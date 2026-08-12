@@ -1,8 +1,10 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { login, register } from '../api/auth'
+import { checkUsernameAvailable, login, register } from '../api/auth'
 import { useAuth } from '../context/AuthContext'
 import { ApiError } from '../api/client'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
+import { validateEmail, validateMinLength, validateRequired } from '../lib/validation'
 
 export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -10,15 +12,74 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
+  const [checkingUsername, setCheckingUsername] = useState(false)
+  const debouncedUsername = useDebouncedValue(username, 400)
 
   const { signIn } = useAuth()
   const navigate = useNavigate()
 
+  const usernameFormatError = validateRequired(username, 'Benutzername') ?? validateMinLength(username, 3, 'Benutzername')
+  const displayNameError = mode === 'register' ? validateRequired(displayName, 'Anzeigename') : null
+  const emailError = mode === 'register' ? (validateRequired(email, 'E-Mail') ?? validateEmail(email)) : null
+  const passwordError = validateRequired(password, 'Passwort') ?? validateMinLength(password, 5, 'Passwort')
+
+  // Username-Verfügbarkeit nur beim Registrieren live prüfen - beim Login wäre das
+  // ein Sicherheitsleck (verrät, welche Accounts existieren, ohne das Passwort zu prüfen).
+  useEffect(() => {
+    if (mode !== 'register' || usernameFormatError || !debouncedUsername) {
+      setUsernameAvailable(null)
+      setCheckingUsername(false)
+      return
+    }
+
+    let cancelled = false
+    setCheckingUsername(true)
+    checkUsernameAvailable(debouncedUsername)
+      .then((result) => {
+        if (!cancelled) setUsernameAvailable(result.available)
+      })
+      .catch(() => {
+        if (!cancelled) setUsernameAvailable(null)
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingUsername(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedUsername, mode])
+
+  const usernameError = useMemo(() => {
+    if (usernameFormatError) return usernameFormatError
+    if (mode === 'register' && usernameAvailable === false) return 'Dieser Benutzername ist bereits vergeben.'
+    return null
+  }, [usernameFormatError, mode, usernameAvailable])
+
+  const hasBlockingErrors =
+    Boolean(usernameError) || Boolean(passwordError) || (mode === 'register' && (Boolean(displayNameError) || Boolean(emailError)))
+
+  function markTouched(field: string) {
+    setTouched((prev) => ({ ...prev, [field]: true }))
+  }
+
+  function fieldMessage(field: string, error: string | null) {
+    return touched[field] && error ? error : null
+  }
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
-    setError(null)
+    setSubmitError(null)
+
+    setTouched({ username: true, password: true, displayName: true, email: true })
+    if (hasBlockingErrors) return
+
     setBusy(true)
     try {
       const response =
@@ -26,58 +87,85 @@ export default function LoginPage() {
       signIn(response.token, response.username, response.displayName)
       navigate('/')
     } catch (err) {
-      setError(err instanceof ApiError ? err.message || 'Anmeldung fehlgeschlagen.' : 'Unbekannter Fehler.')
+      setSubmitError(err instanceof ApiError ? err.message || 'Anmeldung fehlgeschlagen.' : 'Unbekannter Fehler.')
     } finally {
       setBusy(false)
     }
   }
 
+  const usernameMsg = fieldMessage('username', usernameError)
+  const displayNameMsg = fieldMessage('displayName', displayNameError)
+  const emailMsg = fieldMessage('email', emailError)
+  const passwordMsg = fieldMessage('password', passwordError)
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
       <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 rounded-lg border border-slate-800 bg-slate-900 p-8">
-        <h1 className="text-xl font-semibold">PM {mode === 'login' ? 'Anmeldung' : 'Registrierung'}</h1>
+        <h1 className="text-xl font-semibold">Milepoint {mode === 'login' ? 'Anmeldung' : 'Registrierung'}</h1>
 
-        <input
-          className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-          placeholder="Benutzername"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          autoComplete="username"
-          required
-        />
+        <div>
+          <input
+            className={`w-full rounded border bg-slate-800 px-3 py-2 text-sm ${usernameMsg ? 'border-red-500' : 'border-slate-700'}`}
+            placeholder="Benutzername"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            onBlur={() => markTouched('username')}
+            autoComplete="username"
+            required
+          />
+          {usernameMsg && <p className="mt-1 text-xs text-red-400">{usernameMsg}</p>}
+          {!usernameMsg && mode === 'register' && checkingUsername && (
+            <p className="mt-1 text-xs text-slate-500">Prüfe Verfügbarkeit…</p>
+          )}
+          {!usernameMsg && mode === 'register' && !checkingUsername && usernameAvailable === true && (
+            <p className="mt-1 text-xs text-emerald-400">Benutzername ist verfügbar.</p>
+          )}
+        </div>
 
         {mode === 'register' && (
           <>
-            <input
-              className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-              placeholder="Anzeigename"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              required
-            />
-            <input
-              className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-              type="email"
-              placeholder="E-Mail"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+            <div>
+              <input
+                className={`w-full rounded border bg-slate-800 px-3 py-2 text-sm ${displayNameMsg ? 'border-red-500' : 'border-slate-700'}`}
+                placeholder="Anzeigename"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                onBlur={() => markTouched('displayName')}
+                required
+              />
+              {displayNameMsg && <p className="mt-1 text-xs text-red-400">{displayNameMsg}</p>}
+            </div>
+
+            <div>
+              <input
+                className={`w-full rounded border bg-slate-800 px-3 py-2 text-sm ${emailMsg ? 'border-red-500' : 'border-slate-700'}`}
+                type="email"
+                placeholder="E-Mail"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => markTouched('email')}
+                required
+              />
+              {emailMsg && <p className="mt-1 text-xs text-red-400">{emailMsg}</p>}
+            </div>
           </>
         )}
 
-        <input
-          className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-          type="password"
-          placeholder="Passwort"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-          minLength={8}
-          required
-        />
+        <div>
+          <input
+            className={`w-full rounded border bg-slate-800 px-3 py-2 text-sm ${passwordMsg ? 'border-red-500' : 'border-slate-700'}`}
+            type="password"
+            placeholder="Passwort"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onBlur={() => markTouched('password')}
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            required
+          />
+          {passwordMsg && <p className="mt-1 text-xs text-red-400">{passwordMsg}</p>}
+        </div>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {submitError && <p className="text-sm text-red-400">{submitError}</p>}
 
         <button
           type="submit"
@@ -89,7 +177,11 @@ export default function LoginPage() {
 
         <button
           type="button"
-          onClick={() => setMode(mode === 'login' ? 'register' : 'login')}
+          onClick={() => {
+            setMode(mode === 'login' ? 'register' : 'login')
+            setTouched({})
+            setSubmitError(null)
+          }}
           className="w-full text-center text-xs text-slate-400 hover:text-slate-200"
         >
           {mode === 'login' ? 'Noch kein Konto? Registrieren' : 'Schon ein Konto? Anmelden'}

@@ -12,3 +12,6 @@ export const register = (username: string, email: string, password: string, disp
     method: 'POST',
     body: JSON.stringify({ username, email, password, displayName }),
   })
+
+export const checkUsernameAvailable = (username: string) =>
+  apiFetch<{ available: boolean }>(`/auth/username-available?username=${encodeURIComponent(username)}`)

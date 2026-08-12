@@ -64,6 +64,18 @@ public class AuthController : ControllerBase
         return Ok(new AuthResponse(token, expiresAt, user.UserName!, user.Email!, user.DisplayName));
     }
 
+    [HttpGet("username-available")]
+    public async Task<IActionResult> UsernameAvailable([FromQuery] string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return Ok(new { available = false });
+        }
+
+        var existing = await _userManager.FindByNameAsync(username);
+        return Ok(new { available = existing is null });
+    }
+
     [HttpGet("me")]
     [Authorize]
     public async Task<IActionResult> Me()
