@@ -1,0 +1,16 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0
+
+WORKDIR /src
+
+COPY PM.sln .
+COPY src/PM.Api/PM.Api.csproj src/PM.Api/
+RUN dotnet restore src/PM.Api/PM.Api.csproj
+
+COPY . .
+WORKDIR /src/src/PM.Api
+
+ENV ASPNETCORE_URLS=http://+:8080
+ENV DOTNET_USE_POLLING_FILE_WATCHER=true
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "watch", "run", "--no-launch-profile", "--urls", "http://+:8080"]
