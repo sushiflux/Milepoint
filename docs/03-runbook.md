@@ -56,12 +56,13 @@ docker compose -p pm down -v
 
 ## Login / Admin-Zugang
 Login läuft über **Benutzername + Passwort** (nicht E-Mail). Beim allerersten Start legt das Backend automatisch
-ein Admin-Konto an (`ADMIN_USERNAME` aus `.env`, Standard `admin`) mit einem zufällig generierten Passwort, das
-`start.ps1` am Ende jedes Starts anzeigt (`ADMIN_INITIAL_PASSWORD` in `.env`, dort auch jederzeit nachschaubar).
-Das Konto wird nur angelegt, wenn der Username noch nicht existiert — ein späteres Ändern des Passworts in
-`.env` legt also kein zweites Konto an.
+ein Admin-Konto an: fest `admin` / `admin` (`ADMIN_USERNAME` / `ADMIN_INITIAL_PASSWORD` in `.env`, dort auch
+änderbar). Bewusst simples Passwort für die lokale Dev-Umgebung — dafür wurde Identity's Passwort-Policy
+gelockert (min. 5 Zeichen, keine Pflicht für Ziffer/Großbuchstabe/Sonderzeichen, siehe `Program.cs`). **Vor
+jeder öffentlichen/produktiven Nutzung unbedingt wieder verschärfen.** Das Konto wird nur angelegt, wenn der
+Username noch nicht existiert — ein späteres Ändern des Passworts in `.env` legt also kein zweites Konto an.
 
-Weitere Testuser jederzeit über `POST /api/auth/register` (Username, E-Mail, Passwort ≥ 8 Zeichen, Anzeigename),
+Weitere Testuser jederzeit über `POST /api/auth/register` (Username, E-Mail, Passwort ≥ 5 Zeichen, Anzeigename),
 z.B. direkt über die Login-Seite im Frontend.
 
 ## Versionierung

@@ -1,5 +1,5 @@
 <#
-  PM Dev-Stack - Start/Stopp/Status in einer Datei.
+  Milepoint Dev-Stack - Start/Stopp/Status in einer Datei.
 
   .\start.ps1                  Startet den Stack (erstellt .env falls nötig, prüft Ports, wartet auf Healthchecks)
   .\start.ps1 -Action stop     Stoppt den Stack (Docker-Volumes/Daten bleiben erhalten)
@@ -20,7 +20,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ProjectName = 'pm'
+$ProjectName = 'milepoint'
 $RootDir = $PSScriptRoot
 Set-Location $RootDir
 
@@ -92,7 +92,7 @@ function Initialize-EnvFile {
         Set-EnvValue -Path $EnvFile -Key 'POSTGRES_PASSWORD' -Value (New-RandomToken 24)
         Set-EnvValue -Path $EnvFile -Key 'MSSQL_SA_PASSWORD' -Value (New-StrongPassword)
         Set-EnvValue -Path $EnvFile -Key 'JWT_SIGNING_KEY' -Value (New-RandomToken 64)
-        Set-EnvValue -Path $EnvFile -Key 'ADMIN_INITIAL_PASSWORD' -Value (New-StrongPassword)
+        # ADMIN_INITIAL_PASSWORD bleibt bewusst der feste Wert aus .env.example (admin/admin für lokale Dev-Umgebung).
         return
     }
 
@@ -106,7 +106,6 @@ function Initialize-EnvFile {
         if ($null -ne (Get-EnvValue -Path $EnvFile -Key $key)) { continue }
 
         $value = switch ($key) {
-            'ADMIN_INITIAL_PASSWORD' { New-StrongPassword }
             'JWT_SIGNING_KEY' { New-RandomToken 64 }
             'POSTGRES_PASSWORD' { New-RandomToken 24 }
             'MSSQL_SA_PASSWORD' { New-StrongPassword }
@@ -245,7 +244,7 @@ if ($Action -eq 'restart') {
 
 switch ($Action) {
     'stop' {
-        Write-Host "Stoppe PM-Stack..." -ForegroundColor Cyan
+        Write-Host "Stoppe Milepoint-Stack..." -ForegroundColor Cyan
         Invoke-Compose @('down')
         Write-Host "Gestoppt. Datenbank-Volumes bleiben erhalten." -ForegroundColor Green
         exit 0
@@ -287,7 +286,7 @@ Set-EnvValue -Path $EnvFile -Key 'APP_VERSION' -Value $appVersion
 $upArgs = @('up', '-d')
 if (-not $NoBuild) { $upArgs += '--build' }
 
-Write-Host "Starte PM-Stack..." -ForegroundColor Cyan
+Write-Host "Starte Milepoint-Stack..." -ForegroundColor Cyan
 Invoke-Compose $upArgs
 
 Wait-ForHealth
@@ -302,7 +301,7 @@ if (-not (Test-HttpEndpoint "http://localhost:$caddyPort")) {
     Write-Warning "http://localhost:$caddyPort antwortet noch nicht - Stack läuft, App ist evtl. noch am Hochfahren."
 }
 
-Write-Host "`nPM-Stack läuft ($appVersion):" -ForegroundColor Green
+Write-Host "`nMilepoint-Stack läuft ($appVersion):" -ForegroundColor Green
 Write-Host "  App:      http://localhost:$caddyPort"
 Write-Host "  Adminer:  http://localhost:$adminerPort"
 Write-Host "  Mailpit:  http://localhost:$mailpitPort"

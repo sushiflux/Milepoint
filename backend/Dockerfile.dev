@@ -2,12 +2,12 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0
 
 WORKDIR /src
 
-COPY PM.sln .
-COPY src/PM.Api/PM.Api.csproj src/PM.Api/
-RUN dotnet restore src/PM.Api/PM.Api.csproj
+COPY Milepoint.sln .
+COPY src/Milepoint.Api/Milepoint.Api.csproj src/Milepoint.Api/
+RUN dotnet restore src/Milepoint.Api/Milepoint.Api.csproj
 
 COPY . .
-WORKDIR /src/src/PM.Api
+WORKDIR /src/src/Milepoint.Api
 
 ENV ASPNETCORE_URLS=http://+:8080
 ENV DOTNET_USE_POLLING_FILE_WATCHER=true

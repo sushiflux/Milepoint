@@ -1,5 +1,8 @@
 # Projekt-Vision (Rohfassung, wird nach Rückfragen verfeinert)
 
+**Produktname: "Milepoint"** (entschieden 2026-08-12, siehe [02-decisions.md](02-decisions.md) Abschnitt
+"Branding"). Der ursprüngliche Arbeitstitel "PM" taucht in diesem Dokument als historischer Kontext noch auf.
+
 ## Elevator Pitch
 Ein selbst gehostetes Projektmanagement-Tool speziell für Softwareentwicklung (Web, Desktop/Programme, Game-Dev),
 das die Stärken von **Plane**, **OpenProject** und **Vikunja** (Anm.: "Vakuja" im Ursprungstext, vermutlich Vikunja

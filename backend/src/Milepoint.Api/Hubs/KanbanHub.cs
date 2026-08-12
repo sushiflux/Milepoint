@@ -1,0 +1,16 @@
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
+
+namespace Milepoint.Api.Hubs;
+
+[Authorize]
+public class KanbanHub : Hub
+{
+    public Task JoinBoard(string boardId) =>
+        Groups.AddToGroupAsync(Context.ConnectionId, GroupName(boardId));
+
+    public Task LeaveBoard(string boardId) =>
+        Groups.RemoveFromGroupAsync(Context.ConnectionId, GroupName(boardId));
+
+    public static string GroupName(string boardId) => $"board-{boardId}";
+}

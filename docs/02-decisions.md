@@ -15,13 +15,32 @@
 - Kein Dummy-Login — die Basis soll direkt später produktionstauglich sein.
 - **Login läuft über Benutzername + Passwort, nicht über E-Mail** (E-Mail wird bei der Registrierung trotzdem
   erfasst, z.B. für spätere Passwort-Reset-Mails über Mailpit/einen echten SMTP-Relay).
-- Beim ersten Start wird automatisch ein Admin-Konto angelegt (`ADMIN_USERNAME`, Passwort zufällig generiert
-  und in `.env` abgelegt, wird am Ende von `start.ps1` angezeigt) — siehe [03-runbook.md](03-runbook.md).
+- Beim ersten Start wird automatisch ein Admin-Konto angelegt: fest `admin`/`admin` für die lokale
+  Dev-Umgebung (dafür Passwort-Policy bewusst gelockert, siehe [03-runbook.md](03-runbook.md) — vor
+  öffentlicher Nutzung wieder verschärfen).
+
+## Branding
+- **App-/Produktname: "Milepoint"** — entschieden nach Recherche auf Namenskollisionen (siehe Chat-Verlauf
+  vom 2026-08-12): keine existierende PM-/B2B-Software mit diesem Namen gefunden, `milepoint.io` war zum
+  Zeitpunkt der Prüfung nicht registriert (`milepoint.com` gehört einer thematisch unabhängigen
+  Vielflieger-Advice-Seite, kein Software-Konkurrent). Eindeutige Aussprache war das ausschlaggebende
+  Kriterium gegenüber der lateinischen Alternative "Facienda".
+- **Copyright: © 2026 SynShift Labs** (GitHub-Identität für Commits, siehe Git-Konfiguration dieses Repos).
+- **Hinweis:** Diese Recherche ist keine rechtsverbindliche Markenprüfung. Vor einer öffentlichen Nutzung des
+  Namens sollte eine echte Markenrecherche (DPMA/EUIPO TMview) sowie eine Registrar-Prüfung der Domain erfolgen.
+- **Umbenennung von "PM" auf "Milepoint" durchgeführt** (2026-08-12): Ordnername, Docker-Compose-Projektname
+  (`milepoint`), C#-Namespace (`Milepoint.Api`), npm-Paketname (`milepoint-frontend`), JWT-Issuer/Audience
+  (`milepoint-api`/`milepoint-client`), DB-Namen (`milepoint`/`Milepoint`) — alles umgestellt. Ausnahme: interne
+  EF-Core-Klassennamen (`PmDbContextBase`, `PostgresPmDbContext`, `SqlServerPmDbContext`) behalten das "Pm"-Kürzel,
+  um die bestehenden Migrationen nicht neu generieren zu müssen — rein internes Implementierungsdetail, nirgends
+  sichtbar außerhalb des Backend-Codes.
 
 ## Versionierung
-- Schema: `vYear.Release.Commit` (z.B. `v2026.1.42`) — `Year.Release` steht manuell in der Datei `VERSION` am
+- Schema: `vYear.Release.Commit` (z.B. `v2026.0.42`) — `Year.Release` steht manuell in der Datei `VERSION` am
   Repo-Root, `Commit` wird von `start.ps1` bei jedem Start aus der Git-Commit-Anzahl berechnet und in `.env`
   als `APP_VERSION` geschrieben. Das Backend liefert die aktuelle Version unter `GET /api/version`.
+- Release startet bei `0` (`2026.0`) für die laufende Vorab-/Scaffold-Phase; `2026.1` wird erst gesetzt, sobald
+  ein erster fester Release-Stand steht.
 - Bewusst kein separates Major/Minor: Für ein internes Dev-Tool ohne externe API-Konsumenten bringt die
   SemVer-Unterscheidung aktuell keinen Mehrwert.
 
