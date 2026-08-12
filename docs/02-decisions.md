@@ -13,6 +13,17 @@
 ## Auth
 - Echtes Auth-System von Anfang an: **ASP.NET Core Identity + JWT**, mit seedbaren Testusern für die Dev-Umgebung.
 - Kein Dummy-Login — die Basis soll direkt später produktionstauglich sein.
+- **Login läuft über Benutzername + Passwort, nicht über E-Mail** (E-Mail wird bei der Registrierung trotzdem
+  erfasst, z.B. für spätere Passwort-Reset-Mails über Mailpit/einen echten SMTP-Relay).
+- Beim ersten Start wird automatisch ein Admin-Konto angelegt (`ADMIN_USERNAME`, Passwort zufällig generiert
+  und in `.env` abgelegt, wird am Ende von `start.ps1` angezeigt) — siehe [03-runbook.md](03-runbook.md).
+
+## Versionierung
+- Schema: `vYear.Release.Commit` (z.B. `v2026.1.42`) — `Year.Release` steht manuell in der Datei `VERSION` am
+  Repo-Root, `Commit` wird von `start.ps1` bei jedem Start aus der Git-Commit-Anzahl berechnet und in `.env`
+  als `APP_VERSION` geschrieben. Das Backend liefert die aktuelle Version unter `GET /api/version`.
+- Bewusst kein separates Major/Minor: Für ein internes Dev-Tool ohne externe API-Konsumenten bringt die
+  SemVer-Unterscheidung aktuell keinen Mehrwert.
 
 ## Realtime
 - Kanban-Board synchronisiert live zwischen mehreren offenen Tabs/Nutzern über **SignalR** (WebSocket) von Anfang an.

@@ -30,7 +30,7 @@ public class AuthController : ControllerBase
     {
         var user = new ApplicationUser
         {
-            UserName = request.Email,
+            UserName = request.Username,
             Email = request.Email,
             DisplayName = request.DisplayName
         };
@@ -42,13 +42,13 @@ public class AuthController : ControllerBase
         }
 
         var (token, expiresAt) = _tokenService.CreateToken(user);
-        return Ok(new AuthResponse(token, expiresAt, user.Email!, user.DisplayName));
+        return Ok(new AuthResponse(token, expiresAt, user.UserName!, user.Email!, user.DisplayName));
     }
 
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request)
     {
-        var user = await _userManager.FindByEmailAsync(request.Email);
+        var user = await _userManager.FindByNameAsync(request.Username);
         if (user is null)
         {
             return Unauthorized();
@@ -61,7 +61,7 @@ public class AuthController : ControllerBase
         }
 
         var (token, expiresAt) = _tokenService.CreateToken(user);
-        return Ok(new AuthResponse(token, expiresAt, user.Email!, user.DisplayName));
+        return Ok(new AuthResponse(token, expiresAt, user.UserName!, user.Email!, user.DisplayName));
     }
 
     [HttpGet("me")]
@@ -74,6 +74,6 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
-        return Ok(new { user.Email, user.DisplayName });
+        return Ok(new { user.UserName, user.Email, user.DisplayName });
     }
 }

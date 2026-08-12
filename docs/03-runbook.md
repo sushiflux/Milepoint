@@ -54,6 +54,17 @@ docker compose -p pm down -v
 ```
 (`-v` löscht die Datenbank-Inhalte — nur für Dev-Daten unbedenklich, nicht für "echte" Daten verwenden.)
 
-## Demo-Zugang
-Ein Testuser kann jederzeit über `POST /api/auth/register` angelegt werden (E-Mail + Passwort ≥ 8 Zeichen +
-Anzeigename), z.B. direkt über die Login-Seite im Frontend.
+## Login / Admin-Zugang
+Login läuft über **Benutzername + Passwort** (nicht E-Mail). Beim allerersten Start legt das Backend automatisch
+ein Admin-Konto an (`ADMIN_USERNAME` aus `.env`, Standard `admin`) mit einem zufällig generierten Passwort, das
+`start.ps1` am Ende jedes Starts anzeigt (`ADMIN_INITIAL_PASSWORD` in `.env`, dort auch jederzeit nachschaubar).
+Das Konto wird nur angelegt, wenn der Username noch nicht existiert — ein späteres Ändern des Passworts in
+`.env` legt also kein zweites Konto an.
+
+Weitere Testuser jederzeit über `POST /api/auth/register` (Username, E-Mail, Passwort ≥ 8 Zeichen, Anzeigename),
+z.B. direkt über die Login-Seite im Frontend.
+
+## Versionierung
+`start.ps1` berechnet bei jedem Start `vYear.Release.Commit` aus der Datei `VERSION` (Year.Release, manuell
+gepflegt) + der aktuellen Git-Commit-Anzahl, schreibt es als `APP_VERSION` in `.env` und zeigt es in der
+Start-Ausgabe. Abrufbar auch über `GET /api/version`.

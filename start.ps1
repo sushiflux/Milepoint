@@ -31,7 +31,7 @@ function New-RandomToken([int]$Length = 48) {
     -join ((48..57) + (65..90) + (97..122) | Get-Random -Count $Length | ForEach-Object { [char]$_ })
 }
 
-function New-MssqlPassword {
+function New-StrongPassword {
     $lower = -join ((97..122) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
     $upper = -join ((65..90) | Get-Random -Count 6 | ForEach-Object { [char]$_ })
     $digits = -join ((48..57) | Get-Random -Count 4 | ForEach-Object { [char]$_ })
@@ -39,6 +39,25 @@ function New-MssqlPassword {
     $special = -join (@('!', '@', '%', '*', '-', '_') | Get-Random -Count 2)
     $chars = ($lower + $upper + $digits + $special).ToCharArray()
     -join ($chars | Sort-Object { Get-Random })
+}
+
+function Get-AppVersion {
+    $versionFile = Join-Path $RootDir 'VERSION'
+    $base = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { '0.0' }
+
+    $gitExe = (Get-Command git -ErrorAction SilentlyContinue).Source
+    if (-not $gitExe) {
+        $fallback = 'C:\Program Files\Git\cmd\git.exe'
+        if (Test-Path $fallback) { $gitExe = $fallback }
+    }
+
+    $commitCount = $null
+    if ($gitExe) {
+        try { $commitCount = & $gitExe -C $RootDir rev-list --count HEAD 2>$null } catch { $commitCount = $null }
+    }
+    if (-not $commitCount) { $commitCount = '0' }
+
+    return "v$base.$commitCount"
 }
 
 function Set-EnvValue([string]$Path, [string]$Key, [string]$Value) {
@@ -71,8 +90,31 @@ function Initialize-EnvFile {
         Write-Host "Keine .env gefunden - erstelle sie aus .env.example mit zufällig generierten Secrets." -ForegroundColor Yellow
         Copy-Item $EnvExampleFile $EnvFile
         Set-EnvValue -Path $EnvFile -Key 'POSTGRES_PASSWORD' -Value (New-RandomToken 24)
-        Set-EnvValue -Path $EnvFile -Key 'MSSQL_SA_PASSWORD' -Value (New-MssqlPassword)
+        Set-EnvValue -Path $EnvFile -Key 'MSSQL_SA_PASSWORD' -Value (New-StrongPassword)
         Set-EnvValue -Path $EnvFile -Key 'JWT_SIGNING_KEY' -Value (New-RandomToken 64)
+        Set-EnvValue -Path $EnvFile -Key 'ADMIN_INITIAL_PASSWORD' -Value (New-StrongPassword)
+        return
+    }
+
+    # .env existiert schon (z.B. von vor einem Skript-Update) - Keys ergänzen, die .env.example
+    # inzwischen kennt, .env aber noch nicht hat, statt sie leer zu lassen.
+    $exampleKeys = Get-Content $EnvExampleFile |
+        Where-Object { $_ -match '^\s*[A-Za-z_][A-Za-z0-9_]*\s*=' } |
+        ForEach-Object { ($_ -split '=', 2)[0].Trim() }
+
+    foreach ($key in $exampleKeys) {
+        if ($null -ne (Get-EnvValue -Path $EnvFile -Key $key)) { continue }
+
+        $value = switch ($key) {
+            'ADMIN_INITIAL_PASSWORD' { New-StrongPassword }
+            'JWT_SIGNING_KEY' { New-RandomToken 64 }
+            'POSTGRES_PASSWORD' { New-RandomToken 24 }
+            'MSSQL_SA_PASSWORD' { New-StrongPassword }
+            default { Get-EnvValue -Path $EnvExampleFile -Key $key }
+        }
+
+        Write-Host "Ergänze fehlenden Key '$key' in .env." -ForegroundColor Yellow
+        Set-EnvValue -Path $EnvFile -Key $key -Value $value
     }
 }
 
@@ -239,6 +281,9 @@ Invoke-Compose @('down', '--remove-orphans')
 Write-Host "Prüfe Ports..." -ForegroundColor Cyan
 Resolve-Ports
 
+$appVersion = Get-AppVersion
+Set-EnvValue -Path $EnvFile -Key 'APP_VERSION' -Value $appVersion
+
 $upArgs = @('up', '-d')
 if (-not $NoBuild) { $upArgs += '--build' }
 
@@ -250,15 +295,20 @@ Wait-ForHealth
 $caddyPort = Get-EnvValue -Path $EnvFile -Key 'CADDY_PORT'
 $adminerPort = Get-EnvValue -Path $EnvFile -Key 'ADMINER_PORT'
 $mailpitPort = Get-EnvValue -Path $EnvFile -Key 'MAILPIT_UI_PORT'
+$adminUsername = Get-EnvValue -Path $EnvFile -Key 'ADMIN_USERNAME'
+$adminPassword = Get-EnvValue -Path $EnvFile -Key 'ADMIN_INITIAL_PASSWORD'
 
 if (-not (Test-HttpEndpoint "http://localhost:$caddyPort")) {
     Write-Warning "http://localhost:$caddyPort antwortet noch nicht - Stack läuft, App ist evtl. noch am Hochfahren."
 }
 
-Write-Host "`nPM-Stack läuft:" -ForegroundColor Green
+Write-Host "`nPM-Stack läuft ($appVersion):" -ForegroundColor Green
 Write-Host "  App:      http://localhost:$caddyPort"
 Write-Host "  Adminer:  http://localhost:$adminerPort"
 Write-Host "  Mailpit:  http://localhost:$mailpitPort"
+Write-Host "`nLogin (nur beim allerersten Anlegen des Admin-Kontos gültig):"
+Write-Host "  Benutzername: $adminUsername"
+Write-Host "  Passwort:     $adminPassword"
 Write-Host "`nStoppen mit:  .\start.ps1 -Action stop"
 Write-Host "Status mit:   .\start.ps1 -Action status"
 Write-Host "Logs mit:     .\start.ps1 -Action logs"

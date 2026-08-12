@@ -6,6 +6,7 @@ import { ApiError } from '../api/client'
 
 export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
+  const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
@@ -21,8 +22,8 @@ export default function LoginPage() {
     setBusy(true)
     try {
       const response =
-        mode === 'login' ? await login(email, password) : await register(email, password, displayName)
-      signIn(response.token, response.email, response.displayName)
+        mode === 'login' ? await login(username, password) : await register(username, email, password, displayName)
+      signIn(response.token, response.username, response.displayName)
       navigate('/')
     } catch (err) {
       setError(err instanceof ApiError ? err.message || 'Anmeldung fehlgeschlagen.' : 'Unbekannter Fehler.')
@@ -36,24 +37,34 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 rounded-lg border border-slate-800 bg-slate-900 p-8">
         <h1 className="text-xl font-semibold">PM {mode === 'login' ? 'Anmeldung' : 'Registrierung'}</h1>
 
-        {mode === 'register' && (
-          <input
-            className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-            placeholder="Anzeigename"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            required
-          />
-        )}
-
         <input
           className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
-          type="email"
-          placeholder="E-Mail"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          placeholder="Benutzername"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          autoComplete="username"
           required
         />
+
+        {mode === 'register' && (
+          <>
+            <input
+              className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+              placeholder="Anzeigename"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              required
+            />
+            <input
+              className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
+              type="email"
+              placeholder="E-Mail"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </>
+        )}
 
         <input
           className="w-full rounded border border-slate-700 bg-slate-800 px-3 py-2 text-sm"
@@ -61,6 +72,7 @@ export default function LoginPage() {
           placeholder="Passwort"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
+          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
           minLength={8}
           required
         />

@@ -1,14 +1,14 @@
 import { apiFetch } from './client'
 import type { AuthResponse } from './types'
 
-export const login = (email: string, password: string) =>
+export const login = (username: string, password: string) =>
   apiFetch<AuthResponse>('/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ username, password }),
   })
 
-export const register = (email: string, password: string, displayName: string) =>
+export const register = (username: string, email: string, password: string, displayName: string) =>
   apiFetch<AuthResponse>('/auth/register', {
     method: 'POST',
-    body: JSON.stringify({ email, password, displayName }),
+    body: JSON.stringify({ username, email, password, displayName }),
   })

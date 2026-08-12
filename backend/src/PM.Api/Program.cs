@@ -127,6 +127,31 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<PmDbContextBase>();
     await db.Database.MigrateAsync();
+
+    var adminUsername = builder.Configuration["ADMIN_USERNAME"];
+    var adminPassword = builder.Configuration["ADMIN_INITIAL_PASSWORD"];
+    if (!string.IsNullOrWhiteSpace(adminUsername) && !string.IsNullOrWhiteSpace(adminPassword))
+    {
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var existingAdmin = await userManager.FindByNameAsync(adminUsername);
+        if (existingAdmin is null)
+        {
+            var admin = new ApplicationUser
+            {
+                UserName = adminUsername,
+                Email = builder.Configuration["ADMIN_EMAIL"] ?? $"{adminUsername}@pm.local",
+                DisplayName = "Admin",
+                EmailConfirmed = true
+            };
+
+            var seedResult = await userManager.CreateAsync(admin, adminPassword);
+            if (!seedResult.Succeeded)
+            {
+                var errors = string.Join("; ", seedResult.Errors.Select(e => e.Description));
+                app.Logger.LogWarning("Admin-Seed-User konnte nicht angelegt werden: {Errors}", errors);
+            }
+        }
+    }
 }
 
 if (app.Environment.IsDevelopment())
@@ -142,5 +167,6 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapHub<KanbanHub>("/hubs/kanban");
 app.MapHealthChecks("/healthz");
+app.MapGet("/api/version", () => Results.Ok(new { version = builder.Configuration["APP_VERSION"] ?? "dev" }));
 
 app.Run();
