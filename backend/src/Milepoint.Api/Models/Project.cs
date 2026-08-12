@@ -8,6 +8,9 @@ public class Project
     public string? Description { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public Guid ProjectCategoryId { get; set; }
+    public ProjectCategory ProjectCategory { get; set; } = null!;
+
     public ICollection<Board> Boards { get; set; } = new List<Board>();
     public ICollection<Label> Labels { get; set; } = new List<Label>();
 }

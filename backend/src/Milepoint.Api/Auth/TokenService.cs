@@ -16,7 +16,7 @@ public class TokenService
         _options = options.Value;
     }
 
-    public (string Token, DateTimeOffset ExpiresAt) CreateToken(ApplicationUser user)
+    public (string Token, DateTimeOffset ExpiresAt) CreateToken(ApplicationUser user, IEnumerable<string> roles)
     {
         var expiresAt = DateTimeOffset.UtcNow.AddMinutes(_options.ExpiryMinutes);
 
@@ -28,6 +28,8 @@ public class TokenService
             new("displayName", user.DisplayName),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+
+        claims.AddRange(roles.Select(role => new Claim(ClaimTypes.Role, role)));
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_options.SigningKey));
         var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);

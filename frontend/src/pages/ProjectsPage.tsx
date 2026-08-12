@@ -1,24 +1,26 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { createBoard, createProject, getBoards, getProjects } from '../api/projects'
-import type { Board, Project } from '../api/types'
+import { getProjectCategories } from '../api/projectCategories'
+import type { Board, Project, ProjectCategory } from '../api/types'
 import { useAuth } from '../context/AuthContext'
-import { validateMaxLength, validateRequired } from '../lib/validation'
+import { validateRequired } from '../lib/validation'
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
+  const [categories, setCategories] = useState<ProjectCategory[]>([])
   const [boardsByProject, setBoardsByProject] = useState<Record<string, Board[]>>({})
-  const [key, setKey] = useState('')
+  const [categoryId, setCategoryId] = useState('')
   const [name, setName] = useState('')
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
 
-  const { displayName, signOut } = useAuth()
+  const { displayName, isAdmin, signOut } = useAuth()
   const navigate = useNavigate()
 
-  const keyError = validateRequired(key, 'Key') ?? validateMaxLength(key, 10, 'Key')
+  const categoryError = validateRequired(categoryId, 'Typ')
   const nameError = validateRequired(name, 'Projektname')
-  const hasBlockingErrors = Boolean(keyError) || Boolean(nameError)
+  const hasBlockingErrors = Boolean(categoryError) || Boolean(nameError)
 
   function markTouched(field: string) {
     setTouched((prev) => ({ ...prev, [field]: true }))
@@ -29,12 +31,17 @@ export default function ProjectsPage() {
   }
 
   async function loadProjects() {
-    const data = await getProjects()
-    setProjects(data)
+    setProjects(await getProjects())
   }
 
   useEffect(() => {
     loadProjects().catch(() => setError('Projekte konnten nicht geladen werden.'))
+    getProjectCategories()
+      .then((data) => {
+        setCategories(data)
+        setCategoryId((current) => current || data[0]?.id || '')
+      })
+      .catch(() => setError('Kategorien konnten nicht geladen werden.'))
   }, [])
 
   async function loadBoards(projectId: string) {
@@ -46,17 +53,16 @@ export default function ProjectsPage() {
     event.preventDefault()
     setError(null)
 
-    setTouched({ key: true, name: true })
+    setTouched({ categoryId: true, name: true })
     if (hasBlockingErrors) return
 
     try {
-      await createProject(key, name)
-      setKey('')
+      await createProject(categoryId, name)
       setName('')
       setTouched({})
       await loadProjects()
     } catch {
-      setError('Projekt konnte nicht erstellt werden (Key evtl. schon vergeben).')
+      setError('Projekt konnte nicht erstellt werden.')
     }
   }
 
@@ -65,7 +71,7 @@ export default function ProjectsPage() {
     await loadBoards(projectId)
   }
 
-  const keyMsg = fieldMessage('key', keyError)
+  const categoryMsg = fieldMessage('categoryId', categoryError)
   const nameMsg = fieldMessage('name', nameError)
 
   return (
@@ -73,6 +79,11 @@ export default function ProjectsPage() {
       <header className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
         <h1 className="text-lg font-semibold">Milepoint — Projekte</h1>
         <div className="flex items-center gap-3 text-sm text-slate-400">
+          {isAdmin && (
+            <Link to="/admin/project-categories" className="rounded border border-amber-800 px-2 py-1 text-amber-400 hover:bg-amber-950/30">
+              Admin
+            </Link>
+          )}
           <span>{displayName}</span>
           <button onClick={signOut} className="rounded border border-slate-700 px-2 py-1 hover:bg-slate-800">
             Abmelden
@@ -82,17 +93,22 @@ export default function ProjectsPage() {
 
       <main className="mx-auto max-w-3xl space-y-6 p-6">
         <form onSubmit={handleCreateProject} className="flex items-start gap-2">
-          <div className="w-24">
-            <input
-              className={`w-full rounded border bg-slate-900 px-3 py-2 text-sm uppercase ${keyMsg ? 'border-red-500' : 'border-slate-700'}`}
-              placeholder="KEY"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              onBlur={() => markTouched('key')}
-              maxLength={10}
+          <div className="w-32">
+            <select
+              className={`w-full rounded border bg-slate-900 px-3 py-2 text-sm ${categoryMsg ? 'border-red-500' : 'border-slate-700'}`}
+              value={categoryId}
+              onChange={(e) => setCategoryId(e.target.value)}
+              onBlur={() => markTouched('categoryId')}
               required
-            />
-            {keyMsg && <p className="mt-1 text-xs text-red-400">{keyMsg}</p>}
+            >
+              {categories.length === 0 && <option value="">Kein Typ verfügbar</option>}
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+            {categoryMsg && <p className="mt-1 text-xs text-red-400">{categoryMsg}</p>}
           </div>
           <div className="flex-1">
             <input

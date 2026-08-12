@@ -4,4 +4,10 @@ public record RegisterRequest(string Username, string Email, string Password, st
 
 public record LoginRequest(string Username, string Password);
 
-public record AuthResponse(string Token, DateTimeOffset ExpiresAt, string Username, string Email, string DisplayName);
+public record AuthResponse(
+    string Token,
+    DateTimeOffset ExpiresAt,
+    string Username,
+    string Email,
+    string DisplayName,
+    IReadOnlyList<string> Roles);

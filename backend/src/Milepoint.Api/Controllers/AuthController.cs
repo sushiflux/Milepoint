@@ -41,8 +41,11 @@ public class AuthController : ControllerBase
             return BadRequest(new { errors = result.Errors.Select(e => e.Description) });
         }
 
-        var (token, expiresAt) = _tokenService.CreateToken(user);
-        return Ok(new AuthResponse(token, expiresAt, user.UserName!, user.Email!, user.DisplayName));
+        await _userManager.AddToRoleAsync(user, "User");
+        var roles = await _userManager.GetRolesAsync(user);
+
+        var (token, expiresAt) = _tokenService.CreateToken(user, roles);
+        return Ok(new AuthResponse(token, expiresAt, user.UserName!, user.Email!, user.DisplayName, roles.ToList()));
     }
 
     [HttpPost("login")]
@@ -60,8 +63,9 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
-        var (token, expiresAt) = _tokenService.CreateToken(user);
-        return Ok(new AuthResponse(token, expiresAt, user.UserName!, user.Email!, user.DisplayName));
+        var roles = await _userManager.GetRolesAsync(user);
+        var (token, expiresAt) = _tokenService.CreateToken(user, roles);
+        return Ok(new AuthResponse(token, expiresAt, user.UserName!, user.Email!, user.DisplayName, roles.ToList()));
     }
 
     [HttpGet("username-available")]
@@ -86,6 +90,7 @@ public class AuthController : ControllerBase
             return Unauthorized();
         }
 
-        return Ok(new { user.UserName, user.Email, user.DisplayName });
+        var roles = await _userManager.GetRolesAsync(user);
+        return Ok(new { user.UserName, user.Email, user.DisplayName, Roles = roles });
     }
 }

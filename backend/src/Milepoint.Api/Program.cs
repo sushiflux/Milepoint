@@ -132,18 +132,27 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<PmDbContextBase>();
     await db.Database.MigrateAsync();
 
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+    foreach (var roleName in new[] { "SystemAdmin", "Admin", "User" })
+    {
+        if (!await roleManager.RoleExistsAsync(roleName))
+        {
+            await roleManager.CreateAsync(new IdentityRole(roleName));
+        }
+    }
+
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
     var adminUsername = builder.Configuration["ADMIN_USERNAME"];
     var adminPassword = builder.Configuration["ADMIN_INITIAL_PASSWORD"];
     if (!string.IsNullOrWhiteSpace(adminUsername) && !string.IsNullOrWhiteSpace(adminPassword))
     {
-        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        var existingAdmin = await userManager.FindByNameAsync(adminUsername);
-        if (existingAdmin is null)
+        var admin = await userManager.FindByNameAsync(adminUsername);
+        if (admin is null)
         {
-            var admin = new ApplicationUser
+            admin = new ApplicationUser
             {
                 UserName = adminUsername,
-                Email = builder.Configuration["ADMIN_EMAIL"] ?? $"{adminUsername}@pm.local",
+                Email = builder.Configuration["ADMIN_EMAIL"] ?? $"{adminUsername}@milepoint.local",
                 DisplayName = "Admin",
                 EmailConfirmed = true
             };
@@ -153,8 +162,25 @@ using (var scope = app.Services.CreateScope())
             {
                 var errors = string.Join("; ", seedResult.Errors.Select(e => e.Description));
                 app.Logger.LogWarning("Admin-Seed-User konnte nicht angelegt werden: {Errors}", errors);
+                admin = null;
             }
         }
+
+        if (admin is not null && !await userManager.IsInRoleAsync(admin, "SystemAdmin"))
+        {
+            await userManager.AddToRoleAsync(admin, "SystemAdmin");
+        }
+    }
+
+    if (!await db.ProjectCategories.AnyAsync())
+    {
+        db.ProjectCategories.AddRange(
+            new Milepoint.Api.Models.ProjectCategory { Code = "WEB", Name = "Web" },
+            new Milepoint.Api.Models.ProjectCategory { Code = "APP", Name = "App" },
+            new Milepoint.Api.Models.ProjectCategory { Code = "GAME", Name = "Game" },
+            new Milepoint.Api.Models.ProjectCategory { Code = "TOOL", Name = "Tool" },
+            new Milepoint.Api.Models.ProjectCategory { Code = "MISC", Name = "Sonstiges" });
+        await db.SaveChangesAsync();
     }
 }
 

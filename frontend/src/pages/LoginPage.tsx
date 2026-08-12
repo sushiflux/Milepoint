@@ -84,7 +84,7 @@ export default function LoginPage() {
     try {
       const response =
         mode === 'login' ? await login(username, password) : await register(username, email, password, displayName)
-      signIn(response.token, response.username, response.displayName)
+      signIn(response.token, response.username, response.displayName, response.roles)
       navigate('/')
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message || 'Anmeldung fehlgeschlagen.' : 'Unbekannter Fehler.')

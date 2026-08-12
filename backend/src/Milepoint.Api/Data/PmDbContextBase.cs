@@ -15,6 +15,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
     public DbSet<BoardColumn> BoardColumns => Set<BoardColumn>();
     public DbSet<WorkItem> WorkItems => Set<WorkItem>();
     public DbSet<Label> Labels => Set<Label>();
+    public DbSet<ProjectCategory> ProjectCategories => Set<ProjectCategory>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -35,6 +36,18 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
                 .WithOne(l => l.Project)
                 .HasForeignKey(l => l.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(p => p.ProjectCategory)
+                .WithMany(c => c.Projects)
+                .HasForeignKey(p => p.ProjectCategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProjectCategory>(entity =>
+        {
+            entity.HasIndex(c => c.Code).IsUnique();
+            entity.Property(c => c.Code).HasMaxLength(10).IsRequired();
+            entity.Property(c => c.Name).HasMaxLength(100).IsRequired();
         });
 
         builder.Entity<Board>(entity =>

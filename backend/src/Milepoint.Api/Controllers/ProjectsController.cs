@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Milepoint.Api.Data;
 using Milepoint.Api.Dtos.Projects;
 using Milepoint.Api.Models;
+using Milepoint.Api.Services;
 
 namespace Milepoint.Api.Controllers;
 
@@ -12,6 +13,8 @@ namespace Milepoint.Api.Controllers;
 [Route("api/projects")]
 public class ProjectsController : ControllerBase
 {
+    private const int MaxKeyGenerationAttempts = 10;
+
     private readonly PmDbContextBase _db;
 
     public ProjectsController(PmDbContextBase db)
@@ -23,8 +26,9 @@ public class ProjectsController : ControllerBase
     public async Task<ActionResult<List<ProjectDto>>> GetAll()
     {
         var projects = await _db.Projects
+            .Include(p => p.ProjectCategory)
             .OrderBy(p => p.Name)
-            .Select(p => new ProjectDto(p.Id, p.Key, p.Name, p.Description, p.CreatedAt))
+            .Select(p => ToDto(p))
             .ToListAsync();
 
         return Ok(projects);
@@ -33,17 +37,51 @@ public class ProjectsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ProjectDto>> Create(CreateProjectRequest request)
     {
+        var category = await _db.ProjectCategories.FindAsync(request.ProjectCategoryId);
+        if (category is null)
+        {
+            return BadRequest("Unbekannte Projekt-Kategorie.");
+        }
+
+        string key;
+        var attempt = 0;
+        while (true)
+        {
+            key = $"{category.Code}#{ProjectKeySuffixGenerator.Generate()}";
+            var exists = await _db.Projects.AnyAsync(p => p.Key == key);
+            if (!exists)
+            {
+                break;
+            }
+
+            attempt++;
+            if (attempt >= MaxKeyGenerationAttempts)
+            {
+                return Conflict("Konnte keinen eindeutigen Projekt-Key generieren, bitte erneut versuchen.");
+            }
+        }
+
         var project = new Project
         {
-            Key = request.Key.ToUpperInvariant(),
+            Key = key,
             Name = request.Name,
-            Description = request.Description
+            Description = request.Description,
+            ProjectCategoryId = category.Id,
+            ProjectCategory = category
         };
 
         _db.Projects.Add(project);
         await _db.SaveChangesAsync();
 
-        var dto = new ProjectDto(project.Id, project.Key, project.Name, project.Description, project.CreatedAt);
-        return CreatedAtAction(nameof(GetAll), dto);
+        return CreatedAtAction(nameof(GetAll), ToDto(project));
     }
+
+    private static ProjectDto ToDto(Project project) => new(
+        project.Id,
+        project.Key,
+        project.Name,
+        project.Description,
+        project.CreatedAt,
+        project.ProjectCategoryId,
+        project.ProjectCategory.Name);
 }

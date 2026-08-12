@@ -4,6 +4,14 @@ export interface AuthResponse {
   username: string
   email: string
   displayName: string
+  roles: string[]
+}
+
+export interface ProjectCategory {
+  id: string
+  code: string
+  name: string
+  createdAt: string
 }
 
 export interface Project {
@@ -12,6 +20,8 @@ export interface Project {
   name: string
   description: string | null
   createdAt: string
+  projectCategoryId: string
+  projectCategoryName: string
 }
 
 export interface BoardColumn {

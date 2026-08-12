@@ -4,10 +4,12 @@ interface AuthState {
   token: string | null
   username: string | null
   displayName: string | null
+  roles: string[]
 }
 
 interface AuthContextValue extends AuthState {
-  signIn: (token: string, username: string, displayName: string) => void
+  isAdmin: boolean
+  signIn: (token: string, username: string, displayName: string, roles: string[]) => void
   signOut: () => void
 }
 
@@ -16,29 +18,46 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 const STORAGE_TOKEN = 'pm.token'
 const STORAGE_USERNAME = 'pm.username'
 const STORAGE_NAME = 'pm.displayName'
+const STORAGE_ROLES = 'pm.roles'
+
+const ADMIN_ROLES = ['SystemAdmin', 'Admin']
+
+function readRoles(): string[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_ROLES)
+    return raw ? (JSON.parse(raw) as string[]) : []
+  } catch {
+    return []
+  }
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>(() => ({
     token: localStorage.getItem(STORAGE_TOKEN),
     username: localStorage.getItem(STORAGE_USERNAME),
     displayName: localStorage.getItem(STORAGE_NAME),
+    roles: readRoles(),
   }))
 
-  const signIn = (token: string, username: string, displayName: string) => {
+  const signIn = (token: string, username: string, displayName: string, roles: string[]) => {
     localStorage.setItem(STORAGE_TOKEN, token)
     localStorage.setItem(STORAGE_USERNAME, username)
     localStorage.setItem(STORAGE_NAME, displayName)
-    setState({ token, username, displayName })
+    localStorage.setItem(STORAGE_ROLES, JSON.stringify(roles))
+    setState({ token, username, displayName, roles })
   }
 
   const signOut = () => {
     localStorage.removeItem(STORAGE_TOKEN)
     localStorage.removeItem(STORAGE_USERNAME)
     localStorage.removeItem(STORAGE_NAME)
-    setState({ token: null, username: null, displayName: null })
+    localStorage.removeItem(STORAGE_ROLES)
+    setState({ token: null, username: null, displayName: null, roles: [] })
   }
 
-  return <AuthContext.Provider value={{ ...state, signIn, signOut }}>{children}</AuthContext.Provider>
+  const isAdmin = state.roles.some((role) => ADMIN_ROLES.includes(role))
+
+  return <AuthContext.Provider value={{ ...state, isAdmin, signIn, signOut }}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {
