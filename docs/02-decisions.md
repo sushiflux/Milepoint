@@ -19,6 +19,17 @@
   Dev-Umgebung (dafür Passwort-Policy bewusst gelockert, siehe [03-runbook.md](03-runbook.md) — vor
   öffentlicher Nutzung wieder verschärfen).
 
+## Rollen & Projekt-Keys
+- **Rollen:** `SystemAdmin`, `Admin`, `User` (ASP.NET Identity Roles). Der geseedete Admin-Account bekommt
+  `SystemAdmin`, neue Registrierungen bekommen automatisch `User`. Strikt getrennt: Admin-Bereich
+  (`/admin/...`) ist ausschließlich für Konfiguration da, nicht für normale Projektarbeit.
+- **Projekt-Key wird nicht mehr frei eingegeben**, sondern serverseitig generiert:
+  `{Typ-Kürzel}#{5-stelliger Code}` (3 Kleinbuchstaben + 2 Ziffern, gemischt), z.B. `WEB#a4b9c`. Das
+  Typ-Kürzel kommt aus einer admin-verwalteten `ProjectCategory`-Liste (Web/App/Game/Tool/Sonstiges als
+  Startwerte), die beim Projekt-Anlegen als Dropdown angeboten wird.
+- **Kategorie-Verwaltung ist admin-only** (`POST/PUT/DELETE /api/admin/project-categories`), das Lesen
+  (`GET /api/project-categories`, fürs Dropdown) steht allen eingeloggten Usern offen.
+
 ## Branding
 - **App-/Produktname: "Milepoint"** — entschieden nach Recherche auf Namenskollisionen (siehe Chat-Verlauf
   vom 2026-08-12): keine existierende PM-/B2B-Software mit diesem Namen gefunden, `milepoint.io` war zum
