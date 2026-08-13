@@ -62,9 +62,16 @@
   `POST/DELETE .../workitems/{id}/dependencies[/{blockingId}]`).
 - **`GET /api/projects/{id}/timeline`** liefert projektweit (über alle Boards hinweg) alle WorkItems + Milestones
   in einer Antwort — die Timeline-Ansicht muss dafür nicht mehrere Boards einzeln abfragen.
-- Timeline-UI bewusst als **funktionale eingerückte Liste mit proportionalen Balken** umgesetzt, nicht als
-  Drag&Drop-Gantt-Chart mit Verbindungslinien — visuelle Politur bleibt wie beim Rest des Frontends Gemini
-  überlassen.
+- **Revidiert (2026-08-13): Timeline ist jetzt ein echtes Kalender-/Gantt-Diagramm mit Drag & Drop**, nicht
+  mehr die anfängliche einfache Balkenliste — Nutzer-Feedback war explizit, dass die erste Version "sehr
+  falsch" für den Zweck war. `TimelineView.tsx` rendert einen Tages-Raster (fixe `DAY_WIDTH`, sticky linke
+  Titel-Spalte, "Heute"-Linie, Meilenstein-Spur mit Rauten-Markern auf derselben Zeitachse). Balken sind per
+  Pointer-Events verschieb-/dehnbar (ganzer Balken = verschieben, linker/rechter Rand = nur Start bzw. Ende
+  ändern), Commit ans Backend (`PUT .../workitems/{id}`) erst bei `pointerup`, nicht während des Ziehens.
+  Aufgaben ohne Termin erscheinen in einer separaten Liste darunter mit Datumsfeldern, um sie auf den Kalender
+  zu "heben". Bewusst weiterhin **keine** Abhängigkeits-Verbindungslinien zwischen Balken — blockierte Aufgaben
+  bekommen stattdessen nur einen farbigen linken Rand als Hinweis, um die Interaktions-Komplexität (Drag +
+  gleichzeitig Linien nachführen) nicht zu sprengen.
 
 ## Notizen & Verlinkung (Obsidian-artig)
 - **Eigenes, projekt-gebundenes `Note`-Modell** (Titel + Markdown-Text) als drittes Tab neben Timeline/Kanban
