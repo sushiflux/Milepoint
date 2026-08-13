@@ -19,16 +19,21 @@
   Dev-Umgebung (dafür Passwort-Policy bewusst gelockert, siehe [03-runbook.md](03-runbook.md) — vor
   öffentlicher Nutzung wieder verschärfen).
 
-## Rollen & Projekt-Keys
+## Rollen, IDs & Ticket-Nummern
 - **Rollen:** `SystemAdmin`, `Admin`, `User` (ASP.NET Identity Roles). Der geseedete Admin-Account bekommt
-  `SystemAdmin`, neue Registrierungen bekommen automatisch `User`. Strikt getrennt: Admin-Bereich
-  (`/admin/...`) ist ausschließlich für Konfiguration da, nicht für normale Projektarbeit.
-- **Projekt-Key wird nicht mehr frei eingegeben**, sondern serverseitig generiert:
-  `{Typ-Kürzel}#{5-stelliger Code}` (3 Kleinbuchstaben + 2 Ziffern, gemischt), z.B. `WEB#a4b9c`. Das
-  Typ-Kürzel kommt aus einer admin-verwalteten `ProjectCategory`-Liste (Web/App/Game/Tool/Sonstiges als
-  Startwerte), die beim Projekt-Anlegen als Dropdown angeboten wird.
-- **Kategorie-Verwaltung ist admin-only** (`POST/PUT/DELETE /api/admin/project-categories`), das Lesen
-  (`GET /api/project-categories`, fürs Dropdown) steht allen eingeloggten Usern offen.
+  `SystemAdmin`, neue Registrierungen bekommen automatisch `User`. Strikt getrennt: ein Admin-Bereich soll
+  ausschließlich für Konfiguration da sein, nicht für normale Projektarbeit — aktuell aber ohne konkretes
+  Feature (siehe unten, Kategorien wurden wieder entfernt), Infrastruktur (Rollen, JWT-Claims, `isAdmin` im
+  Frontend) bleibt für künftige Admin-Features bestehen.
+- **Project/Board/WorkItem-IDs**: git-artige 40-stellige SHA-1-Hashes statt GUID (siehe `HashIdGenerator`),
+  weil man über diese Dinge redet/sie referenziert — anders als BoardColumn/Label/User, die GUID/Identity-
+  Standard behalten.
+- **Projekt-Kategorien (Web/App/Game/...) wurden wieder entfernt** — kurzzeitig eingeführt, dann als
+  unnötige Komplexität verworfen. Projekt-Erstellung braucht nur noch Name + optionale Beschreibung; auf der
+  Projekt-Kachel wird die gekürzte Hash-ID angezeigt (`shortId()`), kein separates Key-Feld mehr.
+- **WorkItems bekommen stattdessen eine feste Referenz-Nummer** bei Erstellung: `TCK#00001` für Bug/Epic,
+  `TSK#00001` für Task/Feature — je ein **globaler** Zähler (projektübergreifend, kein Projekt-Präfix mehr),
+  einmal vergeben und nie neu berechnet (bleibt stabil auch wenn der Type später geändert wird).
 
 ## Branding
 - **App-/Produktname: "Milepoint"** — entschieden nach Recherche auf Namenskollisionen (siehe Chat-Verlauf
