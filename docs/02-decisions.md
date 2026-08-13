@@ -87,8 +87,12 @@
   über den Titel. Nur der *Rohtext* anderer Notes, der noch den alten Titel als `[[...]]` enthält, zeigt nach
   einer Umbenennung erst wieder auf die Note, sobald diese andere Note selbst neu gespeichert wird (kein
   automatisches Nachziehen der Linktexte — bewusst nicht gebaut, um die Sync-Logik einfach zu halten).
-- **Bewusst kein Obsidian-artiger Graph-View** (Force-Directed-Netzwerk) — nur Textliste mit klickbaren Links
-  und einer Backlinks-Leiste pro Notiz. Visuelle Politur bleibt wie beim Rest des Frontends Gemini überlassen.
+- **Revidiert (2026-08-13): Graph-View doch gebaut**, explizit auf Wunsch ("genau so wie in Obsidian").
+  `NoteGraphView.tsx` zeigt Notizen als Knoten und aufgelöste `[[Links]]` als Kanten, Layout über eine
+  selbst geschriebene Force-Simulation (Abstoßung + Feder-Kanten + schwache Zentrierung) statt einer neuen
+  Abhängigkeit wie d3-force — hält den Bundle schlank. Knoten sind per Pointer-Events verschiebbar, die
+  Simulation setzt danach um den gezogenen Knoten herum fort statt zurückzuspringen; ein Klick ohne Ziehen
+  öffnet die Notiz in der Listenansicht. Liste/Graph als Umschalter im Notizen-Tab.
 
 ## Branding
 - **App-/Produktname: "Milepoint"** — entschieden nach Recherche auf Namenskollisionen (siehe Chat-Verlauf
