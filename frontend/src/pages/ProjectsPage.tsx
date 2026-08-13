@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext'
 import { validateRequired } from '../lib/validation'
 import { shortId } from '../lib/ids'
 import ThemeToggle from '../components/ThemeToggle'
+import Sidebar from '../components/Sidebar'
 
 type ViewMode = 'tiles' | 'list'
 const VIEW_MODE_STORAGE_KEY = 'pm.dashboard.viewMode'
@@ -127,22 +128,25 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
-        <h1 className="text-lg font-semibold">Milepoint — Dashboard</h1>
-        <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
-          <span>{displayName}</span>
-          <ThemeToggle />
-          <button
-            onClick={signOut}
-            className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-          >
-            Abmelden
-          </button>
-        </div>
-      </header>
+    <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <Sidebar />
 
-      <main className="space-y-6 p-6">
+      <div className="flex-1">
+        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+          <h1 className="text-lg font-semibold">Dashboard</h1>
+          <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
+            <span>{displayName}</span>
+            <ThemeToggle />
+            <button
+              onClick={signOut}
+              className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+            >
+              Abmelden
+            </button>
+          </div>
+        </header>
+
+        <main className="space-y-6 p-6">
         {projects === null ? (
           <p className="text-sm text-slate-500">Lade Projekte…</p>
         ) : projects.length === 0 && !showCreateForm ? (
@@ -212,7 +216,8 @@ export default function ProjectsPage() {
             )}
           </>
         )}
-      </main>
+        </main>
+      </div>
     </div>
   )
 }

@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import * as signalR from '@microsoft/signalr'
-import { getBoards } from '../api/projects'
+import { getBoards, getProjects } from '../api/projects'
 import { createWorkItem, getWorkItems, moveWorkItem, updateWorkItem } from '../api/workItems'
 import { getUsers, type UserSummary } from '../api/users'
-import type { Board, BoardColumn, WorkItem } from '../api/types'
+import type { Board, BoardColumn, Project, WorkItem } from '../api/types'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
 import ThemeToggle from '../components/ThemeToggle'
+import Sidebar from '../components/Sidebar'
 
 export default function BoardPage() {
   const { projectId, boardId } = useParams<{ projectId: string; boardId: string }>()
   const { token } = useAuth()
 
+  const [project, setProject] = useState<Project | null>(null)
   const [board, setBoard] = useState<Board | null>(null)
   const [items, setItems] = useState<WorkItem[]>([])
   const [users, setUsers] = useState<UserSummary[]>([])
@@ -20,6 +22,10 @@ export default function BoardPage() {
 
   useEffect(() => {
     if (!projectId || !boardId) return
+
+    getProjects().then((projects) => {
+      setProject(projects.find((p) => p.id === projectId) ?? null)
+    })
 
     getBoards(projectId).then((boards) => {
       setBoard(boards.find((b) => b.id === boardId) ?? null)
@@ -115,13 +121,16 @@ export default function BoardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
-        <h1 className="text-lg font-semibold">{board.name}</h1>
-        <ThemeToggle />
-      </header>
+    <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      {project && <Sidebar project={{ id: project.id, name: project.name }} activeTab="kanban" />}
 
-      <main className="flex gap-4 overflow-x-auto p-6">
+      <div className="flex-1">
+        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+          <h1 className="text-lg font-semibold">{board.name}</h1>
+          <ThemeToggle />
+        </header>
+
+        <main className="flex gap-4 overflow-x-auto p-6">
         {board.columns.map((column) => (
           <section
             key={column.id}
@@ -189,7 +198,8 @@ export default function BoardPage() {
             </form>
           </section>
         ))}
-      </main>
+        </main>
+      </div>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { createNote, deleteNote, updateNote } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note } from '../api/types'
@@ -10,17 +10,22 @@ interface Props {
   onNotesChange: (notes: Note[]) => void
 }
 
+interface OpenTab {
+  noteId: string
+  draftTitle: string
+  draftContent: string
+  dirty: boolean
+}
+
 type ViewMode = 'list' | 'graph'
 
 const LINK_PATTERN = /\[\[([^[\]]+)]]/g
 
 export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>('list')
-  const [selectedId, setSelectedId] = useState<string | null>(notes[0]?.id ?? null)
+  const [tabs, setTabs] = useState<OpenTab[]>([])
+  const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState('')
-  const [draftTitle, setDraftTitle] = useState('')
-  const [draftContent, setDraftContent] = useState('')
-  const [dirty, setDirty] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const notesByTitle = useMemo(() => {
@@ -29,14 +34,43 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     return map
   }, [notes])
 
-  const selected = notes.find((n) => n.id === selectedId) ?? null
+  const activeTab = tabs.find((t) => t.noteId === activeTabId) ?? null
+  const activeNote = notes.find((n) => n.id === activeTabId) ?? null
 
-  function selectNote(note: Note) {
-    setSelectedId(note.id)
-    setDraftTitle(note.title)
-    setDraftContent(note.content)
-    setDirty(false)
+  // Keep non-dirty open tabs in sync if their note changes via another path (e.g. a graph
+  // "Notizen verbinden" edit while the target note is already open here) - tabs with
+  // unsaved edits are left untouched so in-progress work is never silently overwritten.
+  useEffect(() => {
+    setTabs((prev) =>
+      prev.map((t) => {
+        if (t.dirty) return t
+        const note = notes.find((n) => n.id === t.noteId)
+        if (!note) return t
+        return { ...t, draftTitle: note.title, draftContent: note.content }
+      }),
+    )
+  }, [notes])
+
+  function openNote(note: Note) {
+    setTabs((prev) => (prev.some((t) => t.noteId === note.id) ? prev : [...prev, { noteId: note.id, draftTitle: note.title, draftContent: note.content, dirty: false }]))
+    setActiveTabId(note.id)
     setError(null)
+  }
+
+  function closeTab(id: string) {
+    const idx = tabs.findIndex((t) => t.noteId === id)
+    if (idx === -1) return
+    const next = [...tabs.slice(0, idx), ...tabs.slice(idx + 1)]
+    setTabs(next)
+    if (activeTabId === id) {
+      const neighbor = next[idx] ?? next[idx - 1]
+      setActiveTabId(neighbor ? neighbor.noteId : null)
+    }
+  }
+
+  function updateActiveDraft(patch: Partial<Pick<OpenTab, 'draftTitle' | 'draftContent'>>) {
+    if (!activeTabId) return
+    setTabs((prev) => prev.map((t) => (t.noteId === activeTabId ? { ...t, ...patch, dirty: true } : t)))
   }
 
   async function handleCreate(event: FormEvent) {
@@ -49,30 +83,32 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
       const created = await createNote(projectId, title, '')
       onNotesChange([...notes, created])
       setNewTitle('')
-      selectNote(created)
+      openNote(created)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Notiz konnte nicht erstellt werden.')
     }
   }
 
   async function handleSave() {
-    if (!selected) return
+    if (!activeTab) return
     setError(null)
     try {
-      const updated = await updateNote(projectId, selected.id, draftTitle.trim(), draftContent)
+      const updated = await updateNote(projectId, activeTab.noteId, activeTab.draftTitle.trim(), activeTab.draftContent)
       onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
-      setDirty(false)
+      setTabs((prev) =>
+        prev.map((t) => (t.noteId === updated.id ? { ...t, draftTitle: updated.title, draftContent: updated.content, dirty: false } : t)),
+      )
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Notiz konnte nicht gespeichert werden.')
     }
   }
 
   async function handleDelete() {
-    if (!selected) return
-    await deleteNote(projectId, selected.id)
-    const remaining = notes.filter((n) => n.id !== selected.id)
-    onNotesChange(remaining)
-    setSelectedId(remaining[0]?.id ?? null)
+    if (!activeTabId) return
+    const id = activeTabId
+    await deleteNote(projectId, id)
+    onNotesChange(notes.filter((n) => n.id !== id))
+    closeTab(id)
   }
 
   function renderContent(content: string): ReactNode[] {
@@ -92,7 +128,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
         parts.push(
           <button
             key={match.index}
-            onClick={() => selectNote(target)}
+            onClick={() => openNote(target)}
             className="text-indigo-600 underline hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
           >
             {title}
@@ -117,7 +153,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   }
 
   function handleGraphSelect(note: Note) {
-    selectNote(note)
+    openNote(note)
     setViewMode('list')
   }
 
@@ -171,9 +207,9 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
               {notes.map((note) => (
                 <li key={note.id}>
                   <button
-                    onClick={() => selectNote(note)}
+                    onClick={() => openNote(note)}
                     className={`w-full truncate rounded px-2 py-1 text-left text-sm ${
-                      note.id === selectedId
+                      note.id === activeTabId
                         ? 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
                         : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900'
                     }`}
@@ -196,22 +232,53 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
           </aside>
 
           <section className="min-w-0 flex-1 space-y-4">
-            {!selected ? (
+            {tabs.length > 0 && (
+              <div className="flex items-center gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800">
+                {tabs.map((tab) => {
+                  const note = notes.find((n) => n.id === tab.noteId)
+                  const isActive = tab.noteId === activeTabId
+                  return (
+                    <div
+                      key={tab.noteId}
+                      onClick={() => setActiveTabId(tab.noteId)}
+                      role="button"
+                      tabIndex={0}
+                      className={`group flex shrink-0 cursor-pointer items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs ${
+                        isActive
+                          ? 'border-indigo-500 text-slate-900 dark:text-slate-100'
+                          : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                      }`}
+                    >
+                      {tab.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />}
+                      <span className="max-w-[140px] truncate">{note?.title ?? tab.draftTitle}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          closeTab(tab.noteId)
+                        }}
+                        className="shrink-0 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-red-500 dark:hover:text-red-400"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {!activeTab || !activeNote ? (
               <p className="text-sm text-slate-500">Notiz auswählen oder links eine neue anlegen.</p>
             ) : (
               <>
                 <div className="flex items-center gap-2">
                   <input
-                    value={draftTitle}
-                    onChange={(e) => {
-                      setDraftTitle(e.target.value)
-                      setDirty(true)
-                    }}
+                    value={activeTab.draftTitle}
+                    onChange={(e) => updateActiveDraft({ draftTitle: e.target.value })}
                     className="flex-1 rounded border border-slate-300 bg-white px-3 py-2 text-base font-medium dark:border-slate-700 dark:bg-slate-900"
                   />
                   <button
                     onClick={handleSave}
-                    disabled={!dirty}
+                    disabled={!activeTab.dirty}
                     className="rounded bg-indigo-600 px-3 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-40"
                   >
                     Speichern
@@ -225,11 +292,8 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                 </div>
 
                 <textarea
-                  value={draftContent}
-                  onChange={(e) => {
-                    setDraftContent(e.target.value)
-                    setDirty(true)
-                  }}
+                  value={activeTab.draftContent}
+                  onChange={(e) => updateActiveDraft({ draftContent: e.target.value })}
                   placeholder="Text… [[Andere Notiz]] verlinkt automatisch."
                   rows={12}
                   className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
@@ -237,21 +301,21 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
 
                 <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                   <h3 className="mb-2 text-xs font-medium text-slate-500">Vorschau</h3>
-                  <p className="whitespace-pre-wrap text-sm">{renderContent(draftContent)}</p>
+                  <p className="whitespace-pre-wrap text-sm">{renderContent(activeTab.draftContent)}</p>
                 </div>
 
                 <div>
                   <h3 className="mb-2 text-xs font-medium text-slate-500">Verlinkt von</h3>
-                  {selected.incomingLinks.length === 0 ? (
+                  {activeNote.incomingLinks.length === 0 ? (
                     <p className="text-sm text-slate-500">Noch keine anderen Notizen verlinken hierher.</p>
                   ) : (
                     <ul className="flex flex-wrap gap-2">
-                      {selected.incomingLinks.map((link) => {
+                      {activeNote.incomingLinks.map((link) => {
                         const source = notes.find((n) => n.id === link.id)
                         return (
                           <li key={link.id}>
                             <button
-                              onClick={() => source && selectNote(source)}
+                              onClick={() => source && openNote(source)}
                               className="rounded bg-slate-200 px-3 py-1 text-sm hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700"
                             >
                               {link.title}

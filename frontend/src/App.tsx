@@ -26,8 +26,9 @@ export default function App() {
           </RequireAuth>
         }
       />
+      <Route path="/projects/:projectId" element={<Navigate to="timeline" replace />} />
       <Route
-        path="/projects/:projectId"
+        path="/projects/:projectId/:tab"
         element={
           <RequireAuth>
             <ProjectPage />

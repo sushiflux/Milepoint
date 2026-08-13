@@ -274,6 +274,9 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
 
   function handleNodePointerDown(id: string) {
     return (event: React.PointerEvent<SVGCircleElement>) => {
+      // Only the primary (left) button drags/selects - a right-click must fall through
+      // to the native contextmenu event instead of also registering as a select-click.
+      if (event.button !== 0) return
       event.stopPropagation()
       event.currentTarget.setPointerCapture(event.pointerId)
       draggingRef.current = { id, moved: false }
@@ -281,6 +284,7 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
   }
 
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
+    if (event.button !== 0) return
     if (connectMode) {
       setConnectMode(false)
       setConnectFirstId(null)
