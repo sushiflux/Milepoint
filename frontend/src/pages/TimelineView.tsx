@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { createMilestone, deleteMilestone } from '../api/milestones'
 import { createWorkItem, updateWorkItem } from '../api/workItems'
 import type { Board, Milestone, WorkItem, WorkItemPriority } from '../api/types'
@@ -12,7 +12,7 @@ interface Props {
   onMilestonesChange: (milestones: Milestone[]) => void
 }
 
-const DAY_WIDTH = 32
+const MIN_DAY_WIDTH = 28
 const ROW_HEIGHT = 36
 const HEADER_HEIGHT = 40
 const COL_ID = 56
@@ -102,6 +102,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [error, setError] = useState<string | null>(null)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState(0)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => setContainerWidth(entries[0].contentRect.width))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   const itemsByParent = useMemo(() => {
     const map = new Map<string | null, WorkItem[]>()
@@ -133,7 +143,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   }, [workItems, milestones])
 
   const days = useMemo(() => Array.from({ length: dayCount }, (_, i) => addDays(rangeStart, i)), [rangeStart, dayCount])
-  const chartWidth = dayCount * DAY_WIDTH
+  const dayWidth =
+    containerWidth > 0 ? Math.max((containerWidth - LABEL_WIDTH) / dayCount, MIN_DAY_WIDTH) : MIN_DAY_WIDTH
+  const chartWidth = dayCount * dayWidth
   const todayOffset = diffDays(startOfDay(new Date()), rangeStart)
 
   function toggleCollapse(id: string) {
@@ -228,7 +240,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       if (dependentIndex === undefined) continue
       const depRange = effectiveRange(row.item)
       if (!depRange) continue
-      const x2 = diffDays(depRange.start, rangeStart) * DAY_WIDTH
+      const x2 = diffDays(depRange.start, rangeStart) * dayWidth
       const y2 = dependentIndex * ROW_HEIGHT + ROW_HEIGHT / 2
 
       for (const blockingId of row.item.blockingWorkItemIds) {
@@ -239,7 +251,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         const blockRange = effectiveRange(blockingItem)
         if (!blockRange) continue
 
-        const x1 = (diffDays(blockRange.finish, rangeStart) + 1) * DAY_WIDTH
+        const x1 = (diffDays(blockRange.finish, rangeStart) + 1) * dayWidth
         const y1 = blockingIndex * ROW_HEIGHT + ROW_HEIGHT / 2
         const midX = x1 + 10
         paths.push({ key: `${blockingId}-${row.item.id}`, d: `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}` })
@@ -247,7 +259,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     }
     return paths
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, rowIndexByTaskId, workItemById, rangeStart, drag])
+  }, [rows, rowIndexByTaskId, workItemById, rangeStart, dayWidth, drag])
 
   async function commitDateChange(item: WorkItem, start: Date, finish: Date) {
     const updated = await updateWorkItem(item.boardId, item.id, {
@@ -274,7 +286,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
   function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
     if (!drag) return
-    const deltaDays = Math.round((event.clientX - drag.startX) / DAY_WIDTH)
+    const deltaDays = Math.round((event.clientX - drag.startX) / dayWidth)
     if (deltaDays !== drag.deltaDays) setDrag({ ...drag, deltaDays })
   }
 
@@ -337,7 +349,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     onMilestonesChange(milestones.filter((m) => m.id !== milestone.id))
   }
 
-  const weekendBackground = `repeating-linear-gradient(to right, rgba(148,163,184,0.05) 0, rgba(148,163,184,0.05) ${DAY_WIDTH}px, transparent ${DAY_WIDTH}px, transparent ${DAY_WIDTH * 2}px)`
+  const weekendBackground = `repeating-linear-gradient(to right, rgba(148,163,184,0.05) 0, rgba(148,163,184,0.05) ${dayWidth}px, transparent ${dayWidth}px, transparent ${dayWidth * 2}px)`
 
   function LabelCell({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
     return (
@@ -351,9 +363,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     <div className="space-y-6">
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <section className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900">
+      <section ref={containerRef} className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900">
         <div className="relative" style={{ width: LABEL_WIDTH + chartWidth }}>
-          <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: LABEL_WIDTH + todayOffset * DAY_WIDTH }}>
+          <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: LABEL_WIDTH + todayOffset * dayWidth }}>
             <div className="absolute -left-px h-2 w-2 -translate-x-1/2 rotate-45 bg-red-500" />
           </div>
 
@@ -379,7 +391,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <div
                   key={i}
                   className="absolute top-0 flex h-full flex-col items-center justify-center border-l border-slate-800/60 text-[10px] text-slate-500"
-                  style={{ left: i * DAY_WIDTH, width: DAY_WIDTH }}
+                  style={{ left: i * dayWidth, width: dayWidth }}
                 >
                   {(d.getDate() === 1 || i === 0) && <span className="text-slate-300">{d.toLocaleDateString('de-DE', { month: 'short' })}</span>}
                   <span>{d.getDate()}</span>
@@ -410,7 +422,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           {rows.map((row) => {
             if (row.kind === 'milestone') {
               const m = row.milestone
-              const left = diffDays(startOfDay(new Date(m.date)), rangeStart) * DAY_WIDTH + DAY_WIDTH / 2
+              const left = diffDays(startOfDay(new Date(m.date)), rangeStart) * dayWidth + dayWidth / 2
               return (
                 <div key={row.key} className="flex border-b border-slate-800/50 hover:bg-slate-800/20" style={{ height: ROW_HEIGHT }}>
                   <LabelCell>
@@ -480,8 +492,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                       onPointerUp={handlePointerUp(item)}
                       className={`absolute flex cursor-grab items-center rounded ${barColor} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
                       style={{
-                        left: diffDays(range.start, rangeStart) * DAY_WIDTH,
-                        width: Math.max((diffDays(range.finish, range.start) + 1) * DAY_WIDTH - 4, DAY_WIDTH - 4),
+                        left: diffDays(range.start, rangeStart) * dayWidth,
+                        width: Math.max((diffDays(range.finish, range.start) + 1) * dayWidth - 4, dayWidth - 4),
                         top: 6,
                         height: ROW_HEIGHT - 12,
                       }}
