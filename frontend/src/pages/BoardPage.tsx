@@ -7,6 +7,7 @@ import { getUsers, type UserSummary } from '../api/users'
 import type { Board, BoardColumn, WorkItem } from '../api/types'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
+import ThemeToggle from '../components/ThemeToggle'
 
 export default function BoardPage() {
   const { projectId, boardId } = useParams<{ projectId: string; boardId: string }>()
@@ -110,29 +111,36 @@ export default function BoardPage() {
   }
 
   if (!board) {
-    return <div className="p-6 text-slate-400">Board wird geladen…</div>
+    return <div className="p-6 text-slate-500 dark:text-slate-400">Board wird geladen…</div>
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 px-6 py-4">
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
         <h1 className="text-lg font-semibold">{board.name}</h1>
+        <ThemeToggle />
       </header>
 
       <main className="flex gap-4 overflow-x-auto p-6">
         {board.columns.map((column) => (
-          <section key={column.id} className="w-72 shrink-0 rounded-lg border border-slate-800 bg-slate-900 p-3">
-            <h2 className="mb-3 text-sm font-medium text-slate-300">
+          <section
+            key={column.id}
+            className="w-72 shrink-0 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"
+          >
+            <h2 className="mb-3 text-sm font-medium text-slate-700 dark:text-slate-300">
               {column.name}
               <span className="ml-2 text-xs text-slate-500">{itemsByColumn.get(column.id)?.length ?? 0}</span>
             </h2>
 
             <ul className="space-y-2">
               {(itemsByColumn.get(column.id) ?? []).map((item) => (
-                <li key={item.id} className="rounded border border-slate-800 bg-slate-800/60 p-3 text-sm">
+                <li
+                  key={item.id}
+                  className="rounded border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-800/60"
+                >
                   <p className="font-mono text-xs text-slate-500">{item.referenceCode}</p>
                   <p className="font-medium">{item.title}</p>
-                  <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
+                  <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                     <span>{item.type}</span>
                     <select
                       value={column.id}
@@ -140,7 +148,7 @@ export default function BoardPage() {
                         const target = board.columns.find((c) => c.id === e.target.value)
                         if (target) handleMove(item, target)
                       }}
-                      className="rounded border border-slate-700 bg-slate-900 px-1 py-0.5"
+                      className="rounded border border-slate-300 bg-white px-1 py-0.5 dark:border-slate-700 dark:bg-slate-900"
                     >
                       {board.columns.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -152,7 +160,7 @@ export default function BoardPage() {
                   <select
                     value={item.assigneeId ?? ''}
                     onChange={(e) => handleAssign(item, e.target.value)}
-                    className="mt-2 w-full rounded border border-slate-700 bg-slate-900 px-1 py-0.5 text-xs text-slate-300"
+                    className="mt-2 w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
                   >
                     <option value="">Nicht zugewiesen</option>
                     {users.map((u) => (
@@ -176,7 +184,7 @@ export default function BoardPage() {
                 value={newTitleByColumn[column.id] ?? ''}
                 onChange={(e) => setNewTitleByColumn((prev) => ({ ...prev, [column.id]: e.target.value }))}
                 placeholder="+ Neues Item"
-                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
               />
             </form>
           </section>

@@ -353,7 +353,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
   function LabelCell({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
     return (
-      <div className="sticky left-0 z-20 flex shrink-0 items-center bg-slate-900" style={{ width: LABEL_WIDTH, ...style }}>
+      <div
+        className="sticky left-0 z-20 flex shrink-0 items-center bg-white dark:bg-slate-900"
+        style={{ width: LABEL_WIDTH, ...style }}
+      >
         {children}
       </div>
     )
@@ -363,14 +366,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     <div className="space-y-6">
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <section ref={containerRef} className="overflow-x-auto rounded-lg border border-slate-800 bg-slate-900">
+      <section
+        ref={containerRef}
+        className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
+      >
         <div className="relative" style={{ width: LABEL_WIDTH + chartWidth }}>
           <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: LABEL_WIDTH + todayOffset * dayWidth }}>
             <div className="absolute -left-px h-2 w-2 -translate-x-1/2 rotate-45 bg-red-500" />
           </div>
 
           {/* header */}
-          <div className="flex border-b border-slate-800" style={{ height: HEADER_HEIGHT }}>
+          <div className="flex border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
             <LabelCell>
               <span style={{ width: COL_ID }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
                 ID
@@ -390,10 +396,12 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               {days.map((d, i) => (
                 <div
                   key={i}
-                  className="absolute top-0 flex h-full flex-col items-center justify-center border-l border-slate-800/60 text-[10px] text-slate-500"
+                  className="absolute top-0 flex h-full flex-col items-center justify-center border-l border-slate-200 text-[10px] text-slate-500 dark:border-slate-800/60"
                   style={{ left: i * dayWidth, width: dayWidth }}
                 >
-                  {(d.getDate() === 1 || i === 0) && <span className="text-slate-300">{d.toLocaleDateString('de-DE', { month: 'short' })}</span>}
+                  {(d.getDate() === 1 || i === 0) && (
+                    <span className="text-slate-700 dark:text-slate-300">{d.toLocaleDateString('de-DE', { month: 'short' })}</span>
+                  )}
                   <span>{d.getDate()}</span>
                 </div>
               ))}
@@ -424,16 +432,19 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               const m = row.milestone
               const left = diffDays(startOfDay(new Date(m.date)), rangeStart) * dayWidth + dayWidth / 2
               return (
-                <div key={row.key} className="flex border-b border-slate-800/50 hover:bg-slate-800/20" style={{ height: ROW_HEIGHT }}>
+                <div key={row.key} className="flex border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20" style={{ height: ROW_HEIGHT }}>
                   <LabelCell>
                     <span style={{ width: COL_ID }} className="px-2 text-[10px] text-slate-500" />
                     <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs">
                       {m.name}
-                      <button onClick={() => handleDeleteMilestone(m)} className="text-slate-600 hover:text-red-400">
+                      <button
+                        onClick={() => handleDeleteMilestone(m)}
+                        className="text-slate-400 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
+                      >
                         ✕
                       </button>
                     </span>
-                    <span style={{ width: COL_TYPE }} className="px-2 text-[11px] text-amber-400">
+                    <span style={{ width: COL_TYPE }} className="px-2 text-[11px] text-amber-600 dark:text-amber-400">
                       Meilenstein
                     </span>
                     <span style={{ width: COL_STATUS }} className="px-2" />
@@ -442,7 +453,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   <div className="relative shrink-0" style={{ width: chartWidth, height: ROW_HEIGHT }}>
                     <div
                       title={`${m.name} — ${formatDate(m.date)}`}
-                      className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-amber-400"
+                      className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-amber-600 dark:text-amber-400"
                       style={{ left }}
                     >
                       ◆
@@ -459,27 +470,30 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             const blocked = item.blockingWorkItemIds.length > 0
 
             return (
-              <div key={row.key} className="flex border-b border-slate-800/50 hover:bg-slate-800/20" style={{ height: ROW_HEIGHT }}>
+              <div key={row.key} className="flex border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20" style={{ height: ROW_HEIGHT }}>
                 <LabelCell>
                   <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-[10px] text-slate-500">
                     {item.referenceCode}
                   </span>
                   <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs" style={{ paddingLeft: depth * 16 }}>
                     {hasChildren && (
-                      <button onClick={() => toggleCollapse(item.id)} className="w-3 shrink-0 text-slate-500 hover:text-slate-300">
+                      <button
+                        onClick={() => toggleCollapse(item.id)}
+                        className="w-3 shrink-0 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                      >
                         {collapsed.has(item.id) ? '▸' : '▾'}
                       </button>
                     )}
                     <span className="truncate">{item.title}</span>
                   </span>
-                  <span style={{ width: COL_TYPE }} className="truncate px-2 text-[11px] text-slate-400">
+                  <span style={{ width: COL_TYPE }} className="truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
                     {item.type}
                   </span>
-                  <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-400">
+                  <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
                     {item.columnName}
                   </span>
-                  <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-400">
+                  <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
                     <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
                     {item.priority}
                   </span>
@@ -511,7 +525,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-medium text-slate-300">Ohne Termin</h2>
+        <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">Ohne Termin</h2>
         {undatedItems.length === 0 ? (
           <p className="text-sm text-slate-500">Alle Aufgaben haben einen Termin.</p>
         ) : (
@@ -529,9 +543,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
             placeholder="+ Neue Aufgabe"
-            className="w-48 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+            className="w-48 rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
           />
-          <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs">
+          <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
             <option value="">Keine übergeordnete Aufgabe</option>
             {workItems.map((w) => (
               <option key={w.id} value={w.id}>
@@ -539,8 +553,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               </option>
             ))}
           </select>
-          <input type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs" />
-          <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs" />
+          <input type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+          <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
           <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
             Aufgabe anlegen
           </button>
@@ -551,9 +565,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             value={milestoneName}
             onChange={(e) => setMilestoneName(e.target.value)}
             placeholder="Neuer Meilenstein"
-            className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
           />
-          <input type="date" value={milestoneDate} onChange={(e) => setMilestoneDate(e.target.value)} className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs" />
+          <input type="date" value={milestoneDate} onChange={(e) => setMilestoneDate(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
           <button type="submit" className="rounded bg-amber-700 px-3 py-1 text-xs font-medium hover:bg-amber-600">
             Meilenstein anlegen
           </button>
@@ -568,15 +582,25 @@ function UndatedRow({ item, onAssign }: { item: WorkItem; onAssign: (item: WorkI
   const [end, setEnd] = useState(toDateInputValue(item.dueDate))
 
   return (
-    <li className="flex items-center gap-2 rounded border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm">
+    <li className="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-1.5 text-sm dark:border-slate-800 dark:bg-slate-900">
       <span className="font-mono text-xs text-slate-500">{item.referenceCode}</span>
       <span className="flex-1 truncate">{item.title}</span>
-      <input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="rounded border border-slate-700 bg-slate-800 px-1 py-0.5 text-xs" />
-      <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="rounded border border-slate-700 bg-slate-800 px-1 py-0.5 text-xs" />
+      <input
+        type="date"
+        value={start}
+        onChange={(e) => setStart(e.target.value)}
+        className="rounded border border-slate-300 bg-slate-50 px-1 py-0.5 text-xs dark:border-slate-700 dark:bg-slate-800"
+      />
+      <input
+        type="date"
+        value={end}
+        onChange={(e) => setEnd(e.target.value)}
+        className="rounded border border-slate-300 bg-slate-50 px-1 py-0.5 text-xs dark:border-slate-700 dark:bg-slate-800"
+      />
       <button
         onClick={() => onAssign(item, start, end)}
         disabled={!start && !end}
-        className="rounded border border-slate-700 px-2 py-1 text-xs hover:bg-slate-800 disabled:opacity-40"
+        className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
       >
         Setzen
       </button>

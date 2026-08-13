@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { ApiError } from '../api/client'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { validateEmail, validateMinLength, validateRequired } from '../lib/validation'
+import ThemeToggle from '../components/ThemeToggle'
 
 export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -99,13 +100,19 @@ export default function LoginPage() {
   const passwordMsg = fieldMessage('password', passwordError)
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
-      <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4 rounded-lg border border-slate-800 bg-slate-900 p-8">
+    <div className="relative flex min-h-screen items-center justify-center bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-sm space-y-4 rounded-lg border border-slate-200 bg-white p-8 dark:border-slate-800 dark:bg-slate-900"
+      >
         <h1 className="text-xl font-semibold">Milepoint {mode === 'login' ? 'Anmeldung' : 'Registrierung'}</h1>
 
         <div>
           <input
-            className={`w-full rounded border bg-slate-800 px-3 py-2 text-sm ${usernameMsg ? 'border-red-500' : 'border-slate-700'}`}
+            className={`w-full rounded border bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800 ${usernameMsg ? 'border-red-500' : 'border-slate-300 dark:border-slate-700'}`}
             placeholder="Benutzername"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -126,7 +133,7 @@ export default function LoginPage() {
           <>
             <div>
               <input
-                className={`w-full rounded border bg-slate-800 px-3 py-2 text-sm ${displayNameMsg ? 'border-red-500' : 'border-slate-700'}`}
+                className={`w-full rounded border bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800 ${displayNameMsg ? 'border-red-500' : 'border-slate-300 dark:border-slate-700'}`}
                 placeholder="Anzeigename"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
@@ -138,7 +145,7 @@ export default function LoginPage() {
 
             <div>
               <input
-                className={`w-full rounded border bg-slate-800 px-3 py-2 text-sm ${emailMsg ? 'border-red-500' : 'border-slate-700'}`}
+                className={`w-full rounded border bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800 ${emailMsg ? 'border-red-500' : 'border-slate-300 dark:border-slate-700'}`}
                 type="email"
                 placeholder="E-Mail"
                 value={email}
@@ -153,7 +160,7 @@ export default function LoginPage() {
 
         <div>
           <input
-            className={`w-full rounded border bg-slate-800 px-3 py-2 text-sm ${passwordMsg ? 'border-red-500' : 'border-slate-700'}`}
+            className={`w-full rounded border bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800 ${passwordMsg ? 'border-red-500' : 'border-slate-300 dark:border-slate-700'}`}
             type="password"
             placeholder="Passwort"
             value={password}
@@ -182,7 +189,7 @@ export default function LoginPage() {
             setTouched({})
             setSubmitError(null)
           }}
-          className="w-full text-center text-xs text-slate-400 hover:text-slate-200"
+          className="w-full text-center text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
         >
           {mode === 'login' ? 'Noch kein Konto? Registrieren' : 'Schon ein Konto? Anmelden'}
         </button>

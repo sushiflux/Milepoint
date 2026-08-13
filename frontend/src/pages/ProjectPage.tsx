@@ -6,6 +6,7 @@ import { getNotes } from '../api/notes'
 import type { Board, Milestone, Note, Project, WorkItem } from '../api/types'
 import TimelineView from './TimelineView'
 import NotesView from './NotesView'
+import ThemeToggle from '../components/ThemeToggle'
 
 type Tab = 'timeline' | 'kanban' | 'notes'
 
@@ -45,34 +46,37 @@ export default function ProjectPage() {
   if (!projectId) return null
 
   if (loading || !project) {
-    return <div className="p-6 text-slate-400">Projekt wird geladen…</div>
+    return <div className="p-6 text-slate-500 dark:text-slate-400">Projekt wird geladen…</div>
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <header className="border-b border-slate-800 px-6 py-4">
-        <button onClick={() => navigate('/')} className="mb-2 text-xs text-slate-500 hover:text-slate-300">
-          ← Dashboard
-        </button>
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <header className="border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+        <div className="flex items-start justify-between">
+          <button onClick={() => navigate('/')} className="mb-2 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300">
+            ← Dashboard
+          </button>
+          <ThemeToggle />
+        </div>
         <h1 className="text-lg font-semibold">{project.name}</h1>
-        {project.description && <p className="mt-1 text-sm text-slate-400">{project.description}</p>}
+        {project.description && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{project.description}</p>}
 
-        <div className="mt-4 flex gap-1 border-b border-slate-800">
+        <div className="mt-4 flex gap-1 border-b border-slate-200 dark:border-slate-800">
           <button
             onClick={() => setTab('timeline')}
-            className={`px-4 py-2 text-sm ${tab === 'timeline' ? 'border-b-2 border-indigo-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`px-4 py-2 text-sm ${tab === 'timeline' ? 'border-b-2 border-indigo-500 text-slate-900 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
           >
             Timeline
           </button>
           <button
             onClick={() => setTab('kanban')}
-            className={`px-4 py-2 text-sm ${tab === 'kanban' ? 'border-b-2 border-indigo-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`px-4 py-2 text-sm ${tab === 'kanban' ? 'border-b-2 border-indigo-500 text-slate-900 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
           >
             Kanban
           </button>
           <button
             onClick={() => setTab('notes')}
-            className={`px-4 py-2 text-sm ${tab === 'notes' ? 'border-b-2 border-indigo-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}
+            className={`px-4 py-2 text-sm ${tab === 'notes' ? 'border-b-2 border-indigo-500 text-slate-900 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
           >
             Notizen
           </button>
@@ -95,7 +99,7 @@ export default function ProjectPage() {
           <div className="space-y-3">
             <button
               onClick={handleCreateBoard}
-              className="rounded border border-slate-700 px-3 py-1 text-xs hover:bg-slate-800"
+              className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
             >
               + Board
             </button>
@@ -104,14 +108,14 @@ export default function ProjectPage() {
                 <li key={board.id}>
                   <button
                     onClick={() => navigate(`/projects/${projectId}/boards/${board.id}`)}
-                    className="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+                    className="rounded bg-slate-200 px-3 py-1 text-sm hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700"
                   >
                     {board.name}
                   </button>
                 </li>
               ))}
               {boards.length === 0 && (
-                <li className="text-sm text-slate-500">Noch keine Boards — oben auf "+ Board" klicken.</li>
+                <li className="text-sm text-slate-500 dark:text-slate-500">Noch keine Boards — oben auf "+ Board" klicken.</li>
               )}
             </ul>
           </div>

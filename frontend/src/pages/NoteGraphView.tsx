@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import type { Note } from '../api/types'
 
 interface Props {
@@ -14,13 +14,21 @@ interface GraphNode {
   vy: number
 }
 
-const WIDTH = 900
-const HEIGHT = 520
-const REPULSION = 2600
-const LINK_DISTANCE = 100
-const LINK_STRENGTH = 0.02
-const CENTER_STRENGTH = 0.008
-const DAMPING = 0.82
+interface Transform {
+  x: number
+  y: number
+  k: number
+}
+
+const REPULSION = 2000
+const LINK_DISTANCE = 90
+const LINK_STRENGTH = 0.05
+const CENTER_STRENGTH = 0.02
+const VELOCITY_DECAY = 0.35
+const ALPHA_DECAY = 0.02
+const ALPHA_MIN = 0.001
+const MIN_ZOOM = 0.15
+const MAX_ZOOM = 5
 
 function buildEdges(notes: Note[]): [string, string][] {
   const seen = new Set<string>()
@@ -36,64 +44,79 @@ function buildEdges(notes: Note[]): [string, string][] {
   return edges
 }
 
-function simulate(nodes: GraphNode[], edges: [string, string][], pinnedId: string | null, iterations: number) {
+// One simulation step; forces scale with alpha so movement naturally settles (d3-force style).
+function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, width: number, height: number, pinnedId: string | null) {
   const byId = new Map(nodes.map((n) => [n.id, n]))
 
-  for (let iter = 0; iter < iterations; iter++) {
-    for (const n of nodes) {
-      if (n.id === pinnedId) continue
-      let fx = 0
-      let fy = 0
-      for (const other of nodes) {
-        if (other === n) continue
-        const dx = n.x - other.x
-        const dy = n.y - other.y
-        const distSq = Math.max(dx * dx + dy * dy, 1)
-        const dist = Math.sqrt(distSq)
-        const force = REPULSION / distSq
-        fx += (dx / dist) * force
-        fy += (dy / dist) * force
-      }
-      fx += (WIDTH / 2 - n.x) * CENTER_STRENGTH
-      fy += (HEIGHT / 2 - n.y) * CENTER_STRENGTH
-      n.vx = (n.vx + fx) * DAMPING
-      n.vy = (n.vy + fy) * DAMPING
+  for (const n of nodes) {
+    if (n.id === pinnedId) continue
+    let fx = 0
+    let fy = 0
+    for (const other of nodes) {
+      if (other === n) continue
+      const dx = n.x - other.x
+      const dy = n.y - other.y
+      const distSq = Math.max(dx * dx + dy * dy, 1)
+      const dist = Math.sqrt(distSq)
+      const force = (REPULSION * alpha) / distSq
+      fx += (dx / dist) * force
+      fy += (dy / dist) * force
     }
+    fx += (width / 2 - n.x) * CENTER_STRENGTH * alpha
+    fy += (height / 2 - n.y) * CENTER_STRENGTH * alpha
+    n.vx = (n.vx + fx) * (1 - VELOCITY_DECAY)
+    n.vy = (n.vy + fy) * (1 - VELOCITY_DECAY)
+  }
 
-    for (const [a, b] of edges) {
-      const na = byId.get(a)
-      const nb = byId.get(b)
-      if (!na || !nb) continue
-      const dx = nb.x - na.x
-      const dy = nb.y - na.y
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1
-      const diff = (dist - LINK_DISTANCE) * LINK_STRENGTH
-      const fx = (dx / dist) * diff
-      const fy = (dy / dist) * diff
-      if (na.id !== pinnedId) {
-        na.vx += fx
-        na.vy += fy
-      }
-      if (nb.id !== pinnedId) {
-        nb.vx += fx
-        nb.vy += fy
-      }
+  for (const [a, b] of edges) {
+    const na = byId.get(a)
+    const nb = byId.get(b)
+    if (!na || !nb) continue
+    const dx = nb.x - na.x
+    const dy = nb.y - na.y
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1
+    const diff = (dist - LINK_DISTANCE) * LINK_STRENGTH * alpha
+    const fx = (dx / dist) * diff
+    const fy = (dy / dist) * diff
+    if (na.id !== pinnedId) {
+      na.vx += fx
+      na.vy += fy
     }
+    if (nb.id !== pinnedId) {
+      nb.vx += fx
+      nb.vy += fy
+    }
+  }
 
-    for (const n of nodes) {
-      if (n.id === pinnedId) continue
-      n.x = Math.max(20, Math.min(WIDTH - 20, n.x + n.vx))
-      n.y = Math.max(20, Math.min(HEIGHT - 20, n.y + n.vy))
-    }
+  for (const n of nodes) {
+    if (n.id === pinnedId) continue
+    n.x += n.vx
+    n.y += n.vy
   }
 }
 
 export default function NoteGraphView({ notes, onSelectNote }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [size, setSize] = useState({ width: 900, height: 600 })
+  const sizeRef = useRef(size)
+  sizeRef.current = size
+
   const positionsRef = useRef<Map<string, GraphNode>>(new Map())
+  const alphaRef = useRef(0)
+  const rafRef = useRef<number | null>(null)
   const draggingRef = useRef<{ id: string; moved: boolean } | null>(null)
+  const panRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
+
   const [, forceRender] = useReducer((c: number) => c + 1, 0)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, k: 1 })
+  const transformRef = useRef(transform)
+  transformRef.current = transform
 
   const edges = useMemo(() => buildEdges(notes), [notes])
+  const edgesRef = useRef(edges)
+  edgesRef.current = edges
+
   const degree = useMemo(() => {
     const map = new Map<string, number>()
     for (const [a, b] of edges) {
@@ -103,11 +126,54 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
     return map
   }, [edges])
 
+  const neighborIds = useMemo(() => {
+    if (!hoveredId) return null
+    const set = new Set<string>()
+    for (const [a, b] of edges) {
+      if (a === hoveredId) set.add(b)
+      if (b === hoveredId) set.add(a)
+    }
+    return set
+  }, [edges, hoveredId])
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const observer = new ResizeObserver((entries) => {
+      const { width, height } = entries[0].contentRect
+      setSize({ width, height })
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  function step() {
+    const nodes = Array.from(positionsRef.current.values())
+    const { width, height } = sizeRef.current
+    tick(nodes, edgesRef.current, alphaRef.current, width, height, draggingRef.current?.id ?? null)
+    alphaRef.current *= 1 - ALPHA_DECAY
+    forceRender()
+    rafRef.current = alphaRef.current > ALPHA_MIN ? requestAnimationFrame(step) : null
+  }
+
+  function wake(amount: number) {
+    alphaRef.current = Math.max(alphaRef.current, amount)
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(step)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+    }
+  }, [])
+
   const idKey = notes.map((n) => n.id).join(',')
-  const edgeKey = edges.map((e) => e.join('-')).join(',')
 
   useEffect(() => {
     const known = positionsRef.current
+    const { width, height } = sizeRef.current
     for (const id of Array.from(known.keys())) {
       if (!notes.some((n) => n.id === id)) known.delete(id)
     }
@@ -115,46 +181,62 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
       if (!known.has(note.id)) {
         known.set(note.id, {
           id: note.id,
-          x: WIDTH / 2 + (Math.random() - 0.5) * 80,
-          y: HEIGHT / 2 + (Math.random() - 0.5) * 80,
+          x: width / 2 + (Math.random() - 0.5) * 120,
+          y: height / 2 + (Math.random() - 0.5) * 120,
           vx: 0,
           vy: 0,
         })
       }
     }
-
-    simulate(Array.from(known.values()), edges, null, 220)
-    forceRender()
+    wake(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idKey, edgeKey])
+  }, [idKey])
 
-  function handlePointerDown(id: string) {
+  function handleNodePointerDown(id: string) {
     return (event: React.PointerEvent<SVGCircleElement>) => {
+      event.stopPropagation()
       event.currentTarget.setPointerCapture(event.pointerId)
       draggingRef.current = { id, moved: false }
     }
   }
 
-  function handlePointerMove(event: React.PointerEvent<SVGSVGElement>) {
+  function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    panRef.current = { startX: event.clientX, startY: event.clientY, originX: transform.x, originY: transform.y }
+  }
+
+  function handleSvgPointerMove(event: React.PointerEvent<SVGSVGElement>) {
+    if (panRef.current) {
+      const pan = panRef.current
+      const dx = event.clientX - pan.startX
+      const dy = event.clientY - pan.startY
+      setTransform((prev) => ({ ...prev, x: pan.originX + dx, y: pan.originY + dy }))
+      return
+    }
+
     const drag = draggingRef.current
     if (!drag) return
     const node = positionsRef.current.get(drag.id)
     if (!node) return
 
     const rect = event.currentTarget.getBoundingClientRect()
-    const scaleX = WIDTH / rect.width
-    const scaleY = HEIGHT / rect.height
-    node.x = (event.clientX - rect.left) * scaleX
-    node.y = (event.clientY - rect.top) * scaleY
+    const screenX = event.clientX - rect.left
+    const screenY = event.clientY - rect.top
+    const t = transformRef.current
+    node.x = (screenX - t.x) / t.k
+    node.y = (screenY - t.y) / t.k
     node.vx = 0
     node.vy = 0
     drag.moved = true
-
-    simulate(Array.from(positionsRef.current.values()), edges, drag.id, 3)
-    forceRender()
+    wake(0.3)
   }
 
-  function handlePointerUp() {
+  function handleSvgPointerUp() {
+    if (panRef.current) {
+      panRef.current = null
+      return
+    }
+
     const drag = draggingRef.current
     draggingRef.current = null
     if (!drag) return
@@ -165,64 +247,108 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
       return
     }
 
-    simulate(Array.from(positionsRef.current.values()), edges, null, 60)
-    forceRender()
+    wake(0.4)
   }
 
-  const nodes = notes
-    .map((note) => ({ note, pos: positionsRef.current.get(note.id) }))
-    .filter((n): n is { note: Note; pos: GraphNode } => Boolean(n.pos))
+  function handleWheel(event: React.WheelEvent<SVGSVGElement>) {
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const mouseX = event.clientX - rect.left
+    const mouseY = event.clientY - rect.top
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12
+
+    setTransform((prev) => {
+      const newK = Math.min(Math.max(prev.k * factor, MIN_ZOOM), MAX_ZOOM)
+      const worldX = (mouseX - prev.x) / prev.k
+      const worldY = (mouseY - prev.y) / prev.k
+      return { x: mouseX - worldX * newK, y: mouseY - worldY * newK, k: newK }
+    })
+  }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-950">
+    <div
+      ref={containerRef}
+      className="relative h-[75vh] min-h-[480px] w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-[#0a0a0c]"
+    >
+      <button
+        onClick={() => setTransform({ x: 0, y: 0, k: 1 })}
+        className="absolute right-3 top-3 z-10 rounded border border-slate-300 bg-white/80 px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400 dark:hover:bg-slate-800"
+      >
+        Ansicht zurücksetzen
+      </button>
+
       {notes.length === 0 ? (
         <p className="p-6 text-sm text-slate-500">Noch keine Notizen für die Graph-Ansicht.</p>
       ) : (
         <svg
-          viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-          className="h-[520px] w-full touch-none"
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
+          viewBox={`0 0 ${size.width} ${size.height}`}
+          className="h-full w-full touch-none cursor-grab active:cursor-grabbing"
+          onWheel={handleWheel}
+          onPointerDown={handleBackgroundPointerDown}
+          onPointerMove={handleSvgPointerMove}
+          onPointerUp={handleSvgPointerUp}
         >
-          {edges.map(([a, b]) => {
-            const na = positionsRef.current.get(a)
-            const nb = positionsRef.current.get(b)
-            if (!na || !nb) return null
-            return (
-              <line
-                key={`${a}-${b}`}
-                x1={na.x}
-                y1={na.y}
-                x2={nb.x}
-                y2={nb.y}
-                stroke="rgb(71 85 105)"
-                strokeWidth={1}
-              />
-            )
-          })}
-
-          {nodes.map(({ note, pos }) => {
-            const radius = 5 + Math.min(degree.get(note.id) ?? 0, 8) * 1.5
-            return (
-              <g key={note.id}>
-                <circle
-                  cx={pos.x}
-                  cy={pos.y}
-                  r={radius}
-                  className="cursor-pointer fill-indigo-500 hover:fill-indigo-400"
-                  onPointerDown={handlePointerDown(note.id)}
+          <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
+            {edges.map(([a, b]) => {
+              const na = positionsRef.current.get(a)
+              const nb = positionsRef.current.get(b)
+              if (!na || !nb) return null
+              const highlighted = hoveredId !== null && (a === hoveredId || b === hoveredId)
+              const dimmed = hoveredId !== null && !highlighted
+              const strokeClass = highlighted ? 'stroke-indigo-500 dark:stroke-indigo-400' : 'stroke-slate-400 dark:stroke-slate-500'
+              return (
+                <line
+                  key={`${a}-${b}`}
+                  x1={na.x}
+                  y1={na.y}
+                  x2={nb.x}
+                  y2={nb.y}
+                  className={strokeClass}
+                  strokeWidth={highlighted ? 1.5 : 1}
+                  opacity={dimmed ? 0.12 : highlighted ? 0.9 : 0.35}
                 />
-                <text
-                  x={pos.x}
-                  y={pos.y + radius + 12}
-                  textAnchor="middle"
-                  className="pointer-events-none select-none fill-slate-400 text-[10px]"
-                >
-                  {note.title}
-                </text>
-              </g>
-            )
-          })}
+              )
+            })}
+
+            {notes.map((note) => {
+              const pos = positionsRef.current.get(note.id)
+              if (!pos) return null
+              const isHovered = note.id === hoveredId
+              const isNeighbor = neighborIds?.has(note.id) ?? false
+              const dimmed = hoveredId !== null && !isHovered && !isNeighbor
+              const radius = 4 + Math.min(degree.get(note.id) ?? 0, 10) * 1.3
+              const fillClass = isHovered
+                ? 'fill-indigo-600 dark:fill-indigo-400'
+                : isNeighbor
+                  ? 'fill-slate-700 dark:fill-slate-200'
+                  : 'fill-slate-500 dark:fill-slate-400'
+
+              return (
+                <g key={note.id} opacity={dimmed ? 0.25 : 1}>
+                  <circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={radius}
+                    className={`cursor-pointer ${fillClass} ${isHovered ? 'stroke-slate-900 dark:stroke-white' : ''}`}
+                    strokeWidth={isHovered ? 1.5 : 0}
+                    onPointerDown={handleNodePointerDown(note.id)}
+                    onPointerEnter={() => setHoveredId(note.id)}
+                    onPointerLeave={() => setHoveredId((prev) => (prev === note.id ? null : prev))}
+                  />
+                  <text
+                    x={pos.x}
+                    y={pos.y + radius + 12}
+                    textAnchor="middle"
+                    className={`pointer-events-none select-none text-[10px] ${
+                      isHovered || isNeighbor ? 'fill-slate-700 dark:fill-slate-200' : 'fill-slate-500'
+                    }`}
+                  >
+                    {note.title}
+                  </text>
+                </g>
+              )
+            })}
+          </g>
         </svg>
       )}
     </div>

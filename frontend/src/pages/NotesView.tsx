@@ -93,7 +93,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
           <button
             key={match.index}
             onClick={() => selectNote(target)}
-            className="text-indigo-400 underline hover:text-indigo-300"
+            className="text-indigo-600 underline hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
           >
             {title}
           </button>,
@@ -123,16 +123,16 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex rounded border border-slate-700 text-xs w-fit">
+      <div className="flex w-fit rounded border border-slate-300 text-xs dark:border-slate-700">
         <button
           onClick={() => setViewMode('list')}
-          className={`px-3 py-1.5 ${viewMode === 'list' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900'}`}
+          className={`px-3 py-1.5 ${viewMode === 'list' ? 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900'}`}
         >
           Liste
         </button>
         <button
           onClick={() => setViewMode('graph')}
-          className={`border-l border-slate-700 px-3 py-1.5 ${viewMode === 'graph' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900'}`}
+          className={`border-l border-slate-300 px-3 py-1.5 dark:border-slate-700 ${viewMode === 'graph' ? 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900'}`}
         >
           Graph
         </button>
@@ -149,7 +149,9 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                   <button
                     onClick={() => selectNote(note)}
                     className={`w-full truncate rounded px-2 py-1 text-left text-sm ${
-                      note.id === selectedId ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900'
+                      note.id === selectedId
+                        ? 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
+                        : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900'
                     }`}
                   >
                     {note.title}
@@ -164,7 +166,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                 value={newTitle}
                 onChange={(e) => setNewTitle(e.target.value)}
                 placeholder="+ Neue Notiz"
-                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
               />
             </form>
           </aside>
@@ -183,7 +185,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                       setDraftTitle(e.target.value)
                       setDirty(true)
                     }}
-                    className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-base font-medium"
+                    className="flex-1 rounded border border-slate-300 bg-white px-3 py-2 text-base font-medium dark:border-slate-700 dark:bg-slate-900"
                   />
                   <button
                     onClick={handleSave}
@@ -194,7 +196,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                   </button>
                   <button
                     onClick={handleDelete}
-                    className="rounded border border-slate-700 px-3 py-2 text-sm text-red-400 hover:bg-slate-800"
+                    className="rounded border border-slate-300 px-3 py-2 text-sm text-red-500 hover:bg-slate-100 dark:border-slate-700 dark:text-red-400 dark:hover:bg-slate-800"
                   >
                     Löschen
                   </button>
@@ -208,10 +210,10 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                   }}
                   placeholder="Text… [[Andere Notiz]] verlinkt automatisch."
                   rows={12}
-                  className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                  className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
                 />
 
-                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                   <h3 className="mb-2 text-xs font-medium text-slate-500">Vorschau</h3>
                   <p className="whitespace-pre-wrap text-sm">{renderContent(draftContent)}</p>
                 </div>
@@ -228,7 +230,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                           <li key={link.id}>
                             <button
                               onClick={() => source && selectNote(source)}
-                              className="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+                              className="rounded bg-slate-200 px-3 py-1 text-sm hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700"
                             >
                               {link.title}
                             </button>
