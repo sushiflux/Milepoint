@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { createNote, deleteNote, updateNote } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note } from '../api/types'
+import NoteGraphView from './NoteGraphView'
 
 interface Props {
   projectId: string
@@ -9,9 +10,12 @@ interface Props {
   onNotesChange: (notes: Note[]) => void
 }
 
+type ViewMode = 'list' | 'graph'
+
 const LINK_PATTERN = /\[\[([^[\]]+)]]/g
 
 export default function NotesView({ projectId, notes, onNotesChange }: Props) {
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [selectedId, setSelectedId] = useState<string | null>(notes[0]?.id ?? null)
   const [newTitle, setNewTitle] = useState('')
   const [draftTitle, setDraftTitle] = useState('')
@@ -112,107 +116,133 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     return parts
   }
 
+  function handleGraphSelect(note: Note) {
+    selectNote(note)
+    setViewMode('list')
+  }
+
   return (
-    <div className="flex gap-6">
-      <aside className="w-56 shrink-0 space-y-3">
-        <ul className="space-y-1">
-          {notes.map((note) => (
-            <li key={note.id}>
-              <button
-                onClick={() => selectNote(note)}
-                className={`w-full truncate rounded px-2 py-1 text-left text-sm ${
-                  note.id === selectedId ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900'
-                }`}
-              >
-                {note.title}
-              </button>
-            </li>
-          ))}
-          {notes.length === 0 && <li className="text-sm text-slate-500">Noch keine Notizen.</li>}
-        </ul>
+    <div className="space-y-4">
+      <div className="flex rounded border border-slate-700 text-xs w-fit">
+        <button
+          onClick={() => setViewMode('list')}
+          className={`px-3 py-1.5 ${viewMode === 'list' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900'}`}
+        >
+          Liste
+        </button>
+        <button
+          onClick={() => setViewMode('graph')}
+          className={`border-l border-slate-700 px-3 py-1.5 ${viewMode === 'graph' ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900'}`}
+        >
+          Graph
+        </button>
+      </div>
 
-        <form onSubmit={handleCreate}>
-          <input
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="+ Neue Notiz"
-            className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
-          />
-        </form>
-      </aside>
+      {viewMode === 'graph' ? (
+        <NoteGraphView notes={notes} onSelectNote={handleGraphSelect} />
+      ) : (
+        <div className="flex gap-6">
+          <aside className="w-56 shrink-0 space-y-3">
+            <ul className="space-y-1">
+              {notes.map((note) => (
+                <li key={note.id}>
+                  <button
+                    onClick={() => selectNote(note)}
+                    className={`w-full truncate rounded px-2 py-1 text-left text-sm ${
+                      note.id === selectedId ? 'bg-slate-800 text-slate-100' : 'text-slate-400 hover:bg-slate-900'
+                    }`}
+                  >
+                    {note.title}
+                  </button>
+                </li>
+              ))}
+              {notes.length === 0 && <li className="text-sm text-slate-500">Noch keine Notizen.</li>}
+            </ul>
 
-      <section className="min-w-0 flex-1 space-y-4">
-        {error && <p className="text-sm text-red-400">{error}</p>}
-
-        {!selected ? (
-          <p className="text-sm text-slate-500">Notiz auswählen oder links eine neue anlegen.</p>
-        ) : (
-          <>
-            <div className="flex items-center gap-2">
+            <form onSubmit={handleCreate}>
               <input
-                value={draftTitle}
-                onChange={(e) => {
-                  setDraftTitle(e.target.value)
-                  setDirty(true)
-                }}
-                className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-base font-medium"
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="+ Neue Notiz"
+                className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
               />
-              <button
-                onClick={handleSave}
-                disabled={!dirty}
-                className="rounded bg-indigo-600 px-3 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-40"
-              >
-                Speichern
-              </button>
-              <button
-                onClick={handleDelete}
-                className="rounded border border-slate-700 px-3 py-2 text-sm text-red-400 hover:bg-slate-800"
-              >
-                Löschen
-              </button>
-            </div>
+            </form>
+          </aside>
 
-            <textarea
-              value={draftContent}
-              onChange={(e) => {
-                setDraftContent(e.target.value)
-                setDirty(true)
-              }}
-              placeholder="Text… [[Andere Notiz]] verlinkt automatisch."
-              rows={12}
-              className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
-            />
+          <section className="min-w-0 flex-1 space-y-4">
+            {error && <p className="text-sm text-red-400">{error}</p>}
 
-            <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-              <h3 className="mb-2 text-xs font-medium text-slate-500">Vorschau</h3>
-              <p className="whitespace-pre-wrap text-sm">{renderContent(draftContent)}</p>
-            </div>
+            {!selected ? (
+              <p className="text-sm text-slate-500">Notiz auswählen oder links eine neue anlegen.</p>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <input
+                    value={draftTitle}
+                    onChange={(e) => {
+                      setDraftTitle(e.target.value)
+                      setDirty(true)
+                    }}
+                    className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-base font-medium"
+                  />
+                  <button
+                    onClick={handleSave}
+                    disabled={!dirty}
+                    className="rounded bg-indigo-600 px-3 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-40"
+                  >
+                    Speichern
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    className="rounded border border-slate-700 px-3 py-2 text-sm text-red-400 hover:bg-slate-800"
+                  >
+                    Löschen
+                  </button>
+                </div>
 
-            <div>
-              <h3 className="mb-2 text-xs font-medium text-slate-500">Verlinkt von</h3>
-              {selected.incomingLinks.length === 0 ? (
-                <p className="text-sm text-slate-500">Noch keine anderen Notizen verlinken hierher.</p>
-              ) : (
-                <ul className="flex flex-wrap gap-2">
-                  {selected.incomingLinks.map((link) => {
-                    const source = notes.find((n) => n.id === link.id)
-                    return (
-                      <li key={link.id}>
-                        <button
-                          onClick={() => source && selectNote(source)}
-                          className="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
-                        >
-                          {link.title}
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
-          </>
-        )}
-      </section>
+                <textarea
+                  value={draftContent}
+                  onChange={(e) => {
+                    setDraftContent(e.target.value)
+                    setDirty(true)
+                  }}
+                  placeholder="Text… [[Andere Notiz]] verlinkt automatisch."
+                  rows={12}
+                  className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm"
+                />
+
+                <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                  <h3 className="mb-2 text-xs font-medium text-slate-500">Vorschau</h3>
+                  <p className="whitespace-pre-wrap text-sm">{renderContent(draftContent)}</p>
+                </div>
+
+                <div>
+                  <h3 className="mb-2 text-xs font-medium text-slate-500">Verlinkt von</h3>
+                  {selected.incomingLinks.length === 0 ? (
+                    <p className="text-sm text-slate-500">Noch keine anderen Notizen verlinken hierher.</p>
+                  ) : (
+                    <ul className="flex flex-wrap gap-2">
+                      {selected.incomingLinks.map((link) => {
+                        const source = notes.find((n) => n.id === link.id)
+                        return (
+                          <li key={link.id}>
+                            <button
+                              onClick={() => source && selectNote(source)}
+                              className="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
+                            >
+                              {link.title}
+                            </button>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  )}
+                </div>
+              </>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   )
 }
