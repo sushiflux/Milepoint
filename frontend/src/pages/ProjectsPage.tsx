@@ -5,6 +5,7 @@ import type { Project } from '../api/types'
 import { validateRequired } from '../lib/validation'
 import { shortId } from '../lib/ids'
 import Sidebar from '../components/Sidebar'
+import AddButton from '../components/AddButton'
 
 type ViewMode = 'tiles' | 'list'
 const VIEW_MODE_STORAGE_KEY = 'pm.dashboard.viewMode'
@@ -91,6 +92,13 @@ export default function ProjectsPage() {
       <button type="submit" className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500">
         Anlegen
       </button>
+      <button
+        type="button"
+        onClick={() => setShowCreateForm(false)}
+        className="rounded border border-slate-300 px-4 py-2 text-sm hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+      >
+        Abbrechen
+      </button>
     </form>
   )
 
@@ -100,7 +108,7 @@ export default function ProjectsPage() {
     return (
       <button onClick={() => navigate(`/projects/${project.id}`)} className="w-full text-left">
         <div>
-          <span className="font-mono text-xs text-slate-500">{shortId(project.id)}</span>
+          <span className="font-mono text-xs text-slate-500">#{shortId(project.id)}</span>
           <h2 className="text-base font-medium">{project.name}</h2>
         </div>
 
@@ -145,16 +153,10 @@ export default function ProjectsPage() {
         ) : (
           <>
             <div className="flex items-center justify-between">
-              {showCreateForm ? (
-                createForm
-              ) : (
-                <button
-                  onClick={() => setShowCreateForm(true)}
-                  className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500"
-                >
-                  + Projekt anlegen
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-semibold">Projekte</h1>
+                {!showCreateForm && <AddButton onClick={() => setShowCreateForm(true)} label="Projekt anlegen" />}
+              </div>
 
               <div className="ml-4 flex shrink-0 rounded border border-slate-300 text-xs dark:border-slate-700">
                 <button
@@ -171,6 +173,8 @@ export default function ProjectsPage() {
                 </button>
               </div>
             </div>
+
+            {showCreateForm && createForm}
 
             {error && <p className="text-sm text-red-400">{error}</p>}
 

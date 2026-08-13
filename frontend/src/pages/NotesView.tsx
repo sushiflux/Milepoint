@@ -3,6 +3,7 @@ import { createNote, deleteNote, updateNote } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note } from '../api/types'
 import NoteGraphView from './NoteGraphView'
+import AddButton from '../components/AddButton'
 
 interface Props {
   projectId: string
@@ -26,6 +27,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState('')
+  const [showCreateForm, setShowCreateForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const notesByTitle = useMemo(() => {
@@ -83,6 +85,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
       const created = await createNote(projectId, title, '')
       onNotesChange([...notes, created])
       setNewTitle('')
+      setShowCreateForm(false)
       openNote(created)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Notiz konnte nicht erstellt werden.')
@@ -203,6 +206,11 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
       ) : (
         <div className="flex gap-6">
           <aside className="w-56 shrink-0 space-y-3">
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-semibold">Notizen</h1>
+              {!showCreateForm && <AddButton onClick={() => setShowCreateForm(true)} label="Neue Notiz" />}
+            </div>
+
             <ul className="space-y-1">
               {notes.map((note) => (
                 <li key={note.id}>
@@ -219,16 +227,35 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                 </li>
               ))}
               {notes.length === 0 && <li className="text-sm text-slate-500">Noch keine Notizen.</li>}
+              {showCreateForm && (
+                <li>
+                  <form onSubmit={handleCreate} className="space-y-1">
+                    <input
+                      autoFocus
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setShowCreateForm(false)
+                      }}
+                      placeholder="Titel der Notiz"
+                      className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                    />
+                    <div className="flex gap-1">
+                      <button type="submit" className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500">
+                        Anlegen
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowCreateForm(false)}
+                        className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                      >
+                        Abbrechen
+                      </button>
+                    </div>
+                  </form>
+                </li>
+              )}
             </ul>
-
-            <form onSubmit={handleCreate}>
-              <input
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="+ Neue Notiz"
-                className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-              />
-            </form>
           </aside>
 
           <section className="min-w-0 flex-1 space-y-4">

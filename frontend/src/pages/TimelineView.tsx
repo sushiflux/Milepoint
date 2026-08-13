@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { createMilestone, deleteMilestone } from '../api/milestones'
 import { createWorkItem, updateWorkItem } from '../api/workItems'
 import type { Board, Milestone, WorkItem, WorkItemPriority } from '../api/types'
+import AddButton from '../components/AddButton'
 
 interface Props {
   projectId: string
@@ -100,6 +101,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [milestoneName, setMilestoneName] = useState('')
   const [milestoneDate, setMilestoneDate] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [showTaskForm, setShowTaskForm] = useState(false)
+  const [showMilestoneForm, setShowMilestoneForm] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const containerRef = useRef<HTMLDivElement>(null)
@@ -324,6 +327,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     setNewParentId('')
     setNewStart('')
     setNewEnd('')
+    setShowTaskForm(false)
   }
 
   async function handleAssignDates(item: WorkItem, startValue: string, endValue: string) {
@@ -342,6 +346,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     onMilestonesChange([...milestones, created])
     setMilestoneName('')
     setMilestoneDate('')
+    setShowMilestoneForm(false)
   }
 
   async function handleDeleteMilestone(milestone: Milestone) {
@@ -538,40 +543,78 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       </section>
 
       <section className="flex flex-wrap gap-6">
-        <form onSubmit={handleCreateTask} className="flex flex-wrap items-center gap-2">
-          <input
-            value={newTitle}
-            onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="+ Neue Aufgabe"
-            className="w-48 rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-          />
-          <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
-            <option value="">Keine übergeordnete Aufgabe</option>
-            {workItems.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.referenceCode} · {w.title}
-              </option>
-            ))}
-          </select>
-          <input type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
-          <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
-          <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
-            Aufgabe anlegen
-          </button>
-        </form>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">Aufgabe</h2>
+            {!showTaskForm && <AddButton onClick={() => setShowTaskForm(true)} label="Neue Aufgabe" />}
+          </div>
+          {showTaskForm && (
+            <form onSubmit={handleCreateTask} className="flex flex-wrap items-center gap-2">
+              <input
+                autoFocus
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setShowTaskForm(false)
+                }}
+                placeholder="Titel der Aufgabe"
+                className="w-48 rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+              />
+              <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
+                <option value="">Keine übergeordnete Aufgabe</option>
+                {workItems.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.referenceCode} · {w.title}
+                  </option>
+                ))}
+              </select>
+              <input type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+              <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+              <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
+                Anlegen
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTaskForm(false)}
+                className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+              >
+                Abbrechen
+              </button>
+            </form>
+          )}
+        </div>
 
-        <form onSubmit={handleCreateMilestone} className="flex items-center gap-2">
-          <input
-            value={milestoneName}
-            onChange={(e) => setMilestoneName(e.target.value)}
-            placeholder="Neuer Meilenstein"
-            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-          />
-          <input type="date" value={milestoneDate} onChange={(e) => setMilestoneDate(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
-          <button type="submit" className="rounded bg-amber-700 px-3 py-1 text-xs font-medium hover:bg-amber-600">
-            Meilenstein anlegen
-          </button>
-        </form>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">Meilenstein</h2>
+            {!showMilestoneForm && <AddButton onClick={() => setShowMilestoneForm(true)} label="Neuer Meilenstein" />}
+          </div>
+          {showMilestoneForm && (
+            <form onSubmit={handleCreateMilestone} className="flex items-center gap-2">
+              <input
+                autoFocus
+                value={milestoneName}
+                onChange={(e) => setMilestoneName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') setShowMilestoneForm(false)
+                }}
+                placeholder="Name des Meilensteins"
+                className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+              />
+              <input type="date" value={milestoneDate} onChange={(e) => setMilestoneDate(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+              <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
+                Anlegen
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowMilestoneForm(false)}
+                className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+              >
+                Abbrechen
+              </button>
+            </form>
+          )}
+        </div>
       </section>
     </div>
   )

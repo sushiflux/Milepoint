@@ -8,6 +8,7 @@ import type { Board, BoardColumn, Project, WorkItem } from '../api/types'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
 import Sidebar from '../components/Sidebar'
+import AddButton from '../components/AddButton'
 
 export default function BoardPage() {
   const { projectId, boardId } = useParams<{ projectId: string; boardId: string }>()
@@ -18,6 +19,7 @@ export default function BoardPage() {
   const [items, setItems] = useState<WorkItem[]>([])
   const [users, setUsers] = useState<UserSummary[]>([])
   const [newTitleByColumn, setNewTitleByColumn] = useState<Record<string, string>>({})
+  const [openAddColumns, setOpenAddColumns] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     if (!projectId || !boardId) return
@@ -93,6 +95,15 @@ export default function BoardPage() {
     setNewTitleByColumn((prev) => ({ ...prev, [column.id]: '' }))
   }
 
+  function toggleAddColumn(columnId: string, open: boolean) {
+    setOpenAddColumns((prev) => {
+      const next = new Set(prev)
+      if (open) next.add(columnId)
+      else next.delete(columnId)
+      return next
+    })
+  }
+
   async function handleMove(item: WorkItem, targetColumn: BoardColumn) {
     if (!boardId) return
     const position = (itemsByColumn.get(targetColumn.id)?.length ?? 0)
@@ -134,9 +145,14 @@ export default function BoardPage() {
             key={column.id}
             className="w-72 shrink-0 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"
           >
-            <h2 className="mb-3 text-sm font-medium text-slate-700 dark:text-slate-300">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
               {column.name}
-              <span className="ml-2 text-xs text-slate-500">{itemsByColumn.get(column.id)?.length ?? 0}</span>
+              <span className="text-xs text-slate-500">{itemsByColumn.get(column.id)?.length ?? 0}</span>
+              {!openAddColumns.has(column.id) && (
+                <span className="ml-auto">
+                  <AddButton onClick={() => toggleAddColumn(column.id, true)} label="Neues Item" />
+                </span>
+              )}
             </h2>
 
             <ul className="space-y-2">
@@ -180,20 +196,38 @@ export default function BoardPage() {
               ))}
             </ul>
 
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                handleCreate(column)
-              }}
-              className="mt-3"
-            >
-              <input
-                value={newTitleByColumn[column.id] ?? ''}
-                onChange={(e) => setNewTitleByColumn((prev) => ({ ...prev, [column.id]: e.target.value }))}
-                placeholder="+ Neues Item"
-                className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-              />
-            </form>
+            {openAddColumns.has(column.id) && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  handleCreate(column)
+                }}
+                className="mt-3 space-y-1"
+              >
+                <input
+                  autoFocus
+                  value={newTitleByColumn[column.id] ?? ''}
+                  onChange={(e) => setNewTitleByColumn((prev) => ({ ...prev, [column.id]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') toggleAddColumn(column.id, false)
+                  }}
+                  placeholder="Titel der Aufgabe"
+                  className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                />
+                <div className="flex gap-2">
+                  <button type="submit" className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500">
+                    Anlegen
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleAddColumn(column.id, false)}
+                    className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                  >
+                    Abbrechen
+                  </button>
+                </div>
+              </form>
+            )}
           </section>
         ))}
         </main>

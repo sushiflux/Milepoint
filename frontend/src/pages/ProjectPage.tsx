@@ -7,6 +7,7 @@ import type { Board, Milestone, Note, Project, WorkItem } from '../api/types'
 import TimelineView from './TimelineView'
 import NotesView from './NotesView'
 import Sidebar from '../components/Sidebar'
+import AddButton from '../components/AddButton'
 
 type Tab = 'timeline' | 'kanban' | 'notes'
 const VALID_TABS: Tab[] = ['timeline', 'kanban', 'notes']
@@ -73,12 +74,10 @@ export default function ProjectPage() {
 
           {activeTab === 'kanban' && (
             <div className="space-y-3">
-              <button
-                onClick={handleCreateBoard}
-                className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-              >
-                + Board
-              </button>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-semibold">Boards</h1>
+                <AddButton onClick={handleCreateBoard} label="Board anlegen" />
+              </div>
               <ul className="flex flex-wrap gap-2">
                 {boards.map((board) => (
                   <li key={board.id}>
@@ -91,7 +90,7 @@ export default function ProjectPage() {
                   </li>
                 ))}
                 {boards.length === 0 && (
-                  <li className="text-sm text-slate-500 dark:text-slate-500">Noch keine Boards — oben auf "+ Board" klicken.</li>
+                  <li className="text-sm text-slate-500 dark:text-slate-500">Noch keine Boards — oben auf "+" klicken.</li>
                 )}
               </ul>
             </div>
