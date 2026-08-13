@@ -7,7 +7,6 @@ import { getUsers, type UserSummary } from '../api/users'
 import type { Board, BoardColumn, Project, WorkItem } from '../api/types'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
-import ThemeToggle from '../components/ThemeToggle'
 import Sidebar from '../components/Sidebar'
 
 export default function BoardPage() {
@@ -125,9 +124,8 @@ export default function BoardPage() {
       {project && <Sidebar project={{ id: project.id, name: project.name }} activeTab="kanban" />}
 
       <div className="flex-1">
-        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
+        <header className="border-b border-slate-200 px-6 py-4 dark:border-slate-800">
           <h1 className="text-lg font-semibold">{board.name}</h1>
-          <ThemeToggle />
         </header>
 
         <main className="flex gap-4 overflow-x-auto p-6">

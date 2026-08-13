@@ -45,12 +45,7 @@ function Get-AppVersion {
     $versionFile = Join-Path $RootDir 'VERSION'
     $base = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { '0.0' }
 
-    $gitExe = (Get-Command git -ErrorAction SilentlyContinue).Source
-    if (-not $gitExe) {
-        $fallback = 'C:\Program Files\Git\cmd\git.exe'
-        if (Test-Path $fallback) { $gitExe = $fallback }
-    }
-
+    $gitExe = Resolve-GitExe
     $commitCount = $null
     if ($gitExe) {
         try { $commitCount = & $gitExe -C $RootDir rev-list --count HEAD 2>$null } catch { $commitCount = $null }
@@ -58,6 +53,29 @@ function Get-AppVersion {
     if (-not $commitCount) { $commitCount = '0' }
 
     return "v$base.$commitCount"
+}
+
+function Resolve-GitExe {
+    $gitExe = (Get-Command git -ErrorAction SilentlyContinue).Source
+    if (-not $gitExe) {
+        $fallback = 'C:\Program Files\Git\cmd\git.exe'
+        if (Test-Path $fallback) { $gitExe = $fallback }
+    }
+    return $gitExe
+}
+
+function Set-GitHooksPath {
+    # Wires up scripts/git-hooks (tracked in the repo) so post-commit keeps
+    # backend/src/Milepoint.Api/version.txt current after every commit, not just at
+    # start.ps1 time. Idempotent - safe to run on every start.
+    $gitExe = Resolve-GitExe
+    if (-not $gitExe) { return }
+    try { & $gitExe -C $RootDir config core.hooksPath 'scripts/git-hooks' 2>$null } catch {}
+}
+
+function Write-VersionFile([string]$Version) {
+    $versionTarget = Join-Path $RootDir 'backend\src\Milepoint.Api\version.txt'
+    Set-Content -Path $versionTarget -Value $Version -NoNewline -Encoding utf8
 }
 
 function Set-EnvValue([string]$Path, [string]$Key, [string]$Value) {
@@ -280,8 +298,10 @@ Invoke-Compose @('down', '--remove-orphans')
 Write-Host "Prüfe Ports..." -ForegroundColor Cyan
 Resolve-Ports
 
+Set-GitHooksPath
+
 $appVersion = Get-AppVersion
-Set-EnvValue -Path $EnvFile -Key 'APP_VERSION' -Value $appVersion
+Write-VersionFile -Version $appVersion
 
 $upArgs = @('up', '-d')
 if (-not $NoBuild) { $upArgs += '--build' }

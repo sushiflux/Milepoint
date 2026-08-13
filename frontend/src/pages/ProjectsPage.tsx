@@ -2,10 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createProject, getProjects } from '../api/projects'
 import type { Project } from '../api/types'
-import { useAuth } from '../context/AuthContext'
 import { validateRequired } from '../lib/validation'
 import { shortId } from '../lib/ids'
-import ThemeToggle from '../components/ThemeToggle'
 import Sidebar from '../components/Sidebar'
 
 type ViewMode = 'tiles' | 'list'
@@ -22,7 +20,6 @@ export default function ProjectsPage() {
     () => (localStorage.getItem(VIEW_MODE_STORAGE_KEY) as ViewMode | null) ?? 'tiles',
   )
 
-  const { displayName, signOut } = useAuth()
   const navigate = useNavigate()
 
   const nameError = validateRequired(name, 'Projektname')
@@ -132,20 +129,6 @@ export default function ProjectsPage() {
       <Sidebar />
 
       <div className="flex-1">
-        <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
-          <h1 className="text-lg font-semibold">Dashboard</h1>
-          <div className="flex items-center gap-3 text-sm text-slate-500 dark:text-slate-400">
-            <span>{displayName}</span>
-            <ThemeToggle />
-            <button
-              onClick={signOut}
-              className="rounded border border-slate-300 px-2 py-1 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-            >
-              Abmelden
-            </button>
-          </div>
-        </header>
-
         <main className="space-y-6 p-6">
         {projects === null ? (
           <p className="text-sm text-slate-500">Lade Projekte…</p>

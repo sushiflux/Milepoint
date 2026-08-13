@@ -1,0 +1,15 @@
+#!/bin/sh
+# Keeps backend/src/Milepoint.Api/version.txt (read live by GET /api/version) in sync with
+# the actual commit count immediately after every commit - not just whenever start.ps1
+# happens to be re-run. Wired up automatically by start.ps1 via `git config core.hooksPath`.
+
+root_dir="$(git rev-parse --show-toplevel)"
+version_file="$root_dir/VERSION"
+
+base="0.0"
+if [ -f "$version_file" ]; then
+  base="$(tr -d '[:space:]' < "$version_file")"
+fi
+
+count="$(git -C "$root_dir" rev-list --count HEAD)"
+printf 'v%s.%s' "$base" "$count" > "$root_dir/backend/src/Milepoint.Api/version.txt"

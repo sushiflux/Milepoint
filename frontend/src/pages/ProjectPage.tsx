@@ -6,7 +6,6 @@ import { getNotes } from '../api/notes'
 import type { Board, Milestone, Note, Project, WorkItem } from '../api/types'
 import TimelineView from './TimelineView'
 import NotesView from './NotesView'
-import ThemeToggle from '../components/ThemeToggle'
 import Sidebar from '../components/Sidebar'
 
 type Tab = 'timeline' | 'kanban' | 'notes'
@@ -60,14 +59,6 @@ export default function ProjectPage() {
       <Sidebar project={{ id: project.id, name: project.name }} activeTab={activeTab} />
 
       <div className="flex-1">
-        <header className="flex items-start justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-800">
-          <div>
-            <h1 className="text-lg font-semibold">{project.name}</h1>
-            {project.description && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{project.description}</p>}
-          </div>
-          <ThemeToggle />
-        </header>
-
         <main className="p-6">
           {activeTab === 'timeline' && (
             <TimelineView
