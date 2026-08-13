@@ -121,6 +121,23 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     setViewMode('list')
   }
 
+  async function handleGraphCreateNote(title: string) {
+    const created = await createNote(projectId, title, '')
+    onNotesChange([...notes, created])
+  }
+
+  async function handleGraphConnect(sourceId: string, targetId: string) {
+    const source = notes.find((n) => n.id === sourceId)
+    const target = notes.find((n) => n.id === targetId)
+    if (!source || !target) return
+    if (source.outgoingLinks.some((l) => l.id === targetId)) return
+
+    const separator = source.content.trim().length > 0 ? '\n\n' : ''
+    const newContent = `${source.content}${separator}[[${target.title}]]`
+    const updated = await updateNote(projectId, source.id, source.title, newContent)
+    onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex w-fit rounded border border-slate-300 text-xs dark:border-slate-700">
@@ -138,8 +155,15 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
         </button>
       </div>
 
+      {error && <p className="text-sm text-red-400">{error}</p>}
+
       {viewMode === 'graph' ? (
-        <NoteGraphView notes={notes} onSelectNote={handleGraphSelect} />
+        <NoteGraphView
+          notes={notes}
+          onSelectNote={handleGraphSelect}
+          onCreateNote={handleGraphCreateNote}
+          onConnectNotes={handleGraphConnect}
+        />
       ) : (
         <div className="flex gap-6">
           <aside className="w-56 shrink-0 space-y-3">
@@ -172,8 +196,6 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
           </aside>
 
           <section className="min-w-0 flex-1 space-y-4">
-            {error && <p className="text-sm text-red-400">{error}</p>}
-
             {!selected ? (
               <p className="text-sm text-slate-500">Notiz auswählen oder links eine neue anlegen.</p>
             ) : (

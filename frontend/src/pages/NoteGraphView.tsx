@@ -1,9 +1,17 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { ApiError } from '../api/client'
 import type { Note } from '../api/types'
 
 interface Props {
   notes: Note[]
   onSelectNote: (note: Note) => void
+  onCreateNote: (title: string) => Promise<void>
+  onConnectNotes: (sourceId: string, targetId: string) => Promise<void>
+}
+
+interface Point {
+  x: number
+  y: number
 }
 
 interface GraphNode {
@@ -121,7 +129,7 @@ function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, widt
   }
 }
 
-export default function NoteGraphView({ notes, onSelectNote }: Props) {
+export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onConnectNotes }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 900, height: 600 })
   const sizeRef = useRef(size)
@@ -132,6 +140,7 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
   const rafRef = useRef<number | null>(null)
   const draggingRef = useRef<{ id: string; moved: boolean } | null>(null)
   const panRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
+  const pendingSpawnRef = useRef<Point | null>(null)
 
   const [, forceRender] = useReducer((c: number) => c + 1, 0)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
@@ -139,6 +148,13 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
   const transformRef = useRef(transform)
   transformRef.current = transform
   const autoFitRef = useRef(true)
+
+  const [contextMenu, setContextMenu] = useState<{ screen: Point; world: Point } | null>(null)
+  const [createNoteAt, setCreateNoteAt] = useState<{ screen: Point; world: Point } | null>(null)
+  const [newNodeTitle, setNewNodeTitle] = useState('')
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [connectMode, setConnectMode] = useState(false)
+  const [connectFirstId, setConnectFirstId] = useState<string | null>(null)
 
   const edges = useMemo(() => buildEdges(notes), [notes])
   const edgesRef = useRef(edges)
@@ -163,9 +179,16 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
     return set
   }, [edges, hoveredId])
 
-  useEffect(() => {
+  // Layout effect (not a regular effect) so the real container size is measured and
+  // committed before the idKey effect below runs its first fit/center computation -
+  // ResizeObserver's own callback fires asynchronously and would otherwise leave that
+  // first computation working off the 900x600 placeholder, visibly off-center.
+  useLayoutEffect(() => {
     const el = containerRef.current
     if (!el) return
+    const rect = el.getBoundingClientRect()
+    setSize({ width: rect.width, height: rect.height })
+
     const observer = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect
       setSize({ width, height })
@@ -173,6 +196,16 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  // Safety net: re-fit whenever the measured size actually changes (covers the container
+  // being resized, or any residual timing gap in the very first measurement above), as
+  // long as the user hasn't taken manual control of the camera.
+  useEffect(() => {
+    if (!autoFitRef.current) return
+    const fitted = computeFitTransform(Array.from(positionsRef.current.values()), size.width, size.height)
+    transformRef.current = fitted
+    setTransform(fitted)
+  }, [size.width, size.height])
 
   function step() {
     const nodes = Array.from(positionsRef.current.values())
@@ -215,15 +248,17 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
     }
     for (const note of notes) {
       if (!known.has(note.id)) {
+        const spawn = pendingSpawnRef.current
         known.set(note.id, {
           id: note.id,
-          x: width / 2 + (Math.random() - 0.5) * 120,
-          y: height / 2 + (Math.random() - 0.5) * 120,
+          x: spawn ? spawn.x : width / 2 + (Math.random() - 0.5) * 120,
+          y: spawn ? spawn.y : height / 2 + (Math.random() - 0.5) * 120,
           vx: 0,
           vy: 0,
         })
       }
     }
+    pendingSpawnRef.current = null
 
     // A structural change (note added/removed) re-enables auto-fit even if the user had
     // previously zoomed/panned manually, and frames the new set of nodes immediately so
@@ -246,10 +281,91 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
   }
 
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
+    if (connectMode) {
+      setConnectMode(false)
+      setConnectFirstId(null)
+      return
+    }
     event.currentTarget.setPointerCapture(event.pointerId)
     autoFitRef.current = false
     panRef.current = { startX: event.clientX, startY: event.clientY, originX: transform.x, originY: transform.y }
   }
+
+  function screenToWorld(container: Element, clientX: number, clientY: number): { screen: Point; world: Point } {
+    const rect = container.getBoundingClientRect()
+    const screen = { x: clientX - rect.left, y: clientY - rect.top }
+    const t = transformRef.current
+    return { screen, world: { x: (screen.x - t.x) / t.k, y: (screen.y - t.y) / t.k } }
+  }
+
+  function handleContextMenu(event: React.MouseEvent<HTMLDivElement>) {
+    event.preventDefault()
+    setConnectMode(false)
+    setConnectFirstId(null)
+    setContextMenu(screenToWorld(event.currentTarget, event.clientX, event.clientY))
+  }
+
+  function openCreateNoteInput() {
+    if (!contextMenu) return
+    setCreateNoteAt(contextMenu)
+    setContextMenu(null)
+    setActionError(null)
+  }
+
+  function startConnectMode() {
+    setConnectMode(true)
+    setConnectFirstId(null)
+    setContextMenu(null)
+    setActionError(null)
+  }
+
+  async function submitCreateNote(event: React.FormEvent) {
+    event.preventDefault()
+    if (!createNoteAt) return
+    const title = newNodeTitle.trim()
+    if (!title) return
+
+    pendingSpawnRef.current = createNoteAt.world
+    try {
+      await onCreateNote(title)
+      setCreateNoteAt(null)
+      setNewNodeTitle('')
+      setActionError(null)
+    } catch (err) {
+      pendingSpawnRef.current = null
+      setActionError(err instanceof ApiError ? err.message : 'Notiz konnte nicht erstellt werden.')
+    }
+  }
+
+  function handleConnectClick(id: string) {
+    if (!connectFirstId) {
+      setConnectFirstId(id)
+      return
+    }
+    if (connectFirstId === id) {
+      setConnectFirstId(null)
+      return
+    }
+
+    const sourceId = connectFirstId
+    setConnectMode(false)
+    setConnectFirstId(null)
+    onConnectNotes(sourceId, id).catch((err) => {
+      setActionError(err instanceof ApiError ? err.message : 'Verbindung konnte nicht gespeichert werden.')
+    })
+  }
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      setContextMenu(null)
+      setCreateNoteAt(null)
+      setConnectMode(false)
+      setConnectFirstId(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
   function handleSvgPointerMove(event: React.PointerEvent<SVGSVGElement>) {
     if (panRef.current) {
@@ -294,6 +410,10 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
     if (!drag) return
 
     if (!drag.moved) {
+      if (connectMode) {
+        handleConnectClick(drag.id)
+        return
+      }
       const note = notes.find((n) => n.id === drag.id)
       if (note) onSelectNote(note)
       return
@@ -321,6 +441,7 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
   return (
     <div
       ref={containerRef}
+      onContextMenu={handleContextMenu}
       className="relative h-[75vh] min-h-[480px] w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-[#0a0a0c]"
     >
       <button
@@ -335,12 +456,83 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
         Ansicht anpassen
       </button>
 
+      {connectMode && (
+        <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded border border-amber-500/50 bg-white/90 px-3 py-1.5 text-xs text-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
+          {connectFirstId ? 'Ziel-Notiz anklicken, um zu verbinden…' : 'Erste Notiz anklicken…'}
+          <button
+            onClick={() => {
+              setConnectMode(false)
+              setConnectFirstId(null)
+            }}
+            className="text-slate-500 hover:text-red-500 dark:text-slate-400 dark:hover:text-red-400"
+          >
+            Abbrechen
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="absolute bottom-3 left-3 z-10 rounded border border-red-500/50 bg-white/90 px-3 py-1.5 text-xs text-red-500 dark:bg-slate-900/90 dark:text-red-400">
+          {actionError}
+        </div>
+      )}
+
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setContextMenu(null)} />
+          <div
+            className="absolute z-30 rounded border border-slate-300 bg-white py-1 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-900"
+            style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
+          >
+            <button
+              onClick={openCreateNoteInput}
+              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Neue Notiz erstellen
+            </button>
+            <button
+              onClick={startConnectMode}
+              disabled={notes.length < 2}
+              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Notizen verbinden
+            </button>
+          </div>
+        </>
+      )}
+
+      {createNoteAt && (
+        <form
+          onSubmit={submitCreateNote}
+          className="absolute z-30 flex items-center gap-1 rounded border border-slate-300 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+          style={{ left: createNoteAt.screen.x, top: createNoteAt.screen.y }}
+        >
+          <input
+            autoFocus
+            value={newNodeTitle}
+            onChange={(e) => setNewNodeTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setCreateNoteAt(null)
+                setNewNodeTitle('')
+              }
+            }}
+            placeholder="Titel der Notiz"
+            className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800"
+          />
+          <button type="submit" className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500">
+            Anlegen
+          </button>
+        </form>
+      )}
+
       {notes.length === 0 ? (
-        <p className="p-6 text-sm text-slate-500">Noch keine Notizen für die Graph-Ansicht.</p>
+        <p className="p-6 text-sm text-slate-500">Noch keine Notizen. Rechtsklick, um eine anzulegen.</p>
       ) : (
         <svg
           viewBox={`0 0 ${size.width} ${size.height}`}
-          className="h-full w-full touch-none cursor-grab active:cursor-grabbing"
+          preserveAspectRatio="none"
+          className={`h-full w-full touch-none ${connectMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
           onWheel={handleWheel}
           onPointerDown={handleBackgroundPointerDown}
           onPointerMove={handleSvgPointerMove}
@@ -373,13 +565,16 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
               if (!pos) return null
               const isHovered = note.id === hoveredId
               const isNeighbor = neighborIds?.has(note.id) ?? false
+              const isConnectSource = note.id === connectFirstId
               const dimmed = hoveredId !== null && !isHovered && !isNeighbor
               const radius = 4 + Math.min(degree.get(note.id) ?? 0, 10) * 1.3
-              const fillClass = isHovered
-                ? 'fill-indigo-600 dark:fill-indigo-400'
-                : isNeighbor
-                  ? 'fill-slate-700 dark:fill-slate-200'
-                  : 'fill-slate-500 dark:fill-slate-400'
+              const fillClass = isConnectSource
+                ? 'fill-amber-500'
+                : isHovered
+                  ? 'fill-indigo-600 dark:fill-indigo-400'
+                  : isNeighbor
+                    ? 'fill-slate-700 dark:fill-slate-200'
+                    : 'fill-slate-500 dark:fill-slate-400'
 
               return (
                 <g key={note.id} opacity={dimmed ? 0.25 : 1}>
@@ -387,8 +582,8 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
                     cx={pos.x}
                     cy={pos.y}
                     r={radius}
-                    className={`cursor-pointer ${fillClass} ${isHovered ? 'stroke-slate-900 dark:stroke-white' : ''}`}
-                    strokeWidth={isHovered ? 1.5 : 0}
+                    className={`cursor-pointer ${fillClass} ${isHovered || isConnectSource ? 'stroke-slate-900 dark:stroke-white' : ''}`}
+                    strokeWidth={isHovered || isConnectSource ? 1.5 : 0}
                     onPointerDown={handleNodePointerDown(note.id)}
                     onPointerEnter={() => setHoveredId(note.id)}
                     onPointerLeave={() => setHoveredId((prev) => (prev === note.id ? null : prev))}
