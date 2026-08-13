@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { createBoard, getBoards, getProjects } from '../api/projects'
 import { getTimeline } from '../api/timeline'
-import type { Board, Milestone, Project, WorkItem } from '../api/types'
+import { getNotes } from '../api/notes'
+import type { Board, Milestone, Note, Project, WorkItem } from '../api/types'
 import TimelineView from './TimelineView'
+import NotesView from './NotesView'
 
-type Tab = 'timeline' | 'kanban'
+type Tab = 'timeline' | 'kanban' | 'notes'
 
 export default function ProjectPage() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -15,18 +17,20 @@ export default function ProjectPage() {
   const [boards, setBoards] = useState<Board[]>([])
   const [workItems, setWorkItems] = useState<WorkItem[]>([])
   const [milestones, setMilestones] = useState<Milestone[]>([])
+  const [notes, setNotes] = useState<Note[]>([])
   const [tab, setTab] = useState<Tab>('timeline')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!projectId) return
 
-    Promise.all([getProjects(), getBoards(projectId), getTimeline(projectId)]).then(
-      ([projects, boardList, timeline]) => {
+    Promise.all([getProjects(), getBoards(projectId), getTimeline(projectId), getNotes(projectId)]).then(
+      ([projects, boardList, timeline, noteList]) => {
         setProject(projects.find((p) => p.id === projectId) ?? null)
         setBoards(boardList)
         setWorkItems(timeline.workItems)
         setMilestones(timeline.milestones)
+        setNotes(noteList)
         setLoading(false)
       },
     )
@@ -66,11 +70,17 @@ export default function ProjectPage() {
           >
             Kanban
           </button>
+          <button
+            onClick={() => setTab('notes')}
+            className={`px-4 py-2 text-sm ${tab === 'notes' ? 'border-b-2 border-indigo-500 text-slate-100' : 'text-slate-500 hover:text-slate-300'}`}
+          >
+            Notizen
+          </button>
         </div>
       </header>
 
       <main className="mx-auto max-w-5xl p-6">
-        {tab === 'timeline' ? (
+        {tab === 'timeline' && (
           <TimelineView
             projectId={projectId}
             boards={boards}
@@ -79,7 +89,9 @@ export default function ProjectPage() {
             onWorkItemsChange={setWorkItems}
             onMilestonesChange={setMilestones}
           />
-        ) : (
+        )}
+
+        {tab === 'kanban' && (
           <div className="space-y-3">
             <button
               onClick={handleCreateBoard}
@@ -104,6 +116,8 @@ export default function ProjectPage() {
             </ul>
           </div>
         )}
+
+        {tab === 'notes' && <NotesView projectId={projectId} notes={notes} onNotesChange={setNotes} />}
       </main>
     </div>
   )

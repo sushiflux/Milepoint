@@ -341,6 +341,57 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.ToTable("Milestones");
                 });
 
+            modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "Title")
+                        .IsUnique();
+
+                    b.ToTable("Notes");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.NoteLink", b =>
+                {
+                    b.Property<string>("SourceNoteId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("TargetNoteId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.HasKey("SourceNoteId", "TargetNoteId");
+
+                    b.HasIndex("TargetNoteId");
+
+                    b.ToTable("NoteLinks");
+                });
+
             modelBuilder.Entity("Milepoint.Api.Models.Project", b =>
                 {
                     b.Property<string>("Id")
@@ -601,6 +652,36 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
+                {
+                    b.HasOne("Milepoint.Api.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.NoteLink", b =>
+                {
+                    b.HasOne("Milepoint.Api.Models.Note", "SourceNote")
+                        .WithMany("OutgoingLinks")
+                        .HasForeignKey("SourceNoteId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Milepoint.Api.Models.Note", "TargetNote")
+                        .WithMany("IncomingLinks")
+                        .HasForeignKey("TargetNoteId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("SourceNote");
+
+                    b.Navigation("TargetNote");
+                });
+
             modelBuilder.Entity("Milepoint.Api.Models.Project", b =>
                 {
                     b.HasOne("Milepoint.Api.Data.ApplicationUser", "CreatedByUser")
@@ -698,6 +779,13 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
             modelBuilder.Entity("Milepoint.Api.Models.BoardColumn", b =>
                 {
                     b.Navigation("WorkItems");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
+                {
+                    b.Navigation("IncomingLinks");
+
+                    b.Navigation("OutgoingLinks");
                 });
 
             modelBuilder.Entity("Milepoint.Api.Models.Project", b =>

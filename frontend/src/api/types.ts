@@ -75,3 +75,18 @@ export interface Timeline {
   workItems: WorkItem[]
   milestones: Milestone[]
 }
+
+export interface NoteLinkRef {
+  id: string
+  title: string
+}
+
+export interface Note {
+  id: string
+  title: string
+  content: string
+  outgoingLinks: NoteLinkRef[]
+  incomingLinks: NoteLinkRef[]
+  createdAt: string
+  updatedAt: string
+}

@@ -19,6 +19,8 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
     public DbSet<Milestone> Milestones => Set<Milestone>();
     public DbSet<WorkItemDependency> WorkItemDependencies => Set<WorkItemDependency>();
+    public DbSet<Note> Notes => Set<Note>();
+    public DbSet<NoteLink> NoteLinks => Set<NoteLink>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -155,6 +157,38 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
             entity.HasOne(d => d.BlockingWorkItem)
                 .WithMany()
                 .HasForeignKey(d => d.BlockingWorkItemId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<Note>(entity =>
+        {
+            entity.Property(n => n.Id).HasMaxLength(40);
+            entity.Property(n => n.ProjectId).HasMaxLength(40);
+            entity.Property(n => n.Title).HasMaxLength(200).IsRequired();
+
+            entity.HasIndex(n => new { n.ProjectId, n.Title }).IsUnique();
+
+            entity.HasOne(n => n.Project)
+                .WithMany()
+                .HasForeignKey(n => n.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<NoteLink>(entity =>
+        {
+            entity.HasKey(l => new { l.SourceNoteId, l.TargetNoteId });
+            entity.Property(l => l.SourceNoteId).HasMaxLength(40);
+            entity.Property(l => l.TargetNoteId).HasMaxLength(40);
+
+            // NoAction on both sides, same reasoning as WorkItemLabel/WorkItemDependency above.
+            entity.HasOne(l => l.SourceNote)
+                .WithMany(n => n.OutgoingLinks)
+                .HasForeignKey(l => l.SourceNoteId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(l => l.TargetNote)
+                .WithMany(n => n.IncomingLinks)
+                .HasForeignKey(l => l.TargetNoteId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
     }

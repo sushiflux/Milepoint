@@ -2,7 +2,8 @@
 
 ## MVP-Scope
 - **Fokus MVP:** Issue-Tracking & Kanban (Aufgaben, Boards, Backlog, Labels/Prioritäten) — Fundament für alles Weitere.
-- **Nach dem MVP geplant:** Time Tracking, Wiki/Docs, Automationen/Workflows, CI/CD-Status-Dashboard.
+- **Nach dem MVP geplant:** Time Tracking, Automationen/Workflows, CI/CD-Status-Dashboard. (Wiki/Docs wurde
+  vorgezogen und ist bereits gebaut, siehe "Notizen & Verlinkung" unten.)
 - **Tenancy:** Single-Team (ein Workspace, keine Mandantentrennung). Keine Multi-Tenant-Architektur in Phase 1.
 
 ## Datenbanken
@@ -64,6 +65,23 @@
 - Timeline-UI bewusst als **funktionale eingerückte Liste mit proportionalen Balken** umgesetzt, nicht als
   Drag&Drop-Gantt-Chart mit Verbindungslinien — visuelle Politur bleibt wie beim Rest des Frontends Gemini
   überlassen.
+
+## Notizen & Verlinkung (Obsidian-artig)
+- **Eigenes, projekt-gebundenes `Note`-Modell** (Titel + Markdown-Text) als drittes Tab neben Timeline/Kanban
+  in `ProjectPage.tsx` — kein separates Wiki-Modul, sondern direkt im Projekt.
+- **Verlinkung über `[[Titel]]`-Syntax im Text**, geparst serverseitig beim Speichern (`NoteLinkParser`,
+  Regex `\[\[([^\[\]]+)\]\]`). Aufgelöste Links werden als `NoteLink` (Quelle→Ziel, per Note-Id) abgelegt;
+  nicht auflösbare `[[Titel]]` (noch keine Note mit dem Titel) bleiben unverlinkter Text, kein Fehler.
+- **Rückverlinkung (Backlinks) automatisch**: `NoteDto` liefert sowohl `outgoingLinks` als auch
+  `incomingLinks` — letztere ergeben sich rein aus dem `NoteLink`-Fremdschlüssel, keine eigene Pflege nötig.
+- **Titel sind pro Projekt eindeutig** (unique Index `ProjectId`+`Title`), exakter String-Vergleich (keine
+  Groß-/Kleinschreibungs-Normalisierung) — Anlegen/Umbenennen auf einen bereits vergebenen Titel gibt `409`.
+- **Umbenennen bricht bestehende Backlinks nicht**: `NoteLink` referenziert über die stabile Note-`Id`, nicht
+  über den Titel. Nur der *Rohtext* anderer Notes, der noch den alten Titel als `[[...]]` enthält, zeigt nach
+  einer Umbenennung erst wieder auf die Note, sobald diese andere Note selbst neu gespeichert wird (kein
+  automatisches Nachziehen der Linktexte — bewusst nicht gebaut, um die Sync-Logik einfach zu halten).
+- **Bewusst kein Obsidian-artiger Graph-View** (Force-Directed-Netzwerk) — nur Textliste mit klickbaren Links
+  und einer Backlinks-Leiste pro Notiz. Visuelle Politur bleibt wie beim Rest des Frontends Gemini überlassen.
 
 ## Branding
 - **App-/Produktname: "Milepoint"** — entschieden nach Recherche auf Namenskollisionen (siehe Chat-Verlauf
