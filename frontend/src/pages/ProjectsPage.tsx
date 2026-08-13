@@ -137,7 +137,7 @@ export default function ProjectsPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-4xl space-y-6 p-6">
+      <main className="space-y-6 p-6">
         {projects === null ? (
           <p className="text-sm text-slate-500">Lade Projekte…</p>
         ) : projects.length === 0 && !showCreateForm ? (
@@ -183,7 +183,7 @@ export default function ProjectsPage() {
             {error && <p className="text-sm text-red-400">{error}</p>}
 
             {viewMode === 'tiles' ? (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {projects.map((project) => (
                   <div key={project.id} className="rounded-lg border border-slate-800 bg-slate-900 p-4 hover:border-slate-700">
                     {renderProject(project)}

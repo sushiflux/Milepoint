@@ -79,7 +79,7 @@ export default function ProjectPage() {
         </div>
       </header>
 
-      <main className={tab === 'timeline' ? 'p-6' : 'mx-auto max-w-5xl p-6'}>
+      <main className="p-6">
         {tab === 'timeline' && (
           <TimelineView
             projectId={projectId}
