@@ -3,10 +3,10 @@ import type { Board, Project } from './types'
 
 export const getProjects = () => apiFetch<Project[]>('/projects')
 
-export const createProject = (projectCategoryId: string, name: string, description?: string) =>
+export const createProject = (name: string, description?: string) =>
   apiFetch<Project>('/projects', {
     method: 'POST',
-    body: JSON.stringify({ projectCategoryId, name, description }),
+    body: JSON.stringify({ name, description }),
   })
 
 export const getBoards = (projectId: string) => apiFetch<Board[]>(`/projects/${projectId}/boards`)

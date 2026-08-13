@@ -108,6 +108,7 @@ export default function BoardPage() {
             <ul className="space-y-2">
               {(itemsByColumn.get(column.id) ?? []).map((item) => (
                 <li key={item.id} className="rounded border border-slate-800 bg-slate-800/60 p-3 text-sm">
+                  <p className="font-mono text-xs text-slate-500">{item.referenceCode}</p>
                   <p className="font-medium">{item.title}</p>
                   <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
                     <span>{item.type}</span>

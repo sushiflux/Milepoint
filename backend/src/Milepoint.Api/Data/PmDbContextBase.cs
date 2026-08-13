@@ -15,7 +15,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
     public DbSet<BoardColumn> BoardColumns => Set<BoardColumn>();
     public DbSet<WorkItem> WorkItems => Set<WorkItem>();
     public DbSet<Label> Labels => Set<Label>();
-    public DbSet<ProjectCategory> ProjectCategories => Set<ProjectCategory>();
+    public DbSet<SequenceCounter> SequenceCounters => Set<SequenceCounter>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -24,8 +24,6 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
         builder.Entity<Project>(entity =>
         {
             entity.Property(p => p.Id).HasMaxLength(40);
-            entity.HasIndex(p => p.Key).IsUnique();
-            entity.Property(p => p.Key).HasMaxLength(20).IsRequired();
             entity.Property(p => p.Name).HasMaxLength(200).IsRequired();
 
             entity.HasMany(p => p.Boards)
@@ -37,18 +35,12 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
                 .WithOne(l => l.Project)
                 .HasForeignKey(l => l.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(p => p.ProjectCategory)
-                .WithMany(c => c.Projects)
-                .HasForeignKey(p => p.ProjectCategoryId)
-                .OnDelete(DeleteBehavior.Restrict);
         });
 
-        builder.Entity<ProjectCategory>(entity =>
+        builder.Entity<SequenceCounter>(entity =>
         {
-            entity.HasIndex(c => c.Code).IsUnique();
-            entity.Property(c => c.Code).HasMaxLength(10).IsRequired();
-            entity.Property(c => c.Name).HasMaxLength(100).IsRequired();
+            entity.HasKey(c => c.Key);
+            entity.Property(c => c.Key).HasMaxLength(20);
         });
 
         builder.Entity<Board>(entity =>
@@ -80,6 +72,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
             entity.Property(w => w.ProjectId).HasMaxLength(40);
             entity.Property(w => w.BoardId).HasMaxLength(40);
             entity.Property(w => w.Title).HasMaxLength(300).IsRequired();
+            entity.Property(w => w.ReferencePrefix).HasMaxLength(10).IsRequired();
 
             entity.HasOne(w => w.Assignee)
                 .WithMany()

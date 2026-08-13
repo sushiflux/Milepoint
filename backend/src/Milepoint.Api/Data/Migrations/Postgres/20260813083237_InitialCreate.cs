@@ -53,17 +53,29 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 });
 
             migrationBuilder.CreateTable(
-                name: "ProjectCategories",
+                name: "Projects",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uuid", nullable: false),
-                    Code = table.Column<string>(type: "character varying(10)", maxLength: 10, nullable: false),
-                    Name = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: false),
+                    Id = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
+                    Name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    Description = table.Column<string>(type: "text", nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_ProjectCategories", x => x.Id);
+                    table.PrimaryKey("PK_Projects", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "SequenceCounters",
+                columns: table => new
+                {
+                    Key = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
+                    Value = table.Column<int>(type: "integer", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_SequenceCounters", x => x.Key);
                 });
 
             migrationBuilder.CreateTable(
@@ -173,28 +185,6 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 });
 
             migrationBuilder.CreateTable(
-                name: "Projects",
-                columns: table => new
-                {
-                    Id = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
-                    Key = table.Column<string>(type: "character varying(20)", maxLength: 20, nullable: false),
-                    Name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
-                    Description = table.Column<string>(type: "text", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
-                    ProjectCategoryId = table.Column<Guid>(type: "uuid", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Projects", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Projects_ProjectCategories_ProjectCategoryId",
-                        column: x => x.ProjectCategoryId,
-                        principalTable: "ProjectCategories",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "Boards",
                 columns: table => new
                 {
@@ -268,6 +258,8 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     Type = table.Column<int>(type: "integer", nullable: false),
                     Priority = table.Column<int>(type: "integer", nullable: false),
                     Position = table.Column<int>(type: "integer", nullable: false),
+                    ReferencePrefix = table.Column<string>(type: "character varying(10)", maxLength: 10, nullable: false),
+                    ReferenceNumber = table.Column<int>(type: "integer", nullable: false),
                     AssigneeId = table.Column<string>(type: "text", nullable: true),
                     DueDate = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
@@ -365,23 +357,6 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 column: "ProjectId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProjectCategories_Code",
-                table: "ProjectCategories",
-                column: "Code",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Projects_Key",
-                table: "Projects",
-                column: "Key",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Projects_ProjectCategoryId",
-                table: "Projects",
-                column: "ProjectCategoryId");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_WorkItemLabel_WorkItemsId",
                 table: "WorkItemLabel",
                 column: "WorkItemsId");
@@ -416,6 +391,9 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 name: "AspNetUserTokens");
 
             migrationBuilder.DropTable(
+                name: "SequenceCounters");
+
+            migrationBuilder.DropTable(
                 name: "WorkItemLabel");
 
             migrationBuilder.DropTable(
@@ -438,9 +416,6 @@ namespace Milepoint.Api.Data.Migrations.Postgres
 
             migrationBuilder.DropTable(
                 name: "Projects");
-
-            migrationBuilder.DropTable(
-                name: "ProjectCategories");
         }
     }
 }

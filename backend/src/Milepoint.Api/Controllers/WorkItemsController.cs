@@ -6,6 +6,7 @@ using Milepoint.Api.Data;
 using Milepoint.Api.Dtos.WorkItems;
 using Milepoint.Api.Hubs;
 using Milepoint.Api.Models;
+using Milepoint.Api.Services;
 
 namespace Milepoint.Api.Controllers;
 
@@ -55,6 +56,7 @@ public class WorkItemsController : ControllerBase
         }
 
         var position = await _db.WorkItems.Where(w => w.ColumnId == column.Id).CountAsync();
+        var (prefix, number) = await NextReferenceAsync(request.Type);
 
         var item = new WorkItem
         {
@@ -65,7 +67,9 @@ public class WorkItemsController : ControllerBase
             Description = request.Description,
             Type = request.Type,
             Priority = request.Priority,
-            Position = position
+            Position = position,
+            ReferencePrefix = prefix,
+            ReferenceNumber = number
         };
 
         _db.WorkItems.Add(item);
@@ -98,8 +102,28 @@ public class WorkItemsController : ControllerBase
         return NoContent();
     }
 
+    // Simple counter-table increment (see SequenceCounter) rather than a native DB sequence, so the
+    // same code works identically on Postgres and SQL Server without provider-specific raw SQL. Good
+    // enough for a single-team dev tool; revisit if ticket creation ever becomes highly concurrent.
+    private async Task<(string Prefix, int Number)> NextReferenceAsync(WorkItemType type)
+    {
+        var counterKey = WorkItemReferenceCode.CounterKeyFor(type);
+        var prefix = WorkItemReferenceCode.PrefixFor(type);
+
+        var counter = await _db.SequenceCounters.FirstOrDefaultAsync(c => c.Key == counterKey);
+        if (counter is null)
+        {
+            counter = new SequenceCounter { Key = counterKey, Value = 0 };
+            _db.SequenceCounters.Add(counter);
+        }
+
+        counter.Value++;
+        return (prefix, counter.Value);
+    }
+
     private static WorkItemDto ToDto(WorkItem item) => new(
         item.Id,
+        WorkItemReferenceCode.Format(item.ReferencePrefix, item.ReferenceNumber),
         item.ColumnId,
         item.Title,
         item.Description,

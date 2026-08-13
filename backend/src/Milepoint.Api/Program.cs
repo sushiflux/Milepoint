@@ -171,17 +171,6 @@ using (var scope = app.Services.CreateScope())
             await userManager.AddToRoleAsync(admin, "SystemAdmin");
         }
     }
-
-    if (!await db.ProjectCategories.AnyAsync())
-    {
-        db.ProjectCategories.AddRange(
-            new Milepoint.Api.Models.ProjectCategory { Code = "WEB", Name = "Web" },
-            new Milepoint.Api.Models.ProjectCategory { Code = "APP", Name = "App" },
-            new Milepoint.Api.Models.ProjectCategory { Code = "GAME", Name = "Game" },
-            new Milepoint.Api.Models.ProjectCategory { Code = "TOOL", Name = "Tool" },
-            new Milepoint.Api.Models.ProjectCategory { Code = "MISC", Name = "Sonstiges" });
-        await db.SaveChangesAsync();
-    }
 }
 
 if (app.Environment.IsDevelopment())

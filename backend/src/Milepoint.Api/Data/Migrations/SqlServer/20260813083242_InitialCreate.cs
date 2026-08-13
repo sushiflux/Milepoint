@@ -52,17 +52,29 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                 });
 
             migrationBuilder.CreateTable(
-                name: "ProjectCategories",
+                name: "Projects",
                 columns: table => new
                 {
-                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
-                    Code = table.Column<string>(type: "nvarchar(10)", maxLength: 10, nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    Id = table.Column<string>(type: "nvarchar(40)", maxLength: 40, nullable: false),
+                    Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
+                    Description = table.Column<string>(type: "nvarchar(max)", nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_ProjectCategories", x => x.Id);
+                    table.PrimaryKey("PK_Projects", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "SequenceCounters",
+                columns: table => new
+                {
+                    Key = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
+                    Value = table.Column<int>(type: "int", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_SequenceCounters", x => x.Key);
                 });
 
             migrationBuilder.CreateTable(
@@ -172,28 +184,6 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                 });
 
             migrationBuilder.CreateTable(
-                name: "Projects",
-                columns: table => new
-                {
-                    Id = table.Column<string>(type: "nvarchar(40)", maxLength: 40, nullable: false),
-                    Key = table.Column<string>(type: "nvarchar(20)", maxLength: 20, nullable: false),
-                    Name = table.Column<string>(type: "nvarchar(200)", maxLength: 200, nullable: false),
-                    Description = table.Column<string>(type: "nvarchar(max)", nullable: true),
-                    CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
-                    ProjectCategoryId = table.Column<Guid>(type: "uniqueidentifier", nullable: false)
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_Projects", x => x.Id);
-                    table.ForeignKey(
-                        name: "FK_Projects_ProjectCategories_ProjectCategoryId",
-                        column: x => x.ProjectCategoryId,
-                        principalTable: "ProjectCategories",
-                        principalColumn: "Id",
-                        onDelete: ReferentialAction.Restrict);
-                });
-
-            migrationBuilder.CreateTable(
                 name: "Boards",
                 columns: table => new
                 {
@@ -267,6 +257,8 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     Type = table.Column<int>(type: "int", nullable: false),
                     Priority = table.Column<int>(type: "int", nullable: false),
                     Position = table.Column<int>(type: "int", nullable: false),
+                    ReferencePrefix = table.Column<string>(type: "nvarchar(10)", maxLength: 10, nullable: false),
+                    ReferenceNumber = table.Column<int>(type: "int", nullable: false),
                     AssigneeId = table.Column<string>(type: "nvarchar(450)", nullable: true),
                     DueDate = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "datetimeoffset", nullable: false),
@@ -366,23 +358,6 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                 column: "ProjectId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ProjectCategories_Code",
-                table: "ProjectCategories",
-                column: "Code",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Projects_Key",
-                table: "Projects",
-                column: "Key",
-                unique: true);
-
-            migrationBuilder.CreateIndex(
-                name: "IX_Projects_ProjectCategoryId",
-                table: "Projects",
-                column: "ProjectCategoryId");
-
-            migrationBuilder.CreateIndex(
                 name: "IX_WorkItemLabel_WorkItemsId",
                 table: "WorkItemLabel",
                 column: "WorkItemsId");
@@ -417,6 +392,9 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                 name: "AspNetUserTokens");
 
             migrationBuilder.DropTable(
+                name: "SequenceCounters");
+
+            migrationBuilder.DropTable(
                 name: "WorkItemLabel");
 
             migrationBuilder.DropTable(
@@ -439,9 +417,6 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
 
             migrationBuilder.DropTable(
                 name: "Projects");
-
-            migrationBuilder.DropTable(
-                name: "ProjectCategories");
         }
     }
 }

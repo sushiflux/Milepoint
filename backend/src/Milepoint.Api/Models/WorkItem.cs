@@ -18,6 +18,11 @@ public class WorkItem
     public WorkItemPriority Priority { get; set; } = WorkItemPriority.Medium;
     public int Position { get; set; }
 
+    // Assigned once at creation (see WorkItemReferenceCode) and never recomputed, so a ticket's
+    // reference number stays stable even if its Type is edited later.
+    public string ReferencePrefix { get; set; } = string.Empty;
+    public int ReferenceNumber { get; set; }
+
     public string? AssigneeId { get; set; }
     public ApplicationUser? Assignee { get; set; }
 

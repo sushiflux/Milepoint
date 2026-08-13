@@ -21,6 +21,7 @@ public record MoveWorkItemRequest(Guid TargetColumnId, int Position);
 
 public record WorkItemDto(
     string Id,
+    string ReferenceCode,
     Guid ColumnId,
     string Title,
     string? Description,

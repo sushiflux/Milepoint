@@ -316,54 +316,28 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
-                    b.Property<string>("Key")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<Guid>("ProjectCategoryId")
-                        .HasColumnType("uuid");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("Key")
-                        .IsUnique();
-
-                    b.HasIndex("ProjectCategoryId");
 
                     b.ToTable("Projects");
                 });
 
-            modelBuilder.Entity("Milepoint.Api.Models.ProjectCategory", b =>
+            modelBuilder.Entity("Milepoint.Api.Models.SequenceCounter", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                    b.Property<string>("Key")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
 
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(10)
-                        .HasColumnType("character varying(10)");
+                    b.Property<int>("Value")
+                        .HasColumnType("integer");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
+                    b.HasKey("Key");
 
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Code")
-                        .IsUnique();
-
-                    b.ToTable("ProjectCategories");
+                    b.ToTable("SequenceCounters");
                 });
 
             modelBuilder.Entity("Milepoint.Api.Models.WorkItem", b =>
@@ -402,6 +376,14 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
+
+                    b.Property<int>("ReferenceNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ReferencePrefix")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -523,17 +505,6 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Navigation("Project");
                 });
 
-            modelBuilder.Entity("Milepoint.Api.Models.Project", b =>
-                {
-                    b.HasOne("Milepoint.Api.Models.ProjectCategory", "ProjectCategory")
-                        .WithMany("Projects")
-                        .HasForeignKey("ProjectCategoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("ProjectCategory");
-                });
-
             modelBuilder.Entity("Milepoint.Api.Models.WorkItem", b =>
                 {
                     b.HasOne("Milepoint.Api.Data.ApplicationUser", "Assignee")
@@ -582,11 +553,6 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Navigation("Boards");
 
                     b.Navigation("Labels");
-                });
-
-            modelBuilder.Entity("Milepoint.Api.Models.ProjectCategory", b =>
-                {
-                    b.Navigation("Projects");
                 });
 #pragma warning restore 612, 618
         }

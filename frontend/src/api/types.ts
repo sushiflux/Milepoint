@@ -7,21 +7,11 @@ export interface AuthResponse {
   roles: string[]
 }
 
-export interface ProjectCategory {
-  id: string
-  code: string
-  name: string
-  createdAt: string
-}
-
 export interface Project {
   id: string
-  key: string
   name: string
   description: string | null
   createdAt: string
-  projectCategoryId: string
-  projectCategoryName: string
 }
 
 export interface BoardColumn {
@@ -43,6 +33,7 @@ export type WorkItemPriority = 'Low' | 'Medium' | 'High' | 'Urgent'
 
 export interface WorkItem {
   id: string
+  referenceCode: string
   columnId: string
   title: string
   description: string | null
