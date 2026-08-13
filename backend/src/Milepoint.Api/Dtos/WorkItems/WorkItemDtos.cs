@@ -7,7 +7,10 @@ public record CreateWorkItemRequest(
     string Title,
     string? Description,
     WorkItemType Type,
-    WorkItemPriority Priority);
+    WorkItemPriority Priority,
+    string? ParentWorkItemId,
+    DateTimeOffset? StartDate,
+    DateTimeOffset? DueDate);
 
 public record UpdateWorkItemRequest(
     string Title,
@@ -15,14 +18,22 @@ public record UpdateWorkItemRequest(
     WorkItemType Type,
     WorkItemPriority Priority,
     string? AssigneeId,
+    string? ParentWorkItemId,
+    DateTimeOffset? StartDate,
     DateTimeOffset? DueDate);
 
 public record MoveWorkItemRequest(Guid TargetColumnId, int Position);
 
+public record AddDependencyRequest(string BlockingWorkItemId);
+
 public record WorkItemDto(
     string Id,
     string ReferenceCode,
+    string BoardId,
     Guid ColumnId,
+    string ColumnName,
+    BoardColumnType ColumnType,
+    string? ParentWorkItemId,
     string Title,
     string? Description,
     WorkItemType Type,
@@ -30,7 +41,9 @@ public record WorkItemDto(
     int Position,
     string? AssigneeId,
     string? AssigneeDisplayName,
+    DateTimeOffset? StartDate,
     DateTimeOffset? DueDate,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    List<Guid> LabelIds);
+    List<Guid> LabelIds,
+    List<string> BlockingWorkItemIds);

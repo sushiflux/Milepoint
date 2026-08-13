@@ -12,6 +12,11 @@ public class WorkItem
     public Guid ColumnId { get; set; }
     public BoardColumn Column { get; set; } = null!;
 
+    // Unlimited-depth subtask tree (see the Timeline view). Null = a top-level task.
+    public string? ParentWorkItemId { get; set; }
+    public WorkItem? ParentWorkItem { get; set; }
+    public ICollection<WorkItem> Children { get; set; } = new List<WorkItem>();
+
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public WorkItemType Type { get; set; } = WorkItemType.Task;
@@ -26,9 +31,14 @@ public class WorkItem
     public string? AssigneeId { get; set; }
     public ApplicationUser? Assignee { get; set; }
 
+    // Both optional, shown as a bar on the Timeline when set; DueDate alone renders as a single marker.
+    public DateTimeOffset? StartDate { get; set; }
     public DateTimeOffset? DueDate { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public ICollection<Label> Labels { get; set; } = new List<Label>();
+
+    // Tasks that must reach a Done column before this one may move out of its Todo column.
+    public ICollection<WorkItemDependency> Dependencies { get; set; } = new List<WorkItemDependency>();
 }

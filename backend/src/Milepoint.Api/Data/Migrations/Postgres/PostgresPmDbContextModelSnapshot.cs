@@ -307,6 +307,38 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.ToTable("Labels");
                 });
 
+            modelBuilder.Entity("Milepoint.Api.Models.Milestone", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("Date")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("Milestones");
+                });
+
             modelBuilder.Entity("Milepoint.Api.Models.Project", b =>
                 {
                     b.Property<string>("Id")
@@ -391,6 +423,10 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Property<DateTimeOffset?>("DueDate")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("ParentWorkItemId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<int>("Position")
                         .HasColumnType("integer");
 
@@ -410,6 +446,9 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .HasMaxLength(10)
                         .HasColumnType("character varying(10)");
 
+                    b.Property<DateTimeOffset?>("StartDate")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasMaxLength(300)
@@ -427,7 +466,26 @@ namespace Milepoint.Api.Data.Migrations.Postgres
 
                     b.HasIndex("ColumnId");
 
+                    b.HasIndex("ParentWorkItemId");
+
                     b.ToTable("WorkItems");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.WorkItemDependency", b =>
+                {
+                    b.Property<string>("DependentWorkItemId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("BlockingWorkItemId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("DependentWorkItemId", "BlockingWorkItemId");
+
+                    b.HasIndex("BlockingWorkItemId");
+
+                    b.ToTable("WorkItemDependencies");
                 });
 
             modelBuilder.Entity("WorkItemLabel", b =>
@@ -530,6 +588,17 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("Milepoint.Api.Models.Milestone", b =>
+                {
+                    b.HasOne("Milepoint.Api.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
             modelBuilder.Entity("Milepoint.Api.Models.Project", b =>
                 {
                     b.HasOne("Milepoint.Api.Data.ApplicationUser", "CreatedByUser")
@@ -573,9 +642,35 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("Milepoint.Api.Models.WorkItem", "ParentWorkItem")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentWorkItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Assignee");
 
                     b.Navigation("Column");
+
+                    b.Navigation("ParentWorkItem");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.WorkItemDependency", b =>
+                {
+                    b.HasOne("Milepoint.Api.Models.WorkItem", "BlockingWorkItem")
+                        .WithMany()
+                        .HasForeignKey("BlockingWorkItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("Milepoint.Api.Models.WorkItem", "DependentWorkItem")
+                        .WithMany("Dependencies")
+                        .HasForeignKey("DependentWorkItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("BlockingWorkItem");
+
+                    b.Navigation("DependentWorkItem");
                 });
 
             modelBuilder.Entity("WorkItemLabel", b =>
@@ -610,6 +705,13 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Navigation("Labels");
 
                     b.Navigation("Members");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.WorkItem", b =>
+                {
+                    b.Navigation("Children");
+
+                    b.Navigation("Dependencies");
                 });
 #pragma warning restore 612, 618
         }

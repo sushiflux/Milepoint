@@ -232,6 +232,28 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 });
 
             migrationBuilder.CreateTable(
+                name: "Milestones",
+                columns: table => new
+                {
+                    Id = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
+                    ProjectId = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
+                    Name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: false),
+                    Description = table.Column<string>(type: "text", nullable: true),
+                    Date = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Milestones", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_Milestones_Projects_ProjectId",
+                        column: x => x.ProjectId,
+                        principalTable: "Projects",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "ProjectMembers",
                 columns: table => new
                 {
@@ -285,6 +307,7 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     ProjectId = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
                     BoardId = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
                     ColumnId = table.Column<Guid>(type: "uuid", nullable: false),
+                    ParentWorkItemId = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: true),
                     Title = table.Column<string>(type: "character varying(300)", maxLength: 300, nullable: false),
                     Description = table.Column<string>(type: "text", nullable: true),
                     Type = table.Column<int>(type: "integer", nullable: false),
@@ -293,6 +316,7 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     ReferencePrefix = table.Column<string>(type: "character varying(10)", maxLength: 10, nullable: false),
                     ReferenceNumber = table.Column<int>(type: "integer", nullable: false),
                     AssigneeId = table.Column<string>(type: "text", nullable: true),
+                    StartDate = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     DueDate = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     CreatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     UpdatedAt = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
@@ -312,6 +336,34 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         principalTable: "BoardColumns",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                    table.ForeignKey(
+                        name: "FK_WorkItems_WorkItems_ParentWorkItemId",
+                        column: x => x.ParentWorkItemId,
+                        principalTable: "WorkItems",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "WorkItemDependencies",
+                columns: table => new
+                {
+                    DependentWorkItemId = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false),
+                    BlockingWorkItemId = table.Column<string>(type: "character varying(40)", maxLength: 40, nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_WorkItemDependencies", x => new { x.DependentWorkItemId, x.BlockingWorkItemId });
+                    table.ForeignKey(
+                        name: "FK_WorkItemDependencies_WorkItems_BlockingWorkItemId",
+                        column: x => x.BlockingWorkItemId,
+                        principalTable: "WorkItems",
+                        principalColumn: "Id");
+                    table.ForeignKey(
+                        name: "FK_WorkItemDependencies_WorkItems_DependentWorkItemId",
+                        column: x => x.DependentWorkItemId,
+                        principalTable: "WorkItems",
+                        principalColumn: "Id");
                 });
 
             migrationBuilder.CreateTable(
@@ -389,6 +441,11 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 column: "ProjectId");
 
             migrationBuilder.CreateIndex(
+                name: "IX_Milestones_ProjectId",
+                table: "Milestones",
+                column: "ProjectId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_ProjectMembers_UserId",
                 table: "ProjectMembers",
                 column: "UserId");
@@ -397,6 +454,11 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 name: "IX_Projects_CreatedByUserId",
                 table: "Projects",
                 column: "CreatedByUserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_WorkItemDependencies_BlockingWorkItemId",
+                table: "WorkItemDependencies",
+                column: "BlockingWorkItemId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_WorkItemLabel_WorkItemsId",
@@ -412,6 +474,11 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 name: "IX_WorkItems_ColumnId",
                 table: "WorkItems",
                 column: "ColumnId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_WorkItems_ParentWorkItemId",
+                table: "WorkItems",
+                column: "ParentWorkItemId");
         }
 
         /// <inheritdoc />
@@ -433,10 +500,16 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                 name: "AspNetUserTokens");
 
             migrationBuilder.DropTable(
+                name: "Milestones");
+
+            migrationBuilder.DropTable(
                 name: "ProjectMembers");
 
             migrationBuilder.DropTable(
                 name: "SequenceCounters");
+
+            migrationBuilder.DropTable(
+                name: "WorkItemDependencies");
 
             migrationBuilder.DropTable(
                 name: "WorkItemLabel");

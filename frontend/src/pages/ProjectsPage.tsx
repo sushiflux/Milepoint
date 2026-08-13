@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createBoard, createProject, getBoards, getProjects } from '../api/projects'
-import type { Board, Project } from '../api/types'
+import { createProject, getProjects } from '../api/projects'
+import type { Project } from '../api/types'
 import { useAuth } from '../context/AuthContext'
 import { validateRequired } from '../lib/validation'
 import { shortId } from '../lib/ids'
@@ -11,7 +11,6 @@ const VIEW_MODE_STORAGE_KEY = 'pm.dashboard.viewMode'
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[] | null>(null)
-  const [boardsByProject, setBoardsByProject] = useState<Record<string, Board[]>>({})
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [touched, setTouched] = useState<Record<string, boolean>>({})
@@ -47,11 +46,6 @@ export default function ProjectsPage() {
     loadProjects().catch(() => setError('Projekte konnten nicht geladen werden.'))
   }, [])
 
-  async function loadBoards(projectId: string) {
-    const boards = await getBoards(projectId)
-    setBoardsByProject((prev) => ({ ...prev, [projectId]: boards }))
-  }
-
   async function handleCreateProject(event: FormEvent) {
     event.preventDefault()
     setError(null)
@@ -69,11 +63,6 @@ export default function ProjectsPage() {
     } catch {
       setError('Projekt konnte nicht erstellt werden.')
     }
-  }
-
-  async function handleCreateBoard(projectId: string) {
-    await createBoard(projectId, 'Board')
-    await loadBoards(projectId)
   }
 
   const nameMsg = fieldMessage('name', nameError)
@@ -107,22 +96,13 @@ export default function ProjectsPage() {
   )
 
   function renderProject(project: Project) {
-    const boards = boardsByProject[project.id]
     const progressLabel = project.isOwner ? 'Projekt-Fortschritt' : 'Meine Aufgaben'
 
     return (
-      <div>
-        <div className="flex items-center justify-between">
-          <div>
-            <span className="font-mono text-xs text-slate-500">{shortId(project.id)}</span>
-            <h2 className="text-base font-medium">{project.name}</h2>
-          </div>
-          <button
-            onClick={() => (boards ? handleCreateBoard(project.id) : loadBoards(project.id))}
-            className="rounded border border-slate-700 px-3 py-1 text-xs hover:bg-slate-800"
-          >
-            {boards ? '+ Board' : 'Boards anzeigen'}
-          </button>
+      <button onClick={() => navigate(`/projects/${project.id}`)} className="w-full text-left">
+        <div>
+          <span className="font-mono text-xs text-slate-500">{shortId(project.id)}</span>
+          <h2 className="text-base font-medium">{project.name}</h2>
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-3 text-xs text-slate-400">
@@ -141,25 +121,7 @@ export default function ProjectsPage() {
             <p className="text-sm text-slate-200">{project.completionPercent}%</p>
           </div>
         </div>
-
-        {boards && (
-          <ul className="mt-3 flex flex-wrap gap-2">
-            {boards.map((board) => (
-              <li key={board.id}>
-                <button
-                  onClick={() => navigate(`/projects/${project.id}/boards/${board.id}`)}
-                  className="rounded bg-slate-800 px-3 py-1 text-sm hover:bg-slate-700"
-                >
-                  {board.name}
-                </button>
-              </li>
-            ))}
-            {boards.length === 0 && (
-              <li className="text-sm text-slate-500">Noch keine Boards — oben auf "+ Board" klicken.</li>
-            )}
-          </ul>
-        )}
-      </div>
+      </button>
     )
   }
 
@@ -223,7 +185,7 @@ export default function ProjectsPage() {
             {viewMode === 'tiles' ? (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {projects.map((project) => (
-                  <div key={project.id} className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                  <div key={project.id} className="rounded-lg border border-slate-800 bg-slate-900 p-4 hover:border-slate-700">
                     {renderProject(project)}
                   </div>
                 ))}
@@ -231,7 +193,7 @@ export default function ProjectsPage() {
             ) : (
               <ul className="space-y-4">
                 {projects.map((project) => (
-                  <li key={project.id} className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+                  <li key={project.id} className="rounded-lg border border-slate-800 bg-slate-900 p-4 hover:border-slate-700">
                     {renderProject(project)}
                   </li>
                 ))}

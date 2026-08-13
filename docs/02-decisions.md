@@ -43,6 +43,28 @@
   `TSK#00001` für Task/Feature — je ein **globaler** Zähler (projektübergreifend, kein Projekt-Präfix mehr),
   einmal vergeben und nie neu berechnet (bleibt stabil auch wenn der Type später geändert wird).
 
+## Timeline, Unteraufgaben, Meilensteine, Abhängigkeiten
+- **Beim Öffnen eines Projekts ist die Timeline die Standard-Ansicht, Kanban bleibt als zweiter Tab** erreichbar
+  (nicht entfernt) — Route `/projects/{projectId}`, Tabs `Timeline`/`Kanban` in `ProjectPage.tsx`.
+- **Unteraufgaben:** `WorkItem` bekommt ein selbstreferenzierendes `ParentWorkItemId` (nullable), beliebig tief
+  verschachtelbar (kein Limit). Die Timeline rendert daraus einen eingerückten Baum; neue Unteraufgaben werden
+  über ein Formular direkt unter der jeweiligen Zeile angelegt.
+- **Meilensteine sind ein eigenes, einfaches Modell** (`Milestone`: Name + Datum + optionale Beschreibung),
+  bewusst **kein** `WorkItem` — erscheinen deshalb nie auf dem Kanban-Board, nur auf der Timeline
+  (`GET/POST/DELETE /api/projects/{id}/milestones`).
+- **Start-/Enddatum an Aufgaben sind beide optional** (`WorkItem.StartDate`/`DueDate`, beide `DateTimeOffset?`).
+  Ohne Datum erscheint eine Aufgabe in der Timeline nur als Zeile ohne Balken.
+- **Abhängigkeiten (Finish-to-Start):** `WorkItemDependency` (zusammengesetzter Key aus abhängiger und
+  blockierender Aufgabe) erzwingt serverseitig, dass eine Aufgabe erst in eine `Done`-Spalte verschoben werden
+  kann, wenn alle blockierenden Aufgaben selbst bereits in einer `Done`-Spalte sind — sonst `409 Conflict` mit
+  den Titeln der noch offenen Blocker (`WorkItemsController.Move`,
+  `POST/DELETE .../workitems/{id}/dependencies[/{blockingId}]`).
+- **`GET /api/projects/{id}/timeline`** liefert projektweit (über alle Boards hinweg) alle WorkItems + Milestones
+  in einer Antwort — die Timeline-Ansicht muss dafür nicht mehrere Boards einzeln abfragen.
+- Timeline-UI bewusst als **funktionale eingerückte Liste mit proportionalen Balken** umgesetzt, nicht als
+  Drag&Drop-Gantt-Chart mit Verbindungslinien — visuelle Politur bleibt wie beim Rest des Frontends Gemini
+  überlassen.
+
 ## Branding
 - **App-/Produktname: "Milepoint"** — entschieden nach Recherche auf Namenskollisionen (siehe Chat-Verlauf
   vom 2026-08-12): keine existierende PM-/B2B-Software mit diesem Namen gefunden, `milepoint.io` war zum

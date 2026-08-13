@@ -34,12 +34,12 @@ dieser Host/Container-Wettlauf).
 
 **Vorgehen für neue Migrationen:**
 ```powershell
-docker compose -p pm stop backend        # Container-seitiges dotnet watch anhalten
-cd backend\src\PM.Api
+docker compose -p milepoint stop backend # Container-seitiges dotnet watch anhalten
+cd backend\src\Milepoint.Api
 Remove-Item -Recurse -Force bin, obj     # sauberer Host-Build
 cd ..\..
 dotnet restore; dotnet build
-cd src\PM.Api
+cd src\Milepoint.Api
 dotnet ef migrations add <Name> --context PostgresPmDbContext -o Data/Migrations/Postgres
 dotnet ef migrations add <Name> --context SqlServerPmDbContext -o Data/Migrations/SqlServer
 cd ..\..\..
@@ -49,7 +49,7 @@ cd ..\..\..
 Falls sich dabei das Datenbankschema ändert und alte Test-Volumes noch den vorherigen Migrationsstand
 enthalten (Konflikt "relation already exists"), einmalig mit frischen Volumes neu starten:
 ```powershell
-docker compose -p pm down -v
+docker compose -p milepoint down -v
 .\start.ps1
 ```
 (`-v` löscht die Datenbank-Inhalte — nur für Dev-Daten unbedenklich, nicht für "echte" Daten verwenden.)

@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './context/AuthContext'
 import LoginPage from './pages/LoginPage'
 import ProjectsPage from './pages/ProjectsPage'
+import ProjectPage from './pages/ProjectPage'
 import BoardPage from './pages/BoardPage'
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -22,6 +23,14 @@ export default function App() {
         element={
           <RequireAuth>
             <ProjectsPage />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/projects/:projectId"
+        element={
+          <RequireAuth>
+            <ProjectPage />
           </RequireAuth>
         }
       />

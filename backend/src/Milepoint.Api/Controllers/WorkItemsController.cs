@@ -31,10 +31,12 @@ public class WorkItemsController : ControllerBase
             .Where(w => w.BoardId == boardId)
             .Include(w => w.Assignee)
             .Include(w => w.Labels)
+            .Include(w => w.Column)
+            .Include(w => w.Dependencies)
             .OrderBy(w => w.Position)
             .ToListAsync();
 
-        return Ok(items.Select(ToDto));
+        return Ok(items.Select(WorkItemMapper.ToDto));
     }
 
     [HttpPost]
@@ -55,6 +57,12 @@ public class WorkItemsController : ControllerBase
             return BadRequest("Spalte gehört nicht zu diesem Board.");
         }
 
+        if (request.ParentWorkItemId is not null &&
+            !await _db.WorkItems.AnyAsync(w => w.Id == request.ParentWorkItemId && w.ProjectId == board.ProjectId))
+        {
+            return BadRequest("Übergeordnete Aufgabe gehört nicht zu diesem Projekt.");
+        }
+
         var position = await _db.WorkItems.Where(w => w.ColumnId == column.Id).CountAsync();
         var (prefix, number) = await NextReferenceAsync(request.Type);
 
@@ -63,19 +71,23 @@ public class WorkItemsController : ControllerBase
             ProjectId = board.ProjectId,
             BoardId = boardId,
             ColumnId = column.Id,
+            Column = column,
+            ParentWorkItemId = request.ParentWorkItemId,
             Title = request.Title,
             Description = request.Description,
             Type = request.Type,
             Priority = request.Priority,
             Position = position,
             ReferencePrefix = prefix,
-            ReferenceNumber = number
+            ReferenceNumber = number,
+            StartDate = request.StartDate,
+            DueDate = request.DueDate
         };
 
         _db.WorkItems.Add(item);
         await _db.SaveChangesAsync();
 
-        var dto = ToDto(item);
+        var dto = WorkItemMapper.ToDto(item);
         await _hub.Clients.Group(KanbanHub.GroupName(boardId)).SendAsync("workItemCreated", dto);
 
         return CreatedAtAction(nameof(GetAll), new { boardId }, dto);
@@ -87,6 +99,8 @@ public class WorkItemsController : ControllerBase
         var item = await _db.WorkItems
             .Include(w => w.Assignee)
             .Include(w => w.Labels)
+            .Include(w => w.Column)
+            .Include(w => w.Dependencies)
             .FirstOrDefaultAsync(w => w.Id == workItemId && w.BoardId == boardId);
 
         if (item is null)
@@ -94,18 +108,25 @@ public class WorkItemsController : ControllerBase
             return NotFound();
         }
 
+        if (request.ParentWorkItemId == workItemId)
+        {
+            return BadRequest("Eine Aufgabe kann nicht ihre eigene übergeordnete Aufgabe sein.");
+        }
+
         item.Title = request.Title;
         item.Description = request.Description;
         item.Type = request.Type;
         item.Priority = request.Priority;
         item.AssigneeId = request.AssigneeId;
+        item.ParentWorkItemId = request.ParentWorkItemId;
+        item.StartDate = request.StartDate;
         item.DueDate = request.DueDate;
         item.UpdatedAt = DateTimeOffset.UtcNow;
 
         await _db.SaveChangesAsync();
         await _db.Entry(item).Reference(w => w.Assignee).LoadAsync();
 
-        var dto = ToDto(item);
+        var dto = WorkItemMapper.ToDto(item);
         await _hub.Clients.Group(KanbanHub.GroupName(boardId)).SendAsync("workItemUpdated", dto);
 
         return Ok(dto);
@@ -120,6 +141,28 @@ public class WorkItemsController : ControllerBase
             return NotFound();
         }
 
+        var targetColumn = await _db.BoardColumns.FirstOrDefaultAsync(c => c.Id == request.TargetColumnId);
+        if (targetColumn is null)
+        {
+            return BadRequest("Zielspalte existiert nicht.");
+        }
+
+        if (targetColumn.Type != BoardColumnType.Todo)
+        {
+            var unfinishedBlockers = await _db.WorkItemDependencies
+                .Where(d => d.DependentWorkItemId == workItemId)
+                .Include(d => d.BlockingWorkItem)
+                .ThenInclude(w => w.Column)
+                .Where(d => d.BlockingWorkItem.Column.Type != BoardColumnType.Done)
+                .Select(d => d.BlockingWorkItem.Title)
+                .ToListAsync();
+
+            if (unfinishedBlockers.Count > 0)
+            {
+                return Conflict($"Blockiert durch noch nicht fertige Aufgabe(n): {string.Join(", ", unfinishedBlockers)}");
+            }
+        }
+
         item.ColumnId = request.TargetColumnId;
         item.Position = request.Position;
         item.UpdatedAt = DateTimeOffset.UtcNow;
@@ -128,6 +171,57 @@ public class WorkItemsController : ControllerBase
 
         await _hub.Clients.Group(KanbanHub.GroupName(boardId))
             .SendAsync("workItemMoved", new { workItemId, request.TargetColumnId, request.Position });
+
+        return NoContent();
+    }
+
+    [HttpPost("{workItemId}/dependencies")]
+    public async Task<IActionResult> AddDependency(string boardId, string workItemId, AddDependencyRequest request)
+    {
+        var item = await _db.WorkItems.FirstOrDefaultAsync(w => w.Id == workItemId && w.BoardId == boardId);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        if (request.BlockingWorkItemId == workItemId)
+        {
+            return BadRequest("Eine Aufgabe kann nicht sich selbst blockieren.");
+        }
+
+        var blockerExists = await _db.WorkItems.AnyAsync(w => w.Id == request.BlockingWorkItemId && w.ProjectId == item.ProjectId);
+        if (!blockerExists)
+        {
+            return BadRequest("Blockierende Aufgabe gehört nicht zu diesem Projekt.");
+        }
+
+        var exists = await _db.WorkItemDependencies.AnyAsync(d =>
+            d.DependentWorkItemId == workItemId && d.BlockingWorkItemId == request.BlockingWorkItemId);
+
+        if (!exists)
+        {
+            _db.WorkItemDependencies.Add(new WorkItemDependency
+            {
+                DependentWorkItemId = workItemId,
+                BlockingWorkItemId = request.BlockingWorkItemId
+            });
+            await _db.SaveChangesAsync();
+        }
+
+        return NoContent();
+    }
+
+    [HttpDelete("{workItemId}/dependencies/{blockingWorkItemId}")]
+    public async Task<IActionResult> RemoveDependency(string boardId, string workItemId, string blockingWorkItemId)
+    {
+        var dependency = await _db.WorkItemDependencies.FirstOrDefaultAsync(d =>
+            d.DependentWorkItemId == workItemId && d.BlockingWorkItemId == blockingWorkItemId);
+
+        if (dependency is not null)
+        {
+            _db.WorkItemDependencies.Remove(dependency);
+            await _db.SaveChangesAsync();
+        }
 
         return NoContent();
     }
@@ -150,20 +244,4 @@ public class WorkItemsController : ControllerBase
         counter.Value++;
         return (prefix, counter.Value);
     }
-
-    private static WorkItemDto ToDto(WorkItem item) => new(
-        item.Id,
-        WorkItemReferenceCode.Format(item.ReferencePrefix, item.ReferenceNumber),
-        item.ColumnId,
-        item.Title,
-        item.Description,
-        item.Type,
-        item.Priority,
-        item.Position,
-        item.AssigneeId,
-        item.Assignee?.DisplayName,
-        item.DueDate,
-        item.CreatedAt,
-        item.UpdatedAt,
-        item.Labels.Select(l => l.Id).ToList());
 }

@@ -102,6 +102,8 @@ export default function BoardPage() {
       type: item.type,
       priority: item.priority,
       assigneeId: assigneeId || null,
+      parentWorkItemId: item.parentWorkItemId,
+      startDate: item.startDate,
       dueDate: item.dueDate,
     })
     setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)))

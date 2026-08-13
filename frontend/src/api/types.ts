@@ -43,7 +43,11 @@ export type WorkItemPriority = 'Low' | 'Medium' | 'High' | 'Urgent'
 export interface WorkItem {
   id: string
   referenceCode: string
+  boardId: string
   columnId: string
+  columnName: string
+  columnType: BoardColumnType
+  parentWorkItemId: string | null
   title: string
   description: string | null
   type: WorkItemType
@@ -51,8 +55,23 @@ export interface WorkItem {
   position: number
   assigneeId: string | null
   assigneeDisplayName: string | null
+  startDate: string | null
   dueDate: string | null
   createdAt: string
   updatedAt: string
   labelIds: string[]
+  blockingWorkItemIds: string[]
+}
+
+export interface Milestone {
+  id: string
+  name: string
+  description: string | null
+  date: string
+  createdAt: string
+}
+
+export interface Timeline {
+  workItems: WorkItem[]
+  milestones: Milestone[]
 }

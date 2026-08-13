@@ -17,6 +17,8 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
     public DbSet<Label> Labels => Set<Label>();
     public DbSet<SequenceCounter> SequenceCounters => Set<SequenceCounter>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<Milestone> Milestones => Set<Milestone>();
+    public DbSet<WorkItemDependency> WorkItemDependencies => Set<WorkItemDependency>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -101,6 +103,12 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
                 .HasForeignKey(w => w.AssigneeId)
                 .OnDelete(DeleteBehavior.SetNull);
 
+            entity.Property(w => w.ParentWorkItemId).HasMaxLength(40);
+            entity.HasOne(w => w.ParentWorkItem)
+                .WithMany(w => w.Children)
+                .HasForeignKey(w => w.ParentWorkItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // NoAction on both sides: SQL Server rejects cascade paths that could reach WorkItems
             // twice (once via BoardColumn, once via this join table); Postgres allows it, but we
             // keep the model identical across providers.
@@ -117,6 +125,37 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
         {
             entity.Property(l => l.ProjectId).HasMaxLength(40);
             entity.Property(l => l.Name).HasMaxLength(80).IsRequired();
+        });
+
+        builder.Entity<Milestone>(entity =>
+        {
+            entity.Property(m => m.Id).HasMaxLength(40);
+            entity.Property(m => m.ProjectId).HasMaxLength(40);
+            entity.Property(m => m.Name).HasMaxLength(200).IsRequired();
+
+            entity.HasOne(m => m.Project)
+                .WithMany()
+                .HasForeignKey(m => m.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<WorkItemDependency>(entity =>
+        {
+            entity.HasKey(d => new { d.DependentWorkItemId, d.BlockingWorkItemId });
+            entity.Property(d => d.DependentWorkItemId).HasMaxLength(40);
+            entity.Property(d => d.BlockingWorkItemId).HasMaxLength(40);
+
+            // NoAction on both sides, same reasoning as WorkItemLabel above - WorkItem already has
+            // multiple cascade sources, adding a third (two, here) would hit the same SQL Server error.
+            entity.HasOne(d => d.DependentWorkItem)
+                .WithMany(w => w.Dependencies)
+                .HasForeignKey(d => d.DependentWorkItemId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(d => d.BlockingWorkItem)
+                .WithMany()
+                .HasForeignKey(d => d.BlockingWorkItemId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
     }
 }
