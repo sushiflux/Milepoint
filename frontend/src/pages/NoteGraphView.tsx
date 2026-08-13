@@ -45,6 +45,32 @@ function buildEdges(notes: Note[]): [string, string][] {
 }
 
 // One simulation step; forces scale with alpha so movement naturally settles (d3-force style).
+function computeFitTransform(nodes: GraphNode[], width: number, height: number): Transform {
+  if (nodes.length === 0) return { x: 0, y: 0, k: 1 }
+
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const n of nodes) {
+    minX = Math.min(minX, n.x)
+    minY = Math.min(minY, n.y)
+    maxX = Math.max(maxX, n.x)
+    maxY = Math.max(maxY, n.y)
+  }
+
+  const PADDING = 80
+  const bboxWidth = Math.max(maxX - minX, 40)
+  const bboxHeight = Math.max(maxY - minY, 40)
+  const centerX = (minX + maxX) / 2
+  const centerY = (minY + maxY) / 2
+
+  const k = Math.min((width - PADDING * 2) / bboxWidth, (height - PADDING * 2) / bboxHeight, MAX_ZOOM)
+  const clampedK = Math.max(k, MIN_ZOOM)
+
+  return { k: clampedK, x: width / 2 - centerX * clampedK, y: height / 2 - centerY * clampedK }
+}
+
 function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, width: number, height: number, pinnedId: string | null) {
   const byId = new Map(nodes.map((n) => [n.id, n]))
 
@@ -112,6 +138,7 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, k: 1 })
   const transformRef = useRef(transform)
   transformRef.current = transform
+  const autoFitRef = useRef(true)
 
   const edges = useMemo(() => buildEdges(notes), [notes])
   const edgesRef = useRef(edges)
@@ -152,6 +179,15 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
     const { width, height } = sizeRef.current
     tick(nodes, edgesRef.current, alphaRef.current, width, height, draggingRef.current?.id ?? null)
     alphaRef.current *= 1 - ALPHA_DECAY
+
+    // Keep the camera fit to the current spread of nodes while the layout is still settling
+    // (or permanently, for as long as the user hasn't manually panned/zoomed) - otherwise a
+    // freshly created note can land far outside the default view, looking tiny/off-screen.
+    if (autoFitRef.current && !draggingRef.current) {
+      transformRef.current = computeFitTransform(nodes, width, height)
+      setTransform(transformRef.current)
+    }
+
     forceRender()
     rafRef.current = alphaRef.current > ALPHA_MIN ? requestAnimationFrame(step) : null
   }
@@ -188,6 +224,15 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
         })
       }
     }
+
+    // A structural change (note added/removed) re-enables auto-fit even if the user had
+    // previously zoomed/panned manually, and frames the new set of nodes immediately so
+    // there's no flash at the stale zoom level before the physics loop's first tick.
+    autoFitRef.current = true
+    const fitted = computeFitTransform(Array.from(known.values()), width, height)
+    transformRef.current = fitted
+    setTransform(fitted)
+
     wake(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idKey])
@@ -202,6 +247,7 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
 
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     event.currentTarget.setPointerCapture(event.pointerId)
+    autoFitRef.current = false
     panRef.current = { startX: event.clientX, startY: event.clientY, originX: transform.x, originY: transform.y }
   }
 
@@ -228,6 +274,12 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
     node.vx = 0
     node.vy = 0
     drag.moved = true
+
+    // Render this move immediately instead of waiting for the physics loop's next tick -
+    // if the simulation had already settled (alpha decayed to ~0), wake() alone wouldn't
+    // produce a visible frame until the loop actually ran, making the node lag behind the
+    // cursor and only "catch up" once the loop resumed (e.g. on release).
+    forceRender()
     wake(0.3)
   }
 
@@ -252,6 +304,7 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
 
   function handleWheel(event: React.WheelEvent<SVGSVGElement>) {
     event.preventDefault()
+    autoFitRef.current = false
     const rect = event.currentTarget.getBoundingClientRect()
     const mouseX = event.clientX - rect.left
     const mouseY = event.clientY - rect.top
@@ -271,10 +324,15 @@ export default function NoteGraphView({ notes, onSelectNote }: Props) {
       className="relative h-[75vh] min-h-[480px] w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-[#0a0a0c]"
     >
       <button
-        onClick={() => setTransform({ x: 0, y: 0, k: 1 })}
+        onClick={() => {
+          autoFitRef.current = true
+          const fitted = computeFitTransform(Array.from(positionsRef.current.values()), sizeRef.current.width, sizeRef.current.height)
+          transformRef.current = fitted
+          setTransform(fitted)
+        }}
         className="absolute right-3 top-3 z-10 rounded border border-slate-300 bg-white/80 px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-400 dark:hover:bg-slate-800"
       >
-        Ansicht zurücksetzen
+        Ansicht anpassen
       </button>
 
       {notes.length === 0 ? (

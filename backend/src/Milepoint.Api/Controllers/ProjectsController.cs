@@ -70,6 +70,16 @@ public class ProjectsController : ControllerBase
         _db.Projects.Add(project);
         await _db.SaveChangesAsync();
 
+        // Every project starts with a root note named after the project itself, so the
+        // Notes graph always has a natural center to link everything else from.
+        _db.Notes.Add(new Note
+        {
+            ProjectId = project.Id,
+            Title = project.Name,
+            Content = string.Empty
+        });
+        await _db.SaveChangesAsync();
+
         var dto = ToDto(project, [], currentUserId);
         return CreatedAtAction(nameof(GetAll), dto);
     }
