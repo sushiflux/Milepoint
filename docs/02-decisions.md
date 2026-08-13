@@ -69,9 +69,15 @@
   Pointer-Events verschieb-/dehnbar (ganzer Balken = verschieben, linker/rechter Rand = nur Start bzw. Ende
   ändern), Commit ans Backend (`PUT .../workitems/{id}`) erst bei `pointerup`, nicht während des Ziehens.
   Aufgaben ohne Termin erscheinen in einer separaten Liste darunter mit Datumsfeldern, um sie auf den Kalender
-  zu "heben". Bewusst weiterhin **keine** Abhängigkeits-Verbindungslinien zwischen Balken — blockierte Aufgaben
-  bekommen stattdessen nur einen farbigen linken Rand als Hinweis, um die Interaktions-Komplexität (Drag +
-  gleichzeitig Linien nachführen) nicht zu sprengen.
+  zu "heben".
+- **Revidiert (2026-08-13, zweite Runde): richtige Work-Package-Tabelle statt einfacher Zeilen**, orientiert an
+  einem vom Nutzer gezeigten OpenProject-Screenshot. Linkes Panel ist jetzt eine echte Tabelle (ID/Betreff/
+  Typ/Status/Priorität, farbiger Status-/Prioritäts-Punkt), Elternaufgaben lassen sich ein-/ausklappen
+  (Unterbaum wird versteckt), Meilensteine sind chronologisch als Zeilen in denselben Baum einsortiert statt in
+  einer separaten Spur. **Abhängigkeits-Verbindungslinien doch gebaut** (rechtwinklige SVG-Pfade vom Ende des
+  Blockers zum Start der abhängigen Aufgabe), werden aber übersprungen, sobald eine der beiden Zeilen gerade
+  eingeklappt/nicht sichtbar ist. Balkenfarbe zeigt jetzt Gruppe-vs-Blatt (Elternaufgabe = dunkel, einfache
+  Aufgabe = hell) statt Spalten-Status — Status läuft stattdessen über den Tabellen-Punkt.
 
 ## Notizen & Verlinkung (Obsidian-artig)
 - **Eigenes, projekt-gebundenes `Note`-Modell** (Titel + Markdown-Text) als drittes Tab neben Timeline/Kanban
