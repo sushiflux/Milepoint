@@ -12,13 +12,22 @@ export interface Project {
   name: string
   description: string | null
   createdAt: string
+  isOwner: boolean
+  myAssignedTaskCount: number
+  myCompletedTaskCount: number
+  openTicketCount: number
+  /** Project-wide completion if isOwner, otherwise your own task completion. */
+  completionPercent: number
 }
+
+export type BoardColumnType = 'Todo' | 'InProgress' | 'Done'
 
 export interface BoardColumn {
   id: string
   name: string
   order: number
   wipLimit: number | null
+  type: BoardColumnType
 }
 
 export interface Board {

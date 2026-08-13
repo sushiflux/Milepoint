@@ -16,6 +16,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
     public DbSet<WorkItem> WorkItems => Set<WorkItem>();
     public DbSet<Label> Labels => Set<Label>();
     public DbSet<SequenceCounter> SequenceCounters => Set<SequenceCounter>();
+    public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -35,12 +36,33 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
                 .WithOne(l => l.Project)
                 .HasForeignKey(l => l.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(p => p.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(p => p.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<SequenceCounter>(entity =>
         {
             entity.HasKey(c => c.Key);
             entity.Property(c => c.Key).HasMaxLength(20);
+        });
+
+        builder.Entity<ProjectMember>(entity =>
+        {
+            entity.HasKey(m => new { m.ProjectId, m.UserId });
+            entity.Property(m => m.ProjectId).HasMaxLength(40);
+
+            entity.HasOne(m => m.Project)
+                .WithMany(p => p.Members)
+                .HasForeignKey(m => m.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(m => m.User)
+                .WithMany()
+                .HasForeignKey(m => m.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<Board>(entity =>

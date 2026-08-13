@@ -21,3 +21,13 @@ export const moveWorkItem = (boardId: string, workItemId: string, targetColumnId
     method: 'PUT',
     body: JSON.stringify({ targetColumnId, position }),
   })
+
+export const updateWorkItem = (
+  boardId: string,
+  workItemId: string,
+  item: Pick<WorkItem, 'title' | 'description' | 'type' | 'priority' | 'assigneeId' | 'dueDate'>,
+) =>
+  apiFetch<WorkItem>(`/boards/${boardId}/workitems/${workItemId}`, {
+    method: 'PUT',
+    body: JSON.stringify(item),
+  })

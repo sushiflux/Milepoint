@@ -269,6 +269,9 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Property<int>("Order")
                         .HasColumnType("int");
 
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
                     b.Property<int?>("WipLimit")
                         .HasColumnType("int");
 
@@ -315,6 +318,10 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("CreatedByUserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
@@ -325,7 +332,25 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CreatedByUserId");
+
                     b.ToTable("Projects");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.ProjectMember", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("ProjectId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("ProjectMembers");
                 });
 
             modelBuilder.Entity("Milepoint.Api.Models.SequenceCounter", b =>
@@ -507,6 +532,36 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("Milepoint.Api.Models.Project", b =>
+                {
+                    b.HasOne("Milepoint.Api.Data.ApplicationUser", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CreatedByUser");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.ProjectMember", b =>
+                {
+                    b.HasOne("Milepoint.Api.Models.Project", "Project")
+                        .WithMany("Members")
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Milepoint.Api.Data.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("Milepoint.Api.Models.WorkItem", b =>
                 {
                     b.HasOne("Milepoint.Api.Data.ApplicationUser", "Assignee")
@@ -555,6 +610,8 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Navigation("Boards");
 
                     b.Navigation("Labels");
+
+                    b.Navigation("Members");
                 });
 #pragma warning restore 612, 618
         }

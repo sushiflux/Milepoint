@@ -133,7 +133,7 @@ using (var scope = app.Services.CreateScope())
     await db.Database.MigrateAsync();
 
     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    foreach (var roleName in new[] { "SystemAdmin", "Admin", "User" })
+    foreach (var roleName in new[] { "Admin", "Projektleiter", "User" })
     {
         if (!await roleManager.RoleExistsAsync(roleName))
         {
@@ -166,9 +166,17 @@ using (var scope = app.Services.CreateScope())
             }
         }
 
-        if (admin is not null && !await userManager.IsInRoleAsync(admin, "SystemAdmin"))
+        if (admin is not null)
         {
-            await userManager.AddToRoleAsync(admin, "SystemAdmin");
+            // Seeded dev account gets both roles - full system config access and full project
+            // visibility - since there's no SystemAdmin tier above it anymore.
+            foreach (var role in new[] { "Admin", "Projektleiter" })
+            {
+                if (!await userManager.IsInRoleAsync(admin, role))
+                {
+                    await userManager.AddToRoleAsync(admin, role);
+                }
+            }
         }
     }
 }

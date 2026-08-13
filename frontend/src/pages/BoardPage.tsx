@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import * as signalR from '@microsoft/signalr'
 import { getBoards } from '../api/projects'
-import { createWorkItem, getWorkItems, moveWorkItem } from '../api/workItems'
+import { createWorkItem, getWorkItems, moveWorkItem, updateWorkItem } from '../api/workItems'
+import { getUsers, type UserSummary } from '../api/users'
 import type { Board, BoardColumn, WorkItem } from '../api/types'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
@@ -13,6 +14,7 @@ export default function BoardPage() {
 
   const [board, setBoard] = useState<Board | null>(null)
   const [items, setItems] = useState<WorkItem[]>([])
+  const [users, setUsers] = useState<UserSummary[]>([])
   const [newTitleByColumn, setNewTitleByColumn] = useState<Record<string, string>>({})
 
   useEffect(() => {
@@ -23,6 +25,7 @@ export default function BoardPage() {
     })
 
     getWorkItems(boardId).then(setItems)
+    getUsers().then(setUsers)
   }, [projectId, boardId])
 
   useEffect(() => {
@@ -32,6 +35,10 @@ export default function BoardPage() {
 
     connection.on('workItemCreated', (item: WorkItem) => {
       setItems((prev) => (prev.some((i) => i.id === item.id) ? prev : [...prev, item]))
+    })
+
+    connection.on('workItemUpdated', (item: WorkItem) => {
+      setItems((prev) => prev.map((i) => (i.id === item.id ? item : i)))
     })
 
     connection.on('workItemMoved', (payload: { workItemId: string; targetColumnId: string; position: number }) => {
@@ -87,6 +94,19 @@ export default function BoardPage() {
     setItems((prev) => prev.map((i) => (i.id === item.id ? { ...i, columnId: targetColumn.id, position } : i)))
   }
 
+  async function handleAssign(item: WorkItem, assigneeId: string) {
+    if (!boardId) return
+    const updated = await updateWorkItem(boardId, item.id, {
+      title: item.title,
+      description: item.description,
+      type: item.type,
+      priority: item.priority,
+      assigneeId: assigneeId || null,
+      dueDate: item.dueDate,
+    })
+    setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
+  }
+
   if (!board) {
     return <div className="p-6 text-slate-400">Board wird geladen…</div>
   }
@@ -127,6 +147,18 @@ export default function BoardPage() {
                       ))}
                     </select>
                   </div>
+                  <select
+                    value={item.assigneeId ?? ''}
+                    onChange={(e) => handleAssign(item, e.target.value)}
+                    className="mt-2 w-full rounded border border-slate-700 bg-slate-900 px-1 py-0.5 text-xs text-slate-300"
+                  >
+                    <option value="">Nicht zugewiesen</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.displayName}
+                      </option>
+                    ))}
+                  </select>
                 </li>
               ))}
             </ul>

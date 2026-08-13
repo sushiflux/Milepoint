@@ -9,6 +9,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   isAdmin: boolean
+  isProjectLeader: boolean
   signIn: (token: string, username: string, displayName: string, roles: string[]) => void
   signOut: () => void
 }
@@ -19,8 +20,6 @@ const STORAGE_TOKEN = 'pm.token'
 const STORAGE_USERNAME = 'pm.username'
 const STORAGE_NAME = 'pm.displayName'
 const STORAGE_ROLES = 'pm.roles'
-
-const ADMIN_ROLES = ['SystemAdmin', 'Admin']
 
 function readRoles(): string[] {
   try {
@@ -55,9 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ token: null, username: null, displayName: null, roles: [] })
   }
 
-  const isAdmin = state.roles.some((role) => ADMIN_ROLES.includes(role))
+  const isAdmin = state.roles.includes('Admin')
+  const isProjectLeader = state.roles.includes('Projektleiter')
 
-  return <AuthContext.Provider value={{ ...state, isAdmin, signIn, signOut }}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={{ ...state, isAdmin, isProjectLeader, signIn, signOut }}>
+      {children}
+    </AuthContext.Provider>
+  )
 }
 
 export function useAuth() {

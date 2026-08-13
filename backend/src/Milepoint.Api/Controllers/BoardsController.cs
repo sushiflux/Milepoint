@@ -12,6 +12,14 @@ namespace Milepoint.Api.Controllers;
 [Route("api/projects/{projectId}/boards")]
 public class BoardsController : ControllerBase
 {
+    private static readonly (string Name, BoardColumnType Type)[] DefaultColumns =
+    [
+        ("Backlog", BoardColumnType.Todo),
+        ("In Arbeit", BoardColumnType.InProgress),
+        ("Review", BoardColumnType.InProgress),
+        ("Fertig", BoardColumnType.Done)
+    ];
+
     private readonly PmDbContextBase _db;
 
     public BoardsController(PmDbContextBase db)
@@ -40,17 +48,25 @@ public class BoardsController : ControllerBase
             return NotFound();
         }
 
-        var columnNames = request.ColumnNames is { Count: > 0 }
-            ? request.ColumnNames
-            : new List<string> { "Backlog", "In Arbeit", "Review", "Fertig" };
+        List<BoardColumn> columns;
+        if (request.ColumnNames is { Count: > 0 })
+        {
+            columns = request.ColumnNames
+                .Select((name, index) => new BoardColumn { Name = name, Order = index, Type = InferColumnType(name) })
+                .ToList();
+        }
+        else
+        {
+            columns = DefaultColumns
+                .Select((c, index) => new BoardColumn { Name = c.Name, Order = index, Type = c.Type })
+                .ToList();
+        }
 
         var board = new Board
         {
             ProjectId = projectId,
             Name = request.Name,
-            Columns = columnNames
-                .Select((name, index) => new BoardColumn { Name = name, Order = index })
-                .ToList()
+            Columns = columns
         };
 
         _db.Boards.Add(board);
@@ -59,12 +75,31 @@ public class BoardsController : ControllerBase
         return CreatedAtAction(nameof(GetAll), new { projectId }, ToDto(board));
     }
 
+    // Custom column names don't come with an explicit type, so guess from common German/English
+    // keywords. Falls back to Todo, which is the safe default (won't be miscounted as "done").
+    private static BoardColumnType InferColumnType(string name)
+    {
+        var lower = name.ToLowerInvariant();
+
+        if (lower.Contains("fertig") || lower.Contains("done") || lower.Contains("erledigt") || lower.Contains("closed"))
+        {
+            return BoardColumnType.Done;
+        }
+
+        if (lower.Contains("arbeit") || lower.Contains("progress") || lower.Contains("review") || lower.Contains("bearbeitung"))
+        {
+            return BoardColumnType.InProgress;
+        }
+
+        return BoardColumnType.Todo;
+    }
+
     private static BoardDto ToDto(Board board) => new(
         board.Id,
         board.Name,
         board.CreatedAt,
         board.Columns
             .OrderBy(c => c.Order)
-            .Select(c => new BoardColumnDto(c.Id, c.Name, c.Order, c.WipLimit))
+            .Select(c => new BoardColumnDto(c.Id, c.Name, c.Order, c.WipLimit, c.Type))
             .ToList());
 }

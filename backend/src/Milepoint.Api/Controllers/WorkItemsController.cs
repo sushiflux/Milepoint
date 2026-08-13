@@ -81,6 +81,36 @@ public class WorkItemsController : ControllerBase
         return CreatedAtAction(nameof(GetAll), new { boardId }, dto);
     }
 
+    [HttpPut("{workItemId}")]
+    public async Task<ActionResult<WorkItemDto>> Update(string boardId, string workItemId, UpdateWorkItemRequest request)
+    {
+        var item = await _db.WorkItems
+            .Include(w => w.Assignee)
+            .Include(w => w.Labels)
+            .FirstOrDefaultAsync(w => w.Id == workItemId && w.BoardId == boardId);
+
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        item.Title = request.Title;
+        item.Description = request.Description;
+        item.Type = request.Type;
+        item.Priority = request.Priority;
+        item.AssigneeId = request.AssigneeId;
+        item.DueDate = request.DueDate;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await _db.SaveChangesAsync();
+        await _db.Entry(item).Reference(w => w.Assignee).LoadAsync();
+
+        var dto = ToDto(item);
+        await _hub.Clients.Group(KanbanHub.GroupName(boardId)).SendAsync("workItemUpdated", dto);
+
+        return Ok(dto);
+    }
+
     [HttpPut("{workItemId}/move")]
     public async Task<IActionResult> Move(string boardId, string workItemId, MoveWorkItemRequest request)
     {
