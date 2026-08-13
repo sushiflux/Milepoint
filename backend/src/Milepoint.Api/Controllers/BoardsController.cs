@@ -9,7 +9,7 @@ namespace Milepoint.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("api/projects/{projectId:guid}/boards")]
+[Route("api/projects/{projectId}/boards")]
 public class BoardsController : ControllerBase
 {
     private readonly PmDbContextBase _db;
@@ -20,7 +20,7 @@ public class BoardsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<BoardDto>>> GetAll(Guid projectId)
+    public async Task<ActionResult<List<BoardDto>>> GetAll(string projectId)
     {
         var boards = await _db.Boards
             .Where(b => b.ProjectId == projectId)
@@ -32,7 +32,7 @@ public class BoardsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<ActionResult<BoardDto>> Create(Guid projectId, CreateBoardRequest request)
+    public async Task<ActionResult<BoardDto>> Create(string projectId, CreateBoardRequest request)
     {
         var projectExists = await _db.Projects.AnyAsync(p => p.Id == projectId);
         if (!projectExists)

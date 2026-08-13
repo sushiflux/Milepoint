@@ -23,6 +23,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
 
         builder.Entity<Project>(entity =>
         {
+            entity.Property(p => p.Id).HasMaxLength(40);
             entity.HasIndex(p => p.Key).IsUnique();
             entity.Property(p => p.Key).HasMaxLength(20).IsRequired();
             entity.Property(p => p.Name).HasMaxLength(200).IsRequired();
@@ -52,6 +53,8 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
 
         builder.Entity<Board>(entity =>
         {
+            entity.Property(b => b.Id).HasMaxLength(40);
+            entity.Property(b => b.ProjectId).HasMaxLength(40);
             entity.Property(b => b.Name).HasMaxLength(200).IsRequired();
 
             entity.HasMany(b => b.Columns)
@@ -62,6 +65,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
 
         builder.Entity<BoardColumn>(entity =>
         {
+            entity.Property(c => c.BoardId).HasMaxLength(40);
             entity.Property(c => c.Name).HasMaxLength(100).IsRequired();
 
             entity.HasMany(c => c.WorkItems)
@@ -72,6 +76,9 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
 
         builder.Entity<WorkItem>(entity =>
         {
+            entity.Property(w => w.Id).HasMaxLength(40);
+            entity.Property(w => w.ProjectId).HasMaxLength(40);
+            entity.Property(w => w.BoardId).HasMaxLength(40);
             entity.Property(w => w.Title).HasMaxLength(300).IsRequired();
 
             entity.HasOne(w => w.Assignee)
@@ -87,11 +94,13 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
                 .UsingEntity<Dictionary<string, object>>(
                     "WorkItemLabel",
                     right => right.HasOne<Label>().WithMany().HasForeignKey("LabelsId").OnDelete(DeleteBehavior.NoAction),
-                    left => left.HasOne<WorkItem>().WithMany().HasForeignKey("WorkItemsId").OnDelete(DeleteBehavior.NoAction));
+                    left => left.HasOne<WorkItem>().WithMany().HasForeignKey("WorkItemsId").OnDelete(DeleteBehavior.NoAction),
+                    join => join.Property<string>("WorkItemsId").HasMaxLength(40));
         });
 
         builder.Entity<Label>(entity =>
         {
+            entity.Property(l => l.ProjectId).HasMaxLength(40);
             entity.Property(l => l.Name).HasMaxLength(80).IsRequired();
         });
     }

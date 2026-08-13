@@ -20,7 +20,7 @@ public record UpdateWorkItemRequest(
 public record MoveWorkItemRequest(Guid TargetColumnId, int Position);
 
 public record WorkItemDto(
-    Guid Id,
+    string Id,
     Guid ColumnId,
     string Title,
     string? Description,

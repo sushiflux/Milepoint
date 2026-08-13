@@ -11,7 +11,7 @@ namespace Milepoint.Api.Controllers;
 
 [ApiController]
 [Authorize]
-[Route("api/boards/{boardId:guid}/workitems")]
+[Route("api/boards/{boardId}/workitems")]
 public class WorkItemsController : ControllerBase
 {
     private readonly PmDbContextBase _db;
@@ -24,7 +24,7 @@ public class WorkItemsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<WorkItemDto>>> GetAll(Guid boardId)
+    public async Task<ActionResult<List<WorkItemDto>>> GetAll(string boardId)
     {
         var items = await _db.WorkItems
             .Where(w => w.BoardId == boardId)
@@ -37,7 +37,7 @@ public class WorkItemsController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<ActionResult<WorkItemDto>> Create(Guid boardId, CreateWorkItemRequest request)
+    public async Task<ActionResult<WorkItemDto>> Create(string boardId, CreateWorkItemRequest request)
     {
         var board = await _db.Boards
             .Include(b => b.Columns)
@@ -72,13 +72,13 @@ public class WorkItemsController : ControllerBase
         await _db.SaveChangesAsync();
 
         var dto = ToDto(item);
-        await _hub.Clients.Group(KanbanHub.GroupName(boardId.ToString())).SendAsync("workItemCreated", dto);
+        await _hub.Clients.Group(KanbanHub.GroupName(boardId)).SendAsync("workItemCreated", dto);
 
         return CreatedAtAction(nameof(GetAll), new { boardId }, dto);
     }
 
-    [HttpPut("{workItemId:guid}/move")]
-    public async Task<IActionResult> Move(Guid boardId, Guid workItemId, MoveWorkItemRequest request)
+    [HttpPut("{workItemId}/move")]
+    public async Task<IActionResult> Move(string boardId, string workItemId, MoveWorkItemRequest request)
     {
         var item = await _db.WorkItems.FirstOrDefaultAsync(w => w.Id == workItemId && w.BoardId == boardId);
         if (item is null)
@@ -92,7 +92,7 @@ public class WorkItemsController : ControllerBase
 
         await _db.SaveChangesAsync();
 
-        await _hub.Clients.Group(KanbanHub.GroupName(boardId.ToString()))
+        await _hub.Clients.Group(KanbanHub.GroupName(boardId))
             .SendAsync("workItemMoved", new { workItemId, request.TargetColumnId, request.Position });
 
         return NoContent();

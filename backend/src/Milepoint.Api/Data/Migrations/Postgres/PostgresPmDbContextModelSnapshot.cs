@@ -224,9 +224,9 @@ namespace Milepoint.Api.Data.Migrations.Postgres
 
             modelBuilder.Entity("Milepoint.Api.Models.Board", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -236,8 +236,10 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.HasKey("Id");
 
@@ -252,8 +254,10 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("BoardId")
-                        .HasColumnType("uuid");
+                    b.Property<string>("BoardId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -288,8 +292,10 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)");
 
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.HasKey("Id");
 
@@ -300,9 +306,9 @@ namespace Milepoint.Api.Data.Migrations.Postgres
 
             modelBuilder.Entity("Milepoint.Api.Models.Project", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -362,15 +368,17 @@ namespace Milepoint.Api.Data.Migrations.Postgres
 
             modelBuilder.Entity("Milepoint.Api.Models.WorkItem", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("AssigneeId")
                         .HasColumnType("text");
 
-                    b.Property<Guid>("BoardId")
-                        .HasColumnType("uuid");
+                    b.Property<string>("BoardId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<Guid>("ColumnId")
                         .HasColumnType("uuid");
@@ -390,8 +398,10 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Property<int>("Priority")
                         .HasColumnType("integer");
 
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uuid");
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -418,8 +428,9 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Property<Guid>("LabelsId")
                         .HasColumnType("uuid");
 
-                    b.Property<Guid>("WorkItemsId")
-                        .HasColumnType("uuid");
+                    b.Property<string>("WorkItemsId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.HasKey("LabelsId", "WorkItemsId");
 

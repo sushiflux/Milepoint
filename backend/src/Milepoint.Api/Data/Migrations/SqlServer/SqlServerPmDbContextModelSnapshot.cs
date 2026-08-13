@@ -226,9 +226,9 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
 
             modelBuilder.Entity("Milepoint.Api.Models.Board", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
@@ -238,8 +238,10 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
 
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.HasKey("Id");
 
@@ -254,8 +256,10 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("BoardId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("BoardId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -290,8 +294,10 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .HasMaxLength(80)
                         .HasColumnType("nvarchar(80)");
 
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.HasKey("Id");
 
@@ -302,9 +308,9 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
 
             modelBuilder.Entity("Milepoint.Api.Models.Project", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
@@ -364,15 +370,17 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
 
             modelBuilder.Entity("Milepoint.Api.Models.WorkItem", b =>
                 {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("Id")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<string>("AssigneeId")
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<Guid>("BoardId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("BoardId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<Guid>("ColumnId")
                         .HasColumnType("uniqueidentifier");
@@ -392,8 +400,10 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Property<int>("Priority")
                         .HasColumnType("int");
 
-                    b.Property<Guid>("ProjectId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -420,8 +430,9 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Property<Guid>("LabelsId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("WorkItemsId")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<string>("WorkItemsId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
 
                     b.HasKey("LabelsId", "WorkItemsId");
 

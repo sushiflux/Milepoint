@@ -3,7 +3,7 @@ namespace Milepoint.Api.Models;
 public class BoardColumn
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid BoardId { get; set; }
+    public string BoardId { get; set; } = string.Empty;
     public Board Board { get; set; } = null!;
     public string Name { get; set; } = string.Empty;
     public int Order { get; set; }

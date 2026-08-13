@@ -3,7 +3,7 @@ namespace Milepoint.Api.Models;
 public class Label
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid ProjectId { get; set; }
+    public string ProjectId { get; set; } = string.Empty;
     public Project Project { get; set; } = null!;
     public string Name { get; set; } = string.Empty;
     public string ColorHex { get; set; } = "#64748b";

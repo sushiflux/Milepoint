@@ -1,12 +1,13 @@
 using Milepoint.Api.Data;
+using Milepoint.Api.Services;
 
 namespace Milepoint.Api.Models;
 
 public class WorkItem
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid ProjectId { get; set; }
-    public Guid BoardId { get; set; }
+    public string Id { get; set; } = HashIdGenerator.Generate();
+    public string ProjectId { get; set; } = string.Empty;
+    public string BoardId { get; set; } = string.Empty;
 
     public Guid ColumnId { get; set; }
     public BoardColumn Column { get; set; } = null!;
