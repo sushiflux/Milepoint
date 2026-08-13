@@ -20,11 +20,19 @@
   öffentlicher Nutzung wieder verschärfen).
 
 ## Rollen, IDs & Ticket-Nummern
-- **Rollen:** `SystemAdmin`, `Admin`, `User` (ASP.NET Identity Roles). Der geseedete Admin-Account bekommt
-  `SystemAdmin`, neue Registrierungen bekommen automatisch `User`. Strikt getrennt: ein Admin-Bereich soll
-  ausschließlich für Konfiguration da sein, nicht für normale Projektarbeit — aktuell aber ohne konkretes
-  Feature (siehe unten, Kategorien wurden wieder entfernt), Infrastruktur (Rollen, JWT-Claims, `isAdmin` im
-  Frontend) bleibt für künftige Admin-Features bestehen.
+- **Rollen (überarbeitet, `SystemAdmin` wieder entfernt):** `Admin` (nur Systemeinstellungen, kein
+  Projekt-Zugriff automatisch), `Projektleiter` (sieht systemweit **alle** Projekte, unabhängig von
+  Ersteller/Zuweisung), `User` (Standard — wer ein Projekt erstellt, wird automatisch dessen Owner). Der
+  geseedete Admin-Account bekommt sowohl `Admin` als auch `Projektleiter`, neue Registrierungen automatisch
+  `User`.
+- **Projekt-Sichtbarkeit** (`GET /api/projects`): `Projektleiter` sieht alles; alle anderen sehen ein
+  Projekt nur, wenn sie es erstellt haben ODER explizites Mitglied sind (`ProjectMember`,
+  `POST/DELETE /api/projects/{id}/members`, nur Owner/Projektleiter) ODER mindestens eine Aufgabe darin
+  zugewiesen bekommen haben.
+- **Board-Spalten haben einen Typ** (`Todo`/`InProgress`/`Done`), unabhängig vom freien Namen — Default-Spalten
+  bekommen ihn fest zugeordnet, eigene Spaltennamen per Schlüsselwort-Heuristik. Grundlage für die
+  Dashboard-Fortschrittsberechnung (`ProjectDto`: `myAssignedTaskCount`/`myCompletedTaskCount`,
+  `openTicketCount`, `completionPercent` — projektweit für den Owner, sonst nur die eigenen Aufgaben).
 - **Project/Board/WorkItem-IDs**: git-artige 40-stellige SHA-1-Hashes statt GUID (siehe `HashIdGenerator`),
   weil man über diese Dinge redet/sie referenziert — anders als BoardColumn/Label/User, die GUID/Identity-
   Standard behalten.
