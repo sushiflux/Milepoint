@@ -2,7 +2,22 @@
 	admin off
 }
 
+# Plain HTTP just redirects to HTTPS - CADDY_HTTPS_PORT is whatever start.ps1
+# actually mapped on the host (443 by default, or a fallback if that was busy).
 :80 {
+	redir https://{host}:{$CADDY_HTTPS_PORT}{uri} permanent
+}
+
+# Hostname must be explicit (not a bare ":443") - "tls internal" only auto-issues
+# a certificate for names it actually knows about from the site address, so a
+# hostless block left every TLS ClientHello unmatched ("no certificate available").
+localhost:443 {
+	# No public domain here (this is a local dev stack), so Caddy issues its own
+	# locally-trusted certificate instead of requesting one from Let's Encrypt.
+	# The browser will only show a green padlock once that internal CA root is
+	# trusted on the host - see docs/03-runbook.md for the one-time trust step.
+	tls internal
+
 	handle /api/* {
 		reverse_proxy backend:8080
 	}

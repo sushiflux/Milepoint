@@ -6,6 +6,7 @@ import { ApiError } from '../api/client'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { validateEmail, validateMinLength, validateRequired } from '../lib/validation'
 import ThemeToggle from '../components/ThemeToggle'
+import wordmark from '../assets/wordmark-dark.svg'
 
 export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -100,17 +101,23 @@ export default function LoginPage() {
   const passwordMsg = fieldMessage('password', passwordError)
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-      <div className="absolute right-4 top-4">
-        <ThemeToggle />
+    <div className="flex min-h-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <div className="hidden w-2/3 flex-col items-center justify-center gap-6 bg-gradient-to-br from-indigo-600 to-slate-900 p-12 lg:flex">
+        <img src={wordmark} alt="Milepoint" className="w-full max-w-md" />
+        <p className="max-w-sm text-center text-sm text-indigo-100">
+          Projekte, Aufgaben, Timeline, Notizen — an einem Ort, für Entwickler-Teams gebaut.
+        </p>
       </div>
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-sm space-y-4 rounded-lg border border-slate-200 bg-white p-8 dark:border-slate-800 dark:bg-slate-900"
-      >
-        <h1 className="text-xl font-semibold">Milepoint {mode === 'login' ? 'Anmeldung' : 'Registrierung'}</h1>
 
-        <div>
+      <div className="relative flex w-full items-center justify-center p-8 lg:w-1/3">
+        <div className="absolute right-4 top-4">
+          <ThemeToggle />
+        </div>
+        <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4">
+          <h1 className="text-xl font-semibold lg:hidden">Milepoint</h1>
+          <h1 className="hidden text-xl font-semibold lg:block">{mode === 'login' ? 'Anmeldung' : 'Registrierung'}</h1>
+
+          <div>
           <input
             className={`w-full rounded border bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800 ${usernameMsg ? 'border-red-500' : 'border-slate-300 dark:border-slate-700'}`}
             placeholder="Benutzername"
@@ -193,7 +200,8 @@ export default function LoginPage() {
         >
           {mode === 'login' ? 'Noch kein Konto? Registrieren' : 'Schon ein Konto? Anmelden'}
         </button>
-      </form>
+        </form>
+      </div>
     </div>
   )
 }

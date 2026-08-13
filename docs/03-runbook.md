@@ -17,11 +17,32 @@ automatisch auf den nächsten freien Port aus und schreibt ihn in `.env` zurück
 Ports stehen am Ende der Ausgabe.
 
 ## URLs (Ports können je nach `.env` abweichen)
-- App: `http://localhost:<CADDY_PORT>` (Default 80, bei Belegung automatisch höher, z.B. 81)
+- App: `https://localhost:<CADDY_HTTPS_PORT>` (Default 443, bei Belegung automatisch höher). `http://localhost:<CADDY_PORT>` (Default 80) leitet automatisch dorthin um.
 - Adminer (DB-GUI für Postgres & MSSQL): `http://localhost:<ADMINER_PORT>`
 - Mailpit (abgefangene Mails): `http://localhost:<MAILPIT_UI_PORT>`
 - Backend direkt (ohne Proxy): `http://localhost:<BACKEND_PORT>`
 - Frontend direkt (ohne Proxy): `http://localhost:<FRONTEND_PORT>`
+
+## HTTPS lokal vertrauen
+Caddy terminiert TLS mit `tls internal` — da es keine echte öffentliche Domain gibt, kann kein Let's-Encrypt-
+Zertifikat ausgestellt werden. Stattdessen erzeugt Caddy beim ersten Start eine eigene lokale CA und signiert
+das Zertifikat für `localhost` selbst damit. Der Browser warnt deswegen beim ersten Aufruf ("Verbindung ist
+nicht privat" o.ä.), bis diese CA einmalig als vertrauenswürdig importiert wird:
+
+```powershell
+docker compose -p milepoint cp caddy:/data/caddy/pki/authorities/local/root.crt .\caddy-local-root.crt
+
+# Nur für den aktuellen Windows-Benutzer, keine Admin-Rechte nötig:
+certutil -user -addstore -f "ROOT" .\caddy-local-root.crt
+
+# Alternative für alle Benutzer auf diesem Rechner (PowerShell als Administrator):
+certutil -addstore -f "ROOT" .\caddy-local-root.crt
+
+Remove-Item .\caddy-local-root.crt
+```
+
+Die CA liegt im `caddy_data`-Docker-Volume und bleibt über Neustarts hinweg stabil (kein erneuter Import
+nötig), außer nach `docker compose -p milepoint down -v`, was auch dieses Volume löscht.
 
 ## Wichtige Falle beim Arbeiten an Backend-Migrationen (EF Core)
 
@@ -66,6 +87,9 @@ Weitere Testuser jederzeit über `POST /api/auth/register` (Username, E-Mail, Pa
 z.B. direkt über die Login-Seite im Frontend.
 
 ## Versionierung
-`start.ps1` berechnet bei jedem Start `vYear.Release.Commit` aus der Datei `VERSION` (Year.Release, manuell
-gepflegt) + der aktuellen Git-Commit-Anzahl, schreibt es als `APP_VERSION` in `.env` und zeigt es in der
-Start-Ausgabe. Abrufbar auch über `GET /api/version`.
+Format `vYear.Release.Commit` (`VERSION`-Datei = Year.Release, manuell gepflegt, + aktuelle Git-Commit-Anzahl).
+Wird nicht mehr nur bei `start.ps1`-Läufen aktualisiert, sondern live: `GET /api/version` liest
+`backend/src/Milepoint.Api/version.txt` bei jedem Aufruf frisch (kein Neustart nötig). Ein getrackter Git-Hook
+(`scripts/git-hooks/post-commit`, von `start.ps1` automatisch über `core.hooksPath` aktiviert) schreibt diese
+Datei nach jedem Commit neu. `start.ps1` schreibt sie zusätzlich einmal selbst bei jedem Start, damit ein
+frischer Klon auch vor dem ersten eigenen Commit eine korrekte Version zeigt.

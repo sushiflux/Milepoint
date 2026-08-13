@@ -160,7 +160,7 @@ function Find-FreePort([int]$StartPort) {
 
 function Resolve-Ports {
     $portKeys = @(
-        'CADDY_PORT', 'FRONTEND_PORT', 'BACKEND_PORT', 'POSTGRES_PORT',
+        'CADDY_PORT', 'CADDY_HTTPS_PORT', 'FRONTEND_PORT', 'BACKEND_PORT', 'POSTGRES_PORT',
         'MSSQL_PORT', 'REDIS_PORT', 'MAILPIT_SMTP_PORT', 'MAILPIT_UI_PORT', 'ADMINER_PORT'
     )
     foreach ($key in $portKeys) {
@@ -224,7 +224,7 @@ function Wait-ForHealth([int]$TimeoutSeconds = 240) {
         }
 
         if ($unhealthy.Count -gt 0) {
-            throw "Diese Services sind unhealthy: $($unhealthy -join ', '). Prüfe: docker compose -p pm logs <service>"
+            throw "Diese Services sind unhealthy: $($unhealthy -join ', '). Prüfe: docker compose -p milepoint logs <service>"
         }
 
         if ($pending.Count -eq 0) {
@@ -236,23 +236,39 @@ function Wait-ForHealth([int]$TimeoutSeconds = 240) {
         Start-Sleep -Seconds 4
     }
 
-    throw "Timeout beim Warten auf Healthchecks nach $TimeoutSeconds Sekunden. Prüfe: docker compose -p pm logs"
+    throw "Timeout beim Warten auf Healthchecks nach $TimeoutSeconds Sekunden. Prüfe: docker compose -p milepoint logs"
 }
 
-function Test-HttpEndpoint([string]$Url, [int]$TimeoutSeconds = 30) {
-    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    while ((Get-Date) -lt $deadline) {
-        try {
-            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
-                return $true
+function Test-HttpEndpoint([string]$Url, [int]$TimeoutSeconds = 30, [switch]$IgnoreCertificateErrors) {
+    # Windows PowerShell 5.1 has no -SkipCertificateCheck on Invoke-WebRequest (PS7+ only),
+    # so trust-everything is done the old way via ServicePointManager - only while this
+    # specific check runs, and only for our own known-self-signed local Caddy endpoint.
+    $previousCallback = $null
+    if ($IgnoreCertificateErrors) {
+        $previousCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    }
+
+    try {
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            try {
+                $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
+                if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+                    return $true
+                }
+            }
+            catch {
+                Start-Sleep -Seconds 2
             }
         }
-        catch {
-            Start-Sleep -Seconds 2
+        return $false
+    }
+    finally {
+        if ($IgnoreCertificateErrors) {
+            [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previousCallback
         }
     }
-    return $false
 }
 
 if ($Action -eq 'restart') {
@@ -312,19 +328,22 @@ Invoke-Compose $upArgs
 Wait-ForHealth
 
 $caddyPort = Get-EnvValue -Path $EnvFile -Key 'CADDY_PORT'
+$caddyHttpsPort = Get-EnvValue -Path $EnvFile -Key 'CADDY_HTTPS_PORT'
 $adminerPort = Get-EnvValue -Path $EnvFile -Key 'ADMINER_PORT'
 $mailpitPort = Get-EnvValue -Path $EnvFile -Key 'MAILPIT_UI_PORT'
 $adminUsername = Get-EnvValue -Path $EnvFile -Key 'ADMIN_USERNAME'
 $adminPassword = Get-EnvValue -Path $EnvFile -Key 'ADMIN_INITIAL_PASSWORD'
 
-if (-not (Test-HttpEndpoint "http://localhost:$caddyPort")) {
-    Write-Warning "http://localhost:$caddyPort antwortet noch nicht - Stack läuft, App ist evtl. noch am Hochfahren."
+if (-not (Test-HttpEndpoint "https://localhost:$caddyHttpsPort" -IgnoreCertificateErrors)) {
+    Write-Warning "https://localhost:$caddyHttpsPort antwortet noch nicht - Stack läuft, App ist evtl. noch am Hochfahren."
 }
 
 Write-Host "`nMilepoint-Stack läuft ($appVersion):" -ForegroundColor Green
-Write-Host "  App:      http://localhost:$caddyPort"
+Write-Host "  App:      https://localhost:$caddyHttpsPort  (http://localhost:$caddyPort leitet automatisch um)"
 Write-Host "  Adminer:  http://localhost:$adminerPort"
 Write-Host "  Mailpit:  http://localhost:$mailpitPort"
+Write-Host "`nBeim ersten Aufruf warnt der Browser vor dem Zertifikat (selbst ausgestellte, lokale CA von Caddy)."
+Write-Host "Einmalig als vertrauenswürdig einrichten: siehe docs/03-runbook.md Abschnitt 'HTTPS lokal vertrauen'."
 Write-Host "`nLogin (nur beim allerersten Anlegen des Admin-Kontos gültig):"
 Write-Host "  Benutzername: $adminUsername"
 Write-Host "  Passwort:     $adminPassword"
