@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { createMilestone, deleteMilestone } from '../api/milestones'
 import { createWorkItem, updateWorkItem } from '../api/workItems'
-import type { Board, Milestone, WorkItem, WorkItemPriority } from '../api/types'
+import type { Board, BoardColumnType, Milestone, WorkItem, WorkItemPriority } from '../api/types'
 import AddButton from '../components/AddButton'
 
 interface Props {
@@ -15,6 +15,10 @@ interface Props {
 
 const MIN_DAY_WIDTH = 28
 const MIN_VISIBLE_DAYS = 2
+// Roughly 4 months - beyond this, squeezing every remaining day into the window makes the
+// day columns unreadably thin, so a wider range fits this many days to the window and the
+// rest becomes horizontally scrollable instead of compressing further.
+const MAX_FIT_DAYS = 120
 const ZOOM_FACTOR = 1.25
 const ROW_HEIGHT = 36
 const MONTH_ROW_HEIGHT = 20
@@ -120,6 +124,30 @@ const PRIORITY_DOT: Record<WorkItemPriority, string> = {
   Urgent: 'bg-red-500',
 }
 
+const STATUS_LABELS: Record<BoardColumnType, string> = {
+  Todo: 'Offen',
+  InProgress: 'In Arbeit',
+  Done: 'Erledigt',
+}
+
+const PRIORITY_LABELS: Record<WorkItemPriority, string> = {
+  Low: 'Niedrig',
+  Medium: 'Mittel',
+  High: 'Hoch',
+  Urgent: 'Dringend',
+}
+
+const STATUS_OPTIONS: BoardColumnType[] = ['Todo', 'InProgress', 'Done']
+const PRIORITY_OPTIONS: WorkItemPriority[] = ['Low', 'Medium', 'High', 'Urgent']
+const UNASSIGNED = '__unassigned__'
+
+function toggleInSet<T>(set: Set<T>, value: T) {
+  const next = new Set(set)
+  if (next.has(value)) next.delete(value)
+  else next.add(value)
+  return next
+}
+
 type DragMode = 'move' | 'resize-start' | 'resize-end'
 
 interface DragState {
@@ -162,8 +190,13 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [containerWidth, setContainerWidth] = useState(0)
   const [visibleDayCount, setVisibleDayCount] = useState<number | null>(null)
   const [activePreset, setActivePreset] = useState<string | null>(null)
-  const [filtersOpen, setFiltersOpen] = useState(false)
-  const filtersRef = useRef<HTMLDivElement>(null)
+  const [rangeMenuOpen, setRangeMenuOpen] = useState(false)
+  const rangeMenuRef = useRef<HTMLDivElement>(null)
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  const filterMenuRef = useRef<HTMLDivElement>(null)
+  const [filterStatuses, setFilterStatuses] = useState<Set<BoardColumnType>>(new Set())
+  const [filterPriorities, setFilterPriorities] = useState<Set<WorkItemPriority>>(new Set())
+  const [filterAssignees, setFilterAssignees] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     const el = containerRef.current
@@ -174,13 +207,15 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   }, [])
 
   useEffect(() => {
-    if (!filtersOpen) return
+    if (!rangeMenuOpen && !filterMenuOpen) return
     function handleClickOutside(event: MouseEvent) {
-      if (filtersRef.current && !filtersRef.current.contains(event.target as Node)) setFiltersOpen(false)
+      const target = event.target as Node
+      if (rangeMenuRef.current && !rangeMenuRef.current.contains(target)) setRangeMenuOpen(false)
+      if (filterMenuRef.current && !filterMenuRef.current.contains(target)) setFilterMenuOpen(false)
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [filtersOpen])
+  }, [rangeMenuOpen, filterMenuOpen])
 
   const itemsByParent = useMemo(() => {
     const map = new Map<string | null, WorkItem[]>()
@@ -195,6 +230,30 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
   const workItemById = useMemo(() => new Map(workItems.map((w) => [w.id, w])), [workItems])
   const undatedItems = workItems.filter((w) => !w.startDate && !w.dueDate)
+
+  const groupIds = useMemo(
+    () => new Set([...itemsByParent.keys()].filter((k): k is string => k !== null && (itemsByParent.get(k)?.length ?? 0) > 0)),
+    [itemsByParent],
+  )
+  const allCollapsed = groupIds.size > 0 && [...groupIds].every((id) => collapsed.has(id))
+
+  const assigneeOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const w of workItems) {
+      const key = w.assigneeId ?? UNASSIGNED
+      if (!map.has(key)) map.set(key, w.assigneeDisplayName ?? 'Nicht zugewiesen')
+    }
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [workItems])
+
+  const filtersActive = filterStatuses.size > 0 || filterPriorities.size > 0 || filterAssignees.size > 0
+
+  function matchesFilters(item: WorkItem) {
+    if (filterStatuses.size > 0 && !filterStatuses.has(item.columnType)) return false
+    if (filterPriorities.size > 0 && !filterPriorities.has(item.priority)) return false
+    if (filterAssignees.size > 0 && !filterAssignees.has(item.assigneeId ?? UNASSIGNED)) return false
+    return true
+  }
 
   const { rangeStart, dayCount } = useMemo(() => {
     const dates = [
@@ -242,13 +301,14 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     [days],
   )
   // Derived live from containerWidth (not stored as a fixed pixel value) so a selected
-  // range keeps exactly filling the available width as the window is resized. The
-  // MIN_DAY_WIDTH floor only applies to the auto (no explicit range) case - once a range is
-  // explicitly selected it must fit the window exactly, even below that floor (e.g. 12 Monate).
+  // range keeps exactly filling the available width as the window is resized. Ranges up to
+  // MAX_FIT_DAYS fit the window exactly (even below MIN_DAY_WIDTH, e.g. 3 Monate); beyond
+  // that (6/12 Monate), only MAX_FIT_DAYS worth fits the window and the rest scrolls, so day
+  // columns never get squeezed unreadably thin.
   const dayWidth =
     containerWidth > 0
       ? visibleDayCount != null
-        ? Math.max((containerWidth - LABEL_WIDTH) / visibleDayCount, 1)
+        ? Math.max((containerWidth - LABEL_WIDTH) / Math.min(visibleDayCount, MAX_FIT_DAYS), 1)
         : Math.max((containerWidth - LABEL_WIDTH) / dayCount, MIN_DAY_WIDTH)
       : MIN_DAY_WIDTH
   const chartWidth = renderedDayCount * dayWidth
@@ -297,6 +357,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     })
   }
 
+  function toggleCollapseAll() {
+    setCollapsed(allCollapsed ? new Set() : new Set(groupIds))
+  }
+
+  function scrollToToday() {
+    const el = containerRef.current
+    if (!el || todayOffset < 0 || todayOffset >= renderedDayCount) return
+    const target = LABEL_WIDTH + todayOffset * dayWidth - (el.clientWidth - LABEL_WIDTH) / 2
+    el.scrollLeft = Math.max(target, 0)
+  }
+
   function taskRows(parentId: string | null, depth: number): TaskRow[] {
     const children = (itemsByParent.get(parentId) ?? []).filter((w) => w.startDate || w.dueDate)
     return children.flatMap((item) => {
@@ -336,9 +407,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         j++
       }
     }
-    return merged
+    return merged.filter((r) => r.kind === 'milestone' || matchesFilters(r.item))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workItems, milestones, collapsed])
+  }, [workItems, milestones, collapsed, filterStatuses, filterPriorities, filterAssignees])
 
   const rowIndexByTaskId = useMemo(() => {
     const map = new Map<string, number>()
@@ -510,14 +581,170 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          {!showTaskForm && <AddButton onClick={() => setShowTaskForm(true)} label="Neue Aufgabe" />}
-          {!showMilestoneForm && <AddButton onClick={() => setShowMilestoneForm(true)} label="Neuer Meilenstein" />}
+          {!showTaskForm && (
+            <AddButton
+              onClick={() => setShowTaskForm(true)}
+              label="Neue Aufgabe"
+              icon={
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                  <path d="M4 5.5h11M4 10h11M4 14.5h7" />
+                </svg>
+              }
+            />
+          )}
+          {!showMilestoneForm && (
+            <AddButton
+              onClick={() => setShowMilestoneForm(true)}
+              label="Neuer Meilenstein"
+              icon={
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-2.5 w-2.5">
+                  <path d="M10 3 17 10 10 17 3 10Z" />
+                </svg>
+              }
+            />
+          )}
         </div>
 
-        <div ref={filtersRef} className="relative">
+        <div className="flex items-center gap-1.5">
+          <div ref={filterMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setFilterMenuOpen((o) => !o)}
+              title="Filter"
+              aria-label="Filter"
+              className={`flex h-8 w-8 items-center justify-center rounded-full border hover:bg-slate-100 dark:hover:bg-slate-800 ${
+                filtersActive
+                  ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                  : 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400'
+              }`}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <path d="M4 5h16l-6.5 7.5V18l-3 1.5v-7z" />
+              </svg>
+            </button>
+
+            {filterMenuOpen && (
+              <div className="absolute right-0 top-full z-40 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+                <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Status</p>
+                <div className="mb-3 flex flex-wrap gap-1">
+                  {STATUS_OPTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => setFilterStatuses((prev) => toggleInSet(prev, s))}
+                      className={`rounded px-2 py-1 text-xs ${
+                        filterStatuses.has(s)
+                          ? 'bg-indigo-600 text-white'
+                          : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {STATUS_LABELS[s]}
+                    </button>
+                  ))}
+                </div>
+
+                <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Priorität</p>
+                <div className="mb-3 flex flex-wrap gap-1">
+                  {PRIORITY_OPTIONS.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setFilterPriorities((prev) => toggleInSet(prev, p))}
+                      className={`rounded px-2 py-1 text-xs ${
+                        filterPriorities.has(p)
+                          ? 'bg-indigo-600 text-white'
+                          : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      {PRIORITY_LABELS[p]}
+                    </button>
+                  ))}
+                </div>
+
+                {assigneeOptions.length > 0 && (
+                  <>
+                    <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Zuständige</p>
+                    <div className="mb-3 flex max-h-32 flex-wrap gap-1 overflow-y-auto">
+                      {assigneeOptions.map(([id, name]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setFilterAssignees((prev) => toggleInSet(prev, id))}
+                          className={`rounded px-2 py-1 text-xs ${
+                            filterAssignees.has(id)
+                              ? 'bg-indigo-600 text-white'
+                              : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          {name}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {filtersActive && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterStatuses(new Set())
+                      setFilterPriorities(new Set())
+                      setFilterAssignees(new Set())
+                    }}
+                    className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                  >
+                    Zurücksetzen
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
           <button
             type="button"
-            onClick={() => setFiltersOpen((o) => !o)}
+            onClick={toggleCollapseAll}
+            disabled={groupIds.size === 0}
+            title={allCollapsed ? 'Alle ausklappen' : 'Alle einklappen'}
+            aria-label={allCollapsed ? 'Alle ausklappen' : 'Alle einklappen'}
+            className={`flex h-8 w-8 items-center justify-center rounded-full border hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-slate-800 ${
+              allCollapsed
+                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                : 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400'
+            }`}
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+              {allCollapsed ? (
+                <>
+                  <path d="M4 8l6-5 6 5" />
+                  <path d="M4 13l6 5 6-5" />
+                </>
+              ) : (
+                <>
+                  <path d="M4 7l6 5 6-5" />
+                  <path d="M4 12l6-5 6 5" />
+                </>
+              )}
+            </svg>
+          </button>
+
+          <button
+            type="button"
+            onClick={scrollToToday}
+            disabled={todayOffset < 0 || todayOffset >= renderedDayCount}
+            title="Zu heute springen"
+            aria-label="Zu heute springen"
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3.5 w-3.5">
+              <circle cx="10" cy="10" r="6.5" />
+              <circle cx="10" cy="10" r="1.4" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+
+          <div ref={rangeMenuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setRangeMenuOpen((o) => !o)}
             title="Zeitraum & Zoom"
             aria-label="Zeitraum & Zoom"
             className={`flex h-8 w-8 items-center justify-center rounded-full border hover:bg-slate-100 dark:hover:bg-slate-800 ${
@@ -533,7 +760,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             </svg>
           </button>
 
-          {filtersOpen && (
+          {rangeMenuOpen && (
             <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-800 dark:bg-slate-900">
               <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Monate</p>
               <div className="mb-3 flex flex-wrap gap-1">
@@ -606,6 +833,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               </div>
             </div>
           )}
+          </div>
         </div>
       </div>
 
@@ -639,10 +867,12 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             </LabelCell>
             <div className="flex shrink-0 flex-col" style={{ width: chartWidth }}>
               <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: MONTH_ROW_HEIGHT }}>
-                {monthGroups.map((g) => (
+                {monthGroups.map((g, i) => (
                   <div
                     key={g.key}
-                    className="absolute top-0 flex h-full items-center overflow-hidden border-l border-slate-200 px-1.5 text-[10px] font-medium text-slate-600 dark:border-slate-800/60 dark:text-slate-300"
+                    className={`absolute top-0 flex h-full items-center overflow-hidden border-l border-slate-200 px-1.5 text-[10px] font-medium text-slate-600 dark:border-slate-800/60 dark:text-slate-300 ${
+                      i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
+                    }`}
                     style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
                   >
                     <span className="truncate">{g.label}</span>
@@ -650,10 +880,12 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 ))}
               </div>
               <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: WEEK_ROW_HEIGHT }}>
-                {weekGroups.map((g) => (
+                {weekGroups.map((g, i) => (
                   <div
                     key={g.key}
-                    className="absolute top-0 flex h-full items-center justify-center overflow-hidden border-l border-slate-200/70 text-[9px] text-slate-400 dark:border-slate-800/40 dark:text-slate-500"
+                    className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-l border-slate-200/70 text-[9px] text-slate-400 dark:border-slate-800/40 dark:text-slate-500 ${
+                      i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
+                    }`}
                     style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
                   >
                     <span className="truncate">{g.label}</span>
