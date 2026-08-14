@@ -271,6 +271,47 @@ function Test-HttpEndpoint([string]$Url, [int]$TimeoutSeconds = 30, [switch]$Ign
     }
 }
 
+function Test-CertificateTrusted([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert) {
+    return [bool](Get-ChildItem Cert:\CurrentUser\Root | Where-Object { $_.Thumbprint -eq $Cert.Thumbprint })
+}
+
+function Install-CaddyRootCertificate {
+    # Caddy signs its "tls internal" certs with a self-generated local CA (siehe Caddyfile).
+    # Ohne einmaligen Trust-Import warnt jeder Browser bei https://localhost - das hier holt
+    # das nach, idempotent und ohne Admin-Rechte (nur aktueller Windows-Benutzer).
+    #
+    # $ErrorActionPreference lokal auf 'Continue': docker/certutil schreiben normale
+    # Fortschrittsmeldungen auf stderr - unter PS 5.1 wird jede umgeleitete (2>) stderr-Zeile
+    # eines nativen Programms in einen ErrorRecord verpackt, der bei 'Stop' (Skript-Default)
+    # sofort einen NativeCommandError auslöst, obwohl der Exit-Code 0 ist. 'Continue' lässt
+    # $LASTEXITCODE die eigentliche Erfolgsprüfung übernehmen. Gilt nur innerhalb dieser
+    # Funktion (Function-Scope), das Skript-weite 'Stop' bleibt für alles andere unverändert.
+    $ErrorActionPreference = 'Continue'
+    $tempCert = Join-Path $env:TEMP "milepoint-caddy-root-$PID.crt"
+    try {
+        & docker compose -p $ProjectName --env-file $EnvFile cp "caddy:/data/caddy/pki/authorities/local/root.crt" $tempCert 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $tempCert)) {
+            Write-Warning "Caddy-Root-Zertifikat konnte noch nicht gelesen werden - HTTPS-Warnung im Browser ggf. manuell beheben (docs/03-runbook.md, Abschnitt 'HTTPS lokal vertrauen')."
+            return
+        }
+
+        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($tempCert)
+        if (Test-CertificateTrusted $cert) { return }
+
+        Write-Host "`nImportiere lokales Caddy-HTTPS-Zertifikat in den Windows-Zertifikatspeicher (nur aktueller Benutzer)..." -ForegroundColor Yellow
+        & certutil -user -addstore -f "ROOT" $tempCert | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "Zertifikat importiert - Browser sollte https://localhost jetzt ohne Warnung akzeptieren (ggf. Browser neu starten)." -ForegroundColor Green
+        }
+        else {
+            Write-Warning "certutil-Import fehlgeschlagen (Exit Code $LASTEXITCODE) - siehe docs/03-runbook.md, Abschnitt 'HTTPS lokal vertrauen'."
+        }
+    }
+    finally {
+        Remove-Item $tempCert -ErrorAction SilentlyContinue
+    }
+}
+
 if ($Action -eq 'restart') {
     Invoke-Compose @('down')
     $Action = 'start'
@@ -334,9 +375,36 @@ $mailpitPort = Get-EnvValue -Path $EnvFile -Key 'MAILPIT_UI_PORT'
 $adminUsername = Get-EnvValue -Path $EnvFile -Key 'ADMIN_USERNAME'
 $adminPassword = Get-EnvValue -Path $EnvFile -Key 'ADMIN_INITIAL_PASSWORD'
 
-if (-not (Test-HttpEndpoint "https://localhost:$caddyHttpsPort" -IgnoreCertificateErrors)) {
-    Write-Warning "https://localhost:$caddyHttpsPort antwortet noch nicht - Stack läuft, App ist evtl. noch am Hochfahren."
+$appUrl = "https://localhost:$caddyHttpsPort"
+if (-not (Test-HttpEndpoint $appUrl -IgnoreCertificateErrors)) {
+    Write-Warning "$appUrl antwortet noch nicht - Stack läuft, App ist evtl. noch am Hochfahren (Browser öffnet automatisch, sobald erreichbar)."
 }
+
+Install-CaddyRootCertificate
+
+# Docker Desktops eigener Port-Link öffnet auch bei 443/8443 immer http:// statt https://
+# (bekannter, seit Jahren offener Bug: github.com/docker/for-win/issues/13200) - hier wird
+# deshalb direkt mit der richtigen URL im Standardbrowser geöffnet statt sich darauf zu verlassen.
+# Als Background-Job, weil frisch neu gebundene Docker-Desktop-Portweiterleitungen unter Windows
+# nach einem Container-Neustart teils erst nach 1-2 Minuten vom Host aus erreichbar sind, obwohl
+# Caddy selbst längst antwortet - ein synchrones Warten würde das Skript entsprechend blockieren.
+Start-Job -ScriptBlock {
+    param($Url, $TimeoutSeconds)
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+                Start-Process $Url
+                return
+            }
+        }
+        catch {
+            Start-Sleep -Seconds 3
+        }
+    }
+} -ArgumentList $appUrl, 180 | Out-Null
 
 Write-Host "`nMilepoint-Stack läuft ($appVersion):" -ForegroundColor Green
 Write-Host "  App:      https://localhost:$caddyHttpsPort  (http://localhost:$caddyPort leitet automatisch um)"
