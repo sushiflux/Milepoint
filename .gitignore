@@ -16,6 +16,7 @@ backend/src/Milepoint.Api/version.txt
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/*.tsbuildinfo
 
 # --- Editor ---
 .vs/

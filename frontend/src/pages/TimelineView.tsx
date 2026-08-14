@@ -14,13 +14,33 @@ interface Props {
 }
 
 const MIN_DAY_WIDTH = 28
+const MIN_VISIBLE_DAYS = 2
+const ZOOM_FACTOR = 1.25
 const ROW_HEIGHT = 36
-const HEADER_HEIGHT = 40
+const MONTH_ROW_HEIGHT = 20
+const WEEK_ROW_HEIGHT = 16
+const DAY_ROW_HEIGHT = 22
+const HEADER_HEIGHT = MONTH_ROW_HEIGHT + WEEK_ROW_HEIGHT + DAY_ROW_HEIGHT
 const COL_ID = 56
 const COL_TYPE = 68
 const COL_STATUS = 96
 const COL_PRIORITY = 72
 const LABEL_WIDTH = 460
+
+const MONTH_PRESETS: { key: string; label: string; days: number }[] = [
+  { key: 'm1', label: '1 Monat', days: 30 },
+  { key: 'm3', label: '3 Monate', days: 90 },
+  { key: 'm6', label: '6 Monate', days: 180 },
+  { key: 'm12', label: '12 Monate', days: 365 },
+]
+
+const WEEK_PRESETS: { key: string; label: string; days: number }[] = [
+  { key: 'd3', label: '3 Tage', days: 3 },
+  { key: 'w1', label: '1 Woche', days: 7 },
+  { key: 'w2', label: '2 Wochen', days: 14 },
+  { key: 'w3', label: '3 Wochen', days: 21 },
+  { key: 'w4', label: '4 Wochen', days: 28 },
+]
 
 function startOfDay(d: Date) {
   const x = new Date(d)
@@ -36,6 +56,39 @@ function addDays(d: Date, days: number) {
 
 function diffDays(a: Date, b: Date) {
   return Math.round((startOfDay(a).getTime() - startOfDay(b).getTime()) / 86_400_000)
+}
+
+// ISO 8601: week 1 is the week containing the year's first Thursday, weeks start Monday.
+function isoWeek(d: Date) {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  const dayNum = (date.getUTCDay() + 6) % 7
+  date.setUTCDate(date.getUTCDate() - dayNum + 3)
+  const firstThursday = new Date(Date.UTC(date.getUTCFullYear(), 0, 4))
+  const firstDayNum = (firstThursday.getUTCDay() + 6) % 7
+  firstThursday.setUTCDate(firstThursday.getUTCDate() - firstDayNum + 3)
+  const week = 1 + Math.round((date.getTime() - firstThursday.getTime()) / (7 * 86_400_000))
+  return { year: date.getUTCFullYear(), week }
+}
+
+interface HeaderGroup {
+  key: string
+  label: string
+  startIndex: number
+  span: number
+}
+
+function groupConsecutiveDays(days: Date[], keyOf: (d: Date) => string, labelOf: (d: Date) => string): HeaderGroup[] {
+  const groups: HeaderGroup[] = []
+  days.forEach((d, i) => {
+    const key = keyOf(d)
+    const last = groups[groups.length - 1]
+    if (last && last.key === key) {
+      last.span++
+    } else {
+      groups.push({ key, label: labelOf(d), startIndex: i, span: 1 })
+    }
+  })
+  return groups
 }
 
 function firstTodoColumn(boards: Board[]) {
@@ -107,6 +160,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
+  const [visibleDayCount, setVisibleDayCount] = useState<number | null>(null)
+  const [activePreset, setActivePreset] = useState<string | null>(null)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const filtersRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const el = containerRef.current
@@ -115,6 +172,15 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
+
+  useEffect(() => {
+    if (!filtersOpen) return
+    function handleClickOutside(event: MouseEvent) {
+      if (filtersRef.current && !filtersRef.current.contains(event.target as Node)) setFiltersOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [filtersOpen])
 
   const itemsByParent = useMemo(() => {
     const map = new Map<string | null, WorkItem[]>()
@@ -145,11 +211,82 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return { rangeStart: start, dayCount: Math.max(diffDays(end, start), 14) }
   }, [workItems, milestones])
 
-  const days = useMemo(() => Array.from({ length: dayCount }, (_, i) => addDays(rangeStart, i)), [rangeStart, dayCount])
+  // When a range is explicitly selected, it becomes the rendered window exactly - not padded
+  // to the actual data span (dead space if data is shorter, e.g. 12 Monate) and not extended
+  // by it either (endless scrolling if data is longer, e.g. 3 Tage on a long project).
+  // Items outside that window are clipped instead of inflating the scrollable width.
+  const renderedDayCount = visibleDayCount ?? dayCount
+  const days = useMemo(
+    () => Array.from({ length: renderedDayCount }, (_, i) => addDays(rangeStart, i)),
+    [rangeStart, renderedDayCount],
+  )
+  const monthGroups = useMemo(
+    () =>
+      groupConsecutiveDays(
+        days,
+        (d) => `${d.getFullYear()}-${d.getMonth()}`,
+        (d) => d.toLocaleDateString('de-DE', { month: 'long', year: 'numeric' }),
+      ),
+    [days],
+  )
+  const weekGroups = useMemo(
+    () =>
+      groupConsecutiveDays(
+        days,
+        (d) => {
+          const { year, week } = isoWeek(d)
+          return `${year}-${week}`
+        },
+        (d) => `KW ${isoWeek(d).week}`,
+      ),
+    [days],
+  )
+  // Derived live from containerWidth (not stored as a fixed pixel value) so a selected
+  // range keeps exactly filling the available width as the window is resized. The
+  // MIN_DAY_WIDTH floor only applies to the auto (no explicit range) case - once a range is
+  // explicitly selected it must fit the window exactly, even below that floor (e.g. 12 Monate).
   const dayWidth =
-    containerWidth > 0 ? Math.max((containerWidth - LABEL_WIDTH) / dayCount, MIN_DAY_WIDTH) : MIN_DAY_WIDTH
-  const chartWidth = dayCount * dayWidth
+    containerWidth > 0
+      ? visibleDayCount != null
+        ? Math.max((containerWidth - LABEL_WIDTH) / visibleDayCount, 1)
+        : Math.max((containerWidth - LABEL_WIDTH) / dayCount, MIN_DAY_WIDTH)
+      : MIN_DAY_WIDTH
+  const chartWidth = renderedDayCount * dayWidth
   const todayOffset = diffDays(startOfDay(new Date()), rangeStart)
+
+  // scrollLeft is a raw pixel offset, so a day-width change (preset/zoom) alone would leave
+  // the view scrolled to a completely different date - re-anchor it to whatever date was
+  // actually visible before the change instead of letting the chart appear to "go empty".
+  const prevDayWidthRef = useRef(dayWidth)
+  useEffect(() => {
+    const el = containerRef.current
+    const prevDayWidth = prevDayWidthRef.current
+    if (el && prevDayWidth !== dayWidth) {
+      const ratio = dayWidth / prevDayWidth
+      el.scrollLeft = el.scrollLeft > LABEL_WIDTH ? LABEL_WIDTH + (el.scrollLeft - LABEL_WIDTH) * ratio : el.scrollLeft * ratio
+    }
+    prevDayWidthRef.current = dayWidth
+  }, [dayWidth])
+
+  function applyPreset(days: number, key: string) {
+    setActivePreset(key)
+    setVisibleDayCount(days)
+  }
+
+  function zoomIn() {
+    setActivePreset(null)
+    setVisibleDayCount((prev) => Math.max(Math.round((prev ?? dayCount) / ZOOM_FACTOR), MIN_VISIBLE_DAYS))
+  }
+
+  function zoomOut() {
+    setActivePreset(null)
+    setVisibleDayCount((prev) => Math.round((prev ?? dayCount) * ZOOM_FACTOR))
+  }
+
+  function resetZoom() {
+    setActivePreset(null)
+    setVisibleDayCount(null)
+  }
 
   function toggleCollapse(id: string) {
     setCollapsed((prev) => {
@@ -371,14 +508,117 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     <div className="space-y-6">
       {error && <p className="text-sm text-red-400">{error}</p>}
 
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {!showTaskForm && <AddButton onClick={() => setShowTaskForm(true)} label="Neue Aufgabe" />}
+          {!showMilestoneForm && <AddButton onClick={() => setShowMilestoneForm(true)} label="Neuer Meilenstein" />}
+        </div>
+
+        <div ref={filtersRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((o) => !o)}
+            title="Zeitraum & Zoom"
+            aria-label="Zeitraum & Zoom"
+            className={`flex h-8 w-8 items-center justify-center rounded-full border hover:bg-slate-100 dark:hover:bg-slate-800 ${
+              activePreset || visibleDayCount !== null
+                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                : 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400'
+            }`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <rect x="3" y="4.5" width="18" height="16" rx="2" />
+              <path d="M3 9.5h18" />
+              <path d="M8 2.5v4M16 2.5v4" />
+            </svg>
+          </button>
+
+          {filtersOpen && (
+            <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-800 dark:bg-slate-900">
+              <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Monate</p>
+              <div className="mb-3 flex flex-wrap gap-1">
+                {MONTH_PRESETS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => applyPreset(p.days, p.key)}
+                    className={`rounded px-2 py-1 text-xs ${
+                      activePreset === p.key
+                        ? 'bg-indigo-600 text-white'
+                        : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Wochen</p>
+              <div className="mb-3 flex flex-wrap gap-1">
+                {WEEK_PRESETS.map((p) => (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => applyPreset(p.days, p.key)}
+                    className={`rounded px-2 py-1 text-xs ${
+                      activePreset === p.key
+                        ? 'bg-indigo-600 text-white'
+                        : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between border-t border-slate-200 pt-2 dark:border-slate-800">
+                {visibleDayCount !== null ? (
+                  <button
+                    type="button"
+                    onClick={resetZoom}
+                    className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                  >
+                    Automatisch
+                  </button>
+                ) : (
+                  <span />
+                )}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={zoomOut}
+                    title="Rauszoomen"
+                    aria-label="Rauszoomen"
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-sm leading-none text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                  >
+                    −
+                  </button>
+                  <button
+                    type="button"
+                    onClick={zoomIn}
+                    title="Reinzoomen"
+                    aria-label="Reinzoomen"
+                    className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-sm leading-none text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       <section
         ref={containerRef}
         className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
       >
         <div className="relative" style={{ width: LABEL_WIDTH + chartWidth }}>
-          <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: LABEL_WIDTH + todayOffset * dayWidth }}>
-            <div className="absolute -left-px h-2 w-2 -translate-x-1/2 rotate-45 bg-red-500" />
-          </div>
+          {todayOffset >= 0 && todayOffset < renderedDayCount && (
+            <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: LABEL_WIDTH + todayOffset * dayWidth }}>
+              <div className="absolute -left-px h-2 w-2 -translate-x-1/2 rotate-45 bg-red-500" />
+            </div>
+          )}
 
           {/* header */}
           <div className="flex border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
@@ -397,19 +637,40 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 Priorität
               </span>
             </LabelCell>
-            <div className="relative shrink-0" style={{ width: chartWidth, backgroundImage: weekendBackground }}>
-              {days.map((d, i) => (
-                <div
-                  key={i}
-                  className="absolute top-0 flex h-full flex-col items-center justify-center border-l border-slate-200 text-[10px] text-slate-500 dark:border-slate-800/60"
-                  style={{ left: i * dayWidth, width: dayWidth }}
-                >
-                  {(d.getDate() === 1 || i === 0) && (
-                    <span className="text-slate-700 dark:text-slate-300">{d.toLocaleDateString('de-DE', { month: 'short' })}</span>
-                  )}
-                  <span>{d.getDate()}</span>
-                </div>
-              ))}
+            <div className="flex shrink-0 flex-col" style={{ width: chartWidth }}>
+              <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: MONTH_ROW_HEIGHT }}>
+                {monthGroups.map((g) => (
+                  <div
+                    key={g.key}
+                    className="absolute top-0 flex h-full items-center overflow-hidden border-l border-slate-200 px-1.5 text-[10px] font-medium text-slate-600 dark:border-slate-800/60 dark:text-slate-300"
+                    style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
+                  >
+                    <span className="truncate">{g.label}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: WEEK_ROW_HEIGHT }}>
+                {weekGroups.map((g) => (
+                  <div
+                    key={g.key}
+                    className="absolute top-0 flex h-full items-center justify-center overflow-hidden border-l border-slate-200/70 text-[9px] text-slate-400 dark:border-slate-800/40 dark:text-slate-500"
+                    style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
+                  >
+                    <span className="truncate">{g.label}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="relative" style={{ height: DAY_ROW_HEIGHT, backgroundImage: weekendBackground }}>
+                {days.map((d, i) => (
+                  <div
+                    key={i}
+                    className="absolute top-0 flex h-full items-center justify-center border-l border-slate-200 text-[10px] text-slate-500 dark:border-slate-800/60"
+                    style={{ left: i * dayWidth, width: dayWidth }}
+                  >
+                    {d.getDate()}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -455,7 +716,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     <span style={{ width: COL_STATUS }} className="px-2" />
                     <span style={{ width: COL_PRIORITY }} className="px-2" />
                   </LabelCell>
-                  <div className="relative shrink-0" style={{ width: chartWidth, height: ROW_HEIGHT }}>
+                  <div className="relative shrink-0 overflow-hidden" style={{ width: chartWidth, height: ROW_HEIGHT }}>
                     <div
                       title={`${m.name} — ${formatDate(m.date)}`}
                       className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-amber-600 dark:text-amber-400"
@@ -503,7 +764,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     {item.priority}
                   </span>
                 </LabelCell>
-                <div className="relative shrink-0" style={{ width: chartWidth, height: ROW_HEIGHT }}>
+                <div className="relative shrink-0 overflow-hidden" style={{ width: chartWidth, height: ROW_HEIGHT }}>
                   {range && (
                     <div
                       onPointerDown={handlePointerDown(item)}
@@ -542,12 +803,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         )}
       </section>
 
-      <section className="flex flex-wrap gap-6">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">Aufgabe</h2>
-            {!showTaskForm && <AddButton onClick={() => setShowTaskForm(true)} label="Neue Aufgabe" />}
-          </div>
+      {(showTaskForm || showMilestoneForm) && (
+        <section className="flex flex-wrap gap-6">
           {showTaskForm && (
             <form onSubmit={handleCreateTask} className="flex flex-wrap items-center gap-2">
               <input
@@ -582,13 +839,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               </button>
             </form>
           )}
-        </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">Meilenstein</h2>
-            {!showMilestoneForm && <AddButton onClick={() => setShowMilestoneForm(true)} label="Neuer Meilenstein" />}
-          </div>
           {showMilestoneForm && (
             <form onSubmit={handleCreateMilestone} className="flex items-center gap-2">
               <input
@@ -614,8 +865,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               </button>
             </form>
           )}
-        </div>
-      </section>
+        </section>
+      )}
     </div>
   )
 }
