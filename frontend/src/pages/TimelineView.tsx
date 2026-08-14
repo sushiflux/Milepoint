@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { createMilestone, deleteMilestone } from '../api/milestones'
-import { createBoard } from '../api/projects'
 import { createWorkItem, updateWorkItem } from '../api/workItems'
 import type { Board, BoardColumnType, Milestone, WorkItem, WorkItemPriority, WorkItemType } from '../api/types'
 import AddButton from '../components/AddButton'
@@ -12,7 +11,6 @@ interface Props {
   milestones: Milestone[]
   onWorkItemsChange: (items: WorkItem[]) => void
   onMilestonesChange: (milestones: Milestone[]) => void
-  onBoardsChange: (boards: Board[]) => void
 }
 
 const MIN_DAY_WIDTH = 28
@@ -36,19 +34,16 @@ const COL_STATUS = 96
 const COL_PRIORITY = 72
 const LABEL_WIDTH = 460
 
-const MONTH_PRESETS: { key: string; label: string; days: number }[] = [
-  { key: 'm1', label: '1 Monat', days: 30 },
-  { key: 'm3', label: '3 Monate', days: 90 },
-  { key: 'm6', label: '6 Monate', days: 180 },
-  { key: 'm12', label: '12 Monate', days: 365 },
-]
-
-const WEEK_PRESETS: { key: string; label: string; days: number }[] = [
+const RANGE_PRESETS: { key: string; label: string; days: number }[] = [
   { key: 'd3', label: '3 Tage', days: 3 },
   { key: 'w1', label: '1 Woche', days: 7 },
   { key: 'w2', label: '2 Wochen', days: 14 },
   { key: 'w3', label: '3 Wochen', days: 21 },
   { key: 'w4', label: '4 Wochen', days: 28 },
+  { key: 'm1', label: '1 Monat', days: 30 },
+  { key: 'm3', label: '3 Monate', days: 90 },
+  { key: 'm6', label: '6 Monate', days: 180 },
+  { key: 'm12', label: '12 Monate', days: 365 },
 ]
 
 function startOfDay(d: Date) {
@@ -190,7 +185,7 @@ interface MilestoneRow {
 
 type Row = TaskRow | MilestoneRow
 
-export default function TimelineView({ projectId, boards, workItems, milestones, onWorkItemsChange, onMilestonesChange, onBoardsChange }: Props) {
+export default function TimelineView({ projectId, boards, workItems, milestones, onWorkItemsChange, onMilestonesChange }: Props) {
   const [newTitle, setNewTitle] = useState('')
   const [newType, setNewType] = useState<WorkItemType>('Task')
   const [newParentId, setNewParentId] = useState('')
@@ -421,6 +416,25 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     syncScrollLeft(bodyScrollRef.current, [scrollbarRef.current, monthScrollRef.current, containerRef.current])
   }
 
+  // Mouse-wheel scrolling anywhere over the chart moves it left/right instead of the page up/down
+  // - there's no vertical scroll to preserve inside the chart itself (the page scrolls for tall
+  // row lists), so repurposing the wheel axis entirely for horizontal scroll is unambiguous.
+  // A native (non-React) listener is required: React registers onWheel as a passive listener,
+  // which silently ignores preventDefault() and would let the page scroll vertically underneath.
+  const chartWheelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = chartWheelRef.current
+    if (!el) return
+    function onWheel(event: WheelEvent) {
+      const target = containerRef.current
+      if (!target) return
+      event.preventDefault()
+      target.scrollLeft += event.deltaX + event.deltaY
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
   function taskRows(parentId: string | null, depth: number): TaskRow[] {
     const children = (itemsByParent.get(parentId) ?? []).filter((w) => w.startDate || w.dueDate)
     return children.flatMap((item) => {
@@ -592,21 +606,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     if (!title) return
     if (newType === 'Task' && !newStart) return
 
-    let target = firstTodoColumn(boards)
+    // ProjectPage guarantees a board with columns exists before this view even renders.
+    const target = firstTodoColumn(boards)
     if (!target?.column) {
-      // First task/phase in a project that predates auto-created boards (or somehow still has
-      // none) - provision one on the fly instead of sending the user off to the Kanban tab first.
-      try {
-        const board = await createBoard(projectId, 'Board')
-        onBoardsChange([...boards, board])
-        target = firstTodoColumn([board])
-      } catch {
-        setError('Board konnte nicht automatisch angelegt werden.')
-        return
-      }
-    }
-    if (!target?.column) {
-      setError('Das automatisch angelegte Board hat keine Spalten - im Kanban-Tab prüfen.')
+      setError('Board hat keine Spalten - im Kanban-Tab prüfen.')
       return
     }
 
@@ -845,27 +848,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
           {rangeMenuOpen && (
             <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-              <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Monate</p>
+              <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Zeitraum</p>
               <div className="mb-3 flex flex-wrap gap-1">
-                {MONTH_PRESETS.map((p) => (
-                  <button
-                    key={p.key}
-                    type="button"
-                    onClick={() => applyPreset(p.days, p.key)}
-                    className={`rounded px-2 py-1 text-xs ${
-                      activePreset === p.key
-                        ? 'bg-indigo-600 text-white'
-                        : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-
-              <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Wochen</p>
-              <div className="mb-3 flex flex-wrap gap-1">
-                {WEEK_PRESETS.map((p) => (
+                {RANGE_PRESETS.map((p) => (
                   <button
                     key={p.key}
                     type="button"
@@ -1015,7 +1000,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         {/* scrollable day chart: a thin strip holds the one visible scrollbar, anchored above
             the month/year row; the month row, week/day header rows, and the row body below all
             scroll in lockstep with their own scrollbars hidden, looking like a single view */}
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div ref={chartWheelRef} className="flex min-w-0 flex-1 flex-col">
           <div ref={scrollbarRef} className="overflow-x-auto" onScroll={handleScrollbarScroll} style={{ height: SCROLLBAR_ROW_HEIGHT }}>
             <div style={{ width: chartWidth, height: 1 }} />
           </div>

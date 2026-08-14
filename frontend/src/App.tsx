@@ -4,7 +4,6 @@ import { useAuth } from './context/AuthContext'
 import LoginPage from './pages/LoginPage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectPage from './pages/ProjectPage'
-import BoardPage from './pages/BoardPage'
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { token } = useAuth()
@@ -32,14 +31,6 @@ export default function App() {
         element={
           <RequireAuth>
             <ProjectPage />
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/projects/:projectId/boards/:boardId"
-        element={
-          <RequireAuth>
-            <BoardPage />
           </RequireAuth>
         }
       />

@@ -1,48 +1,47 @@
 import { useEffect, useState } from 'react'
-import { Navigate, useNavigate, useParams } from 'react-router-dom'
+import { Navigate, useParams } from 'react-router-dom'
 import { createBoard, getBoards, getProjects } from '../api/projects'
 import { getTimeline } from '../api/timeline'
 import { getNotes } from '../api/notes'
+import { getUsers, type UserSummary } from '../api/users'
 import type { Board, Milestone, Note, Project, WorkItem } from '../api/types'
 import TimelineView from './TimelineView'
+import KanbanBoard from './KanbanBoard'
 import NotesView from './NotesView'
 import Sidebar from '../components/Sidebar'
-import AddButton from '../components/AddButton'
 
 type Tab = 'timeline' | 'kanban' | 'notes'
 const VALID_TABS: Tab[] = ['timeline', 'kanban', 'notes']
 
 export default function ProjectPage() {
   const { projectId, tab } = useParams<{ projectId: string; tab: string }>()
-  const navigate = useNavigate()
 
   const [project, setProject] = useState<Project | null>(null)
-  const [boards, setBoards] = useState<Board[]>([])
+  const [board, setBoard] = useState<Board | null>(null)
   const [workItems, setWorkItems] = useState<WorkItem[]>([])
   const [milestones, setMilestones] = useState<Milestone[]>([])
   const [notes, setNotes] = useState<Note[]>([])
+  const [users, setUsers] = useState<UserSummary[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!projectId) return
 
-    Promise.all([getProjects(), getBoards(projectId), getTimeline(projectId), getNotes(projectId)]).then(
-      ([projects, boardList, timeline, noteList]) => {
+    Promise.all([getProjects(), getBoards(projectId), getTimeline(projectId), getNotes(projectId), getUsers()]).then(
+      async ([projects, boardList, timeline, noteList, userList]) => {
         setProject(projects.find((p) => p.id === projectId) ?? null)
-        setBoards(boardList)
+        // Every project gets a board automatically on creation - this only provisions one for
+        // projects that predate that (or somehow still have none), so Kanban always has columns.
+        const resolvedBoard = boardList[0] ?? (await createBoard(projectId, 'Board'))
+        setBoard(resolvedBoard)
         setWorkItems(timeline.workItems)
         setMilestones(timeline.milestones)
         setNotes(noteList)
+        setUsers(userList)
         setLoading(false)
       },
     )
   }, [projectId])
-
-  async function handleCreateBoard() {
-    if (!projectId) return
-    const board = await createBoard(projectId, 'Board')
-    setBoards((prev) => [...prev, board])
-  }
 
   if (!projectId) return null
 
@@ -51,7 +50,7 @@ export default function ProjectPage() {
   }
   const activeTab = tab as Tab
 
-  if (loading || !project) {
+  if (loading || !project || !board) {
     return <div className="p-6 text-slate-500 dark:text-slate-400">Projekt wird geladen…</div>
   }
 
@@ -64,38 +63,15 @@ export default function ProjectPage() {
           {activeTab === 'timeline' && (
             <TimelineView
               projectId={projectId}
-              boards={boards}
+              boards={[board]}
               workItems={workItems}
               milestones={milestones}
               onWorkItemsChange={setWorkItems}
               onMilestonesChange={setMilestones}
-              onBoardsChange={setBoards}
             />
           )}
 
-          {activeTab === 'kanban' && (
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-semibold">Boards</h1>
-                <AddButton onClick={handleCreateBoard} label="Board anlegen" />
-              </div>
-              <ul className="flex flex-wrap gap-2">
-                {boards.map((board) => (
-                  <li key={board.id}>
-                    <button
-                      onClick={() => navigate(`/projects/${projectId}/boards/${board.id}`)}
-                      className="rounded bg-slate-200 px-3 py-1 text-sm hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700"
-                    >
-                      {board.name}
-                    </button>
-                  </li>
-                ))}
-                {boards.length === 0 && (
-                  <li className="text-sm text-slate-500 dark:text-slate-500">Noch keine Boards — oben auf "+" klicken.</li>
-                )}
-              </ul>
-            </div>
-          )}
+          {activeTab === 'kanban' && <KanbanBoard board={board} items={workItems} users={users} onItemsChange={setWorkItems} />}
 
           {activeTab === 'notes' && <NotesView projectId={projectId} notes={notes} onNotesChange={setNotes} />}
         </main>
