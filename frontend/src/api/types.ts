@@ -15,7 +15,6 @@ export interface Project {
   isOwner: boolean
   myAssignedTaskCount: number
   myCompletedTaskCount: number
-  openTicketCount: number
   /** Project-wide completion if isOwner, otherwise your own task completion. */
   completionPercent: number
 }
@@ -37,7 +36,7 @@ export interface Board {
   columns: BoardColumn[]
 }
 
-export type WorkItemType = 'Task' | 'Bug' | 'Feature' | 'Epic'
+export type WorkItemType = 'Task' | 'Phase'
 export type WorkItemPriority = 'Low' | 'Medium' | 'High' | 'Urgent'
 
 export interface WorkItem {

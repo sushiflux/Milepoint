@@ -112,16 +112,12 @@ export default function ProjectsPage() {
           <h2 className="text-base font-medium">{project.name}</h2>
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-3 text-xs text-slate-500 dark:text-slate-400">
+        <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500 dark:text-slate-400">
           <div>
             <p className="text-slate-500 dark:text-slate-500">Meine Aufgaben</p>
             <p className="text-sm text-slate-700 dark:text-slate-200">
               {project.myCompletedTaskCount} / {project.myAssignedTaskCount} erledigt
             </p>
-          </div>
-          <div>
-            <p className="text-slate-500 dark:text-slate-500">Offene Tickets</p>
-            <p className="text-sm text-slate-700 dark:text-slate-200">{project.openTicketCount}</p>
           </div>
           <div>
             <p className="text-slate-500 dark:text-slate-500">{progressLabel}</p>

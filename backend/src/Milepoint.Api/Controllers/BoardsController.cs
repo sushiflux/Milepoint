@@ -12,7 +12,7 @@ namespace Milepoint.Api.Controllers;
 [Route("api/projects/{projectId}/boards")]
 public class BoardsController : ControllerBase
 {
-    private static readonly (string Name, BoardColumnType Type)[] DefaultColumns =
+    internal static readonly (string Name, BoardColumnType Type)[] DefaultColumns =
     [
         ("Backlog", BoardColumnType.Todo),
         ("In Arbeit", BoardColumnType.InProgress),

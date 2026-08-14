@@ -12,7 +12,6 @@ public record ProjectDto(
     bool IsOwner,
     int MyAssignedTaskCount,
     int MyCompletedTaskCount,
-    int OpenTicketCount,
     // Project-wide completion if you're the owner, otherwise your own task completion - see
     // ProjectsController for the exact rule.
     double CompletionPercent);

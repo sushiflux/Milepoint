@@ -78,6 +78,17 @@ public class ProjectsController : ControllerBase
             Title = project.Name,
             Content = string.Empty
         });
+
+        // ...and a default board, so Timeline task/phase creation always has a column to land
+        // in - no "create a board first" detour before the project is usable.
+        _db.Boards.Add(new Board
+        {
+            ProjectId = project.Id,
+            Name = "Board",
+            Columns = BoardsController.DefaultColumns
+                .Select((c, index) => new BoardColumn { Name = c.Name, Order = index, Type = c.Type })
+                .ToList()
+        });
         await _db.SaveChangesAsync();
 
         var dto = ToDto(project, [], currentUserId);
@@ -154,15 +165,11 @@ public class ProjectsController : ControllerBase
         var isOwner = project.CreatedByUserId == currentUserId;
 
         var myTasks = items.Where(w =>
-            (w.Type == WorkItemType.Task || w.Type == WorkItemType.Feature) &&
+            w.Type == WorkItemType.Task &&
             w.AssigneeId == currentUserId).ToList();
 
         var myAssignedTaskCount = myTasks.Count;
         var myCompletedTaskCount = myTasks.Count(w => w.Column.Type == BoardColumnType.Done);
-
-        var openTicketCount = items.Count(w =>
-            (w.Type == WorkItemType.Bug || w.Type == WorkItemType.Epic) &&
-            w.Column.Type != BoardColumnType.Done);
 
         double completionPercent;
         if (isOwner)
@@ -186,7 +193,6 @@ public class ProjectsController : ControllerBase
             isOwner,
             myAssignedTaskCount,
             myCompletedTaskCount,
-            openTicketCount,
             Math.Round(completionPercent, 1));
     }
 }

@@ -3,9 +3,7 @@ namespace Milepoint.Api.Models;
 public enum WorkItemType
 {
     Task,
-    Bug,
-    Feature,
-    Epic
+    Phase
 }
 
 public enum WorkItemPriority

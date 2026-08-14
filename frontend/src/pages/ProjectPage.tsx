@@ -69,6 +69,7 @@ export default function ProjectPage() {
               milestones={milestones}
               onWorkItemsChange={setWorkItems}
               onMilestonesChange={setMilestones}
+              onBoardsChange={setBoards}
             />
           )}
 

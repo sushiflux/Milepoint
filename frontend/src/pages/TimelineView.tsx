@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { createMilestone, deleteMilestone } from '../api/milestones'
+import { createBoard } from '../api/projects'
 import { createWorkItem, updateWorkItem } from '../api/workItems'
-import type { Board, BoardColumnType, Milestone, WorkItem, WorkItemPriority } from '../api/types'
+import type { Board, BoardColumnType, Milestone, WorkItem, WorkItemPriority, WorkItemType } from '../api/types'
 import AddButton from '../components/AddButton'
 
 interface Props {
@@ -11,6 +12,7 @@ interface Props {
   milestones: Milestone[]
   onWorkItemsChange: (items: WorkItem[]) => void
   onMilestonesChange: (milestones: Milestone[]) => void
+  onBoardsChange: (boards: Board[]) => void
 }
 
 const MIN_DAY_WIDTH = 28
@@ -25,6 +27,9 @@ const MONTH_ROW_HEIGHT = 20
 const WEEK_ROW_HEIGHT = 16
 const DAY_ROW_HEIGHT = 22
 const HEADER_HEIGHT = MONTH_ROW_HEIGHT + WEEK_ROW_HEIGHT + DAY_ROW_HEIGHT
+// Height of the scrollbar-only strip placed above the month/year row so the one visible
+// horizontal scrollbar is anchored there instead of at the bottom of the day rows.
+const SCROLLBAR_ROW_HEIGHT = 14
 const COL_ID = 56
 const COL_TYPE = 68
 const COL_STATUS = 96
@@ -132,6 +137,22 @@ const PRIORITY_LABELS: Record<WorkItemPriority, string> = {
   Urgent: 'Dringend',
 }
 
+const TYPE_LABELS: Record<WorkItemType, string> = {
+  Task: 'Aufgabe',
+  Phase: 'Phase',
+}
+
+// Matches the OpenProject color convention: phases orange, tasks blue, milestones green.
+const TYPE_TEXT_COLOR: Record<WorkItemType, string> = {
+  Task: 'text-sky-600 dark:text-sky-400',
+  Phase: 'text-orange-600 dark:text-orange-400',
+}
+
+const TYPE_BAR_COLOR: Record<WorkItemType, string> = {
+  Task: 'bg-sky-600',
+  Phase: 'bg-orange-600',
+}
+
 const STATUS_OPTIONS: BoardColumnType[] = ['Todo', 'InProgress', 'Done']
 const PRIORITY_OPTIONS: WorkItemPriority[] = ['Low', 'Medium', 'High', 'Urgent']
 const UNASSIGNED = '__unassigned__'
@@ -169,8 +190,9 @@ interface MilestoneRow {
 
 type Row = TaskRow | MilestoneRow
 
-export default function TimelineView({ projectId, boards, workItems, milestones, onWorkItemsChange, onMilestonesChange }: Props) {
+export default function TimelineView({ projectId, boards, workItems, milestones, onWorkItemsChange, onMilestonesChange, onBoardsChange }: Props) {
   const [newTitle, setNewTitle] = useState('')
+  const [newType, setNewType] = useState<WorkItemType>('Task')
   const [newParentId, setNewParentId] = useState('')
   const [newStart, setNewStart] = useState('')
   const [newEnd, setNewEnd] = useState('')
@@ -181,6 +203,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [showMilestoneForm, setShowMilestoneForm] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const scrollbarRef = useRef<HTMLDivElement>(null)
+  const monthScrollRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const bodyScrollRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
@@ -303,7 +327,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const dayWidth =
     containerWidth > 0
       ? visibleDayCount != null
-        ? Math.max(containerWidth / Math.min(visibleDayCount, MAX_FIT_DAYS), 1)
+        ? Math.max(containerWidth / Math.min(visibleDayCount, MAX_FIT_DAYS), MIN_DAY_WIDTH)
         : Math.max(containerWidth / dayCount, MIN_DAY_WIDTH)
       : MIN_DAY_WIDTH
   const chartWidth = renderedDayCount * dayWidth
@@ -342,6 +366,14 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     setVisibleDayCount(null)
   }
 
+  // Mirrors OpenProject's "Create new child" (right-click on a work package) - opens the same
+  // task form, just pre-scoped to a parent instead of forcing a fixed wizard order, so a
+  // hierarchy of any depth can grow ad-hoc from wherever it's needed.
+  function openChildForm(parentId: string) {
+    setNewParentId(parentId)
+    setShowTaskForm(true)
+  }
+
   function toggleCollapse(id: string) {
     setCollapsed((prev) => {
       const next = new Set(prev)
@@ -362,20 +394,31 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     el.scrollLeft = Math.max(target, 0)
   }
 
-  // The visible scrollbar lives under the day header; the row area below scrolls in lockstep
-  // with its own scrollbar hidden, so it looks like a single view with one scrollbar up top.
-  function handleHeaderScroll() {
-    const body = bodyScrollRef.current
-    if (body && containerRef.current && body.scrollLeft !== containerRef.current.scrollLeft) {
-      body.scrollLeft = containerRef.current.scrollLeft
+  // The one visible scrollbar lives in its own thin strip above the month/year row; the month
+  // row, the week/day header rows, and the row area below all scroll in lockstep with their own
+  // scrollbars hidden, so it looks like a single view with the scrollbar anchored above the
+  // month/year level.
+  function syncScrollLeft(source: HTMLDivElement | null, targets: (HTMLDivElement | null)[]) {
+    if (!source) return
+    for (const target of targets) {
+      if (target && target.scrollLeft !== source.scrollLeft) target.scrollLeft = source.scrollLeft
     }
   }
 
+  function handleScrollbarScroll() {
+    syncScrollLeft(scrollbarRef.current, [monthScrollRef.current, containerRef.current, bodyScrollRef.current])
+  }
+
+  function handleMonthScroll() {
+    syncScrollLeft(monthScrollRef.current, [scrollbarRef.current, containerRef.current, bodyScrollRef.current])
+  }
+
+  function handleHeaderScroll() {
+    syncScrollLeft(containerRef.current, [scrollbarRef.current, monthScrollRef.current, bodyScrollRef.current])
+  }
+
   function handleBodyScroll() {
-    const header = containerRef.current
-    if (header && bodyScrollRef.current && header.scrollLeft !== bodyScrollRef.current.scrollLeft) {
-      header.scrollLeft = bodyScrollRef.current.scrollLeft
-    }
+    syncScrollLeft(bodyScrollRef.current, [scrollbarRef.current, monthScrollRef.current, containerRef.current])
   }
 
   function taskRows(parentId: string | null, depth: number): TaskRow[] {
@@ -453,6 +496,25 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return { start, finish }
   }
 
+  // A Phase has no dates of its own - its bar is the union of its descendants' ranges (earliest
+  // start to latest finish), recursively, so nested phases roll up too. No bar until at least one
+  // descendant actually has a date.
+  function phaseRange(item: WorkItem): { start: Date; finish: Date } | null {
+    let start: Date | null = null
+    let finish: Date | null = null
+    for (const child of itemsByParent.get(item.id) ?? []) {
+      const childRange = child.type === 'Phase' ? phaseRange(child) : effectiveRange(child)
+      if (!childRange) continue
+      if (!start || childRange.start < start) start = childRange.start
+      if (!finish || childRange.finish > finish) finish = childRange.finish
+    }
+    return start && finish ? { start, finish } : null
+  }
+
+  function rangeOf(item: WorkItem) {
+    return item.type === 'Phase' ? phaseRange(item) : effectiveRange(item)
+  }
+
   const connectors = useMemo(() => {
     const paths: { key: string; d: string }[] = []
     for (const row of rows) {
@@ -527,21 +589,36 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     event.preventDefault()
     setError(null)
     const title = newTitle.trim()
-    if (!title || !newStart) return
+    if (!title) return
+    if (newType === 'Task' && !newStart) return
 
-    const target = firstTodoColumn(boards)
+    let target = firstTodoColumn(boards)
     if (!target?.column) {
-      setError('Erst ein Board mit Spalten anlegen (Kanban-Tab), bevor Aufgaben angelegt werden können.')
+      // First task/phase in a project that predates auto-created boards (or somehow still has
+      // none) - provision one on the fly instead of sending the user off to the Kanban tab first.
+      try {
+        const board = await createBoard(projectId, 'Board')
+        onBoardsChange([...boards, board])
+        target = firstTodoColumn([board])
+      } catch {
+        setError('Board konnte nicht automatisch angelegt werden.')
+        return
+      }
+    }
+    if (!target?.column) {
+      setError('Das automatisch angelegte Board hat keine Spalten - im Kanban-Tab prüfen.')
       return
     }
 
-    const created = await createWorkItem(target.board.id, target.column.id, title, 'Task', 'Medium', undefined, {
+    // A Phase has no dates of its own - its bar is rolled up live from its subtasks (see phaseRange).
+    const created = await createWorkItem(target.board.id, target.column.id, title, newType, 'Medium', undefined, {
       parentWorkItemId: newParentId || undefined,
-      startDate: new Date(newStart).toISOString(),
-      dueDate: newEnd ? new Date(newEnd).toISOString() : undefined,
+      startDate: newType === 'Phase' ? undefined : new Date(newStart).toISOString(),
+      dueDate: newType === 'Phase' ? undefined : newEnd ? new Date(newEnd).toISOString() : undefined,
     })
     onWorkItemsChange([...workItems, created])
     setNewTitle('')
+    setNewType('Task')
     setNewParentId('')
     setNewStart('')
     setNewEnd('')
@@ -586,7 +663,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         <div className="flex items-center gap-2">
           {!showTaskForm && (
             <AddButton
-              onClick={() => setShowTaskForm(true)}
+              onClick={() => {
+                setNewParentId('')
+                setShowTaskForm(true)
+              }}
               label="Neue Aufgabe"
               icon={
                 <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
@@ -841,8 +921,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       </div>
 
       <section className="flex overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        {/* fixed label column - not part of the horizontal scroll, so the scrollbar below only spans the day chart */}
+        {/* fixed label column - not part of the horizontal scroll, so the scrollbar strip only spans the day chart */}
         <div className="shrink-0" style={{ width: LABEL_WIDTH }}>
+          {/* spacer matching the scrollbar strip above the chart's month row, so the column labels stay aligned */}
+          <div style={{ height: SCROLLBAR_ROW_HEIGHT }} />
           <div className="flex items-center border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
             <span style={{ width: COL_ID }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
               ID
@@ -880,7 +962,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                       ✕
                     </button>
                   </span>
-                  <span style={{ width: COL_TYPE }} className="px-2 text-[11px] text-amber-600 dark:text-amber-400">
+                  <span style={{ width: COL_TYPE }} className="px-2 text-[11px] text-emerald-600 dark:text-emerald-400">
                     Meilenstein
                   </span>
                   <span style={{ width: COL_STATUS }} className="px-2" />
@@ -905,9 +987,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     </button>
                   )}
                   <span className="truncate">{item.title}</span>
+                  <button
+                    onClick={() => openChildForm(item.id)}
+                    title="Unteraufgabe hinzufügen"
+                    aria-label="Unteraufgabe hinzufügen"
+                    className="shrink-0 px-0.5 text-slate-400 hover:text-indigo-500 dark:text-slate-600 dark:hover:text-indigo-400"
+                  >
+                    +
+                  </button>
                 </span>
-                <span style={{ width: COL_TYPE }} className="truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  {item.type}
+                <span style={{ width: COL_TYPE }} className={`truncate px-2 text-[11px] ${TYPE_TEXT_COLOR[item.type]}`}>
+                  {TYPE_LABELS[item.type]}
                 </span>
                 <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
                   <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
@@ -922,33 +1012,56 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           })}
         </div>
 
-        {/* scrollable day chart: a header row with the one visible scrollbar (right under the
-            days), and a row body below it whose own scrollbar is hidden but kept in sync -
-            looks and behaves like a single scroll area with the scrollbar anchored at the top */}
+        {/* scrollable day chart: a thin strip holds the one visible scrollbar, anchored above
+            the month/year row; the month row, week/day header rows, and the row body below all
+            scroll in lockstep with their own scrollbars hidden, looking like a single view */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <div ref={containerRef} className="overflow-x-auto" onScroll={handleHeaderScroll}>
-            <div className="relative" style={{ width: chartWidth }}>
+          <div ref={scrollbarRef} className="overflow-x-auto" onScroll={handleScrollbarScroll} style={{ height: SCROLLBAR_ROW_HEIGHT }}>
+            <div style={{ width: chartWidth, height: 1 }} />
+          </div>
+
+          <div
+            ref={monthScrollRef}
+            className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: 'none' }}
+            onScroll={handleMonthScroll}
+          >
+            <div
+              className="relative border-b border-slate-100 dark:border-slate-800/60"
+              style={{ width: chartWidth, height: MONTH_ROW_HEIGHT }}
+            >
               {todayOffset >= 0 && todayOffset < renderedDayCount && (
                 <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }}>
                   <div className="absolute -left-px h-2 w-2 -translate-x-1/2 rotate-45 bg-red-500" />
                 </div>
               )}
-
-              {/* header */}
-              <div className="flex flex-col border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
-                <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: MONTH_ROW_HEIGHT }}>
-                  {monthGroups.map((g, i) => (
-                    <div
-                      key={g.key}
-                      className={`absolute top-0 flex h-full items-center overflow-hidden border-l border-slate-200 px-1.5 text-[10px] font-medium text-slate-600 dark:border-slate-800/60 dark:text-slate-300 ${
-                        i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
-                      }`}
-                      style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
-                    >
-                      <span className="truncate">{g.label}</span>
-                    </div>
-                  ))}
+              {monthGroups.map((g, i) => (
+                <div
+                  key={g.key}
+                  className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-l border-slate-200 px-1.5 text-[10px] font-medium text-slate-600 dark:border-slate-800/60 dark:text-slate-300 ${
+                    i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
+                  }`}
+                  style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
+                >
+                  <span className="truncate">{g.label}</span>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          <div
+            ref={containerRef}
+            className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: 'none' }}
+            onScroll={handleHeaderScroll}
+          >
+            <div className="relative" style={{ width: chartWidth }}>
+              {todayOffset >= 0 && todayOffset < renderedDayCount && (
+                <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }} />
+              )}
+
+              {/* header: week + day rows */}
+              <div className="flex flex-col border-b border-slate-200 dark:border-slate-800" style={{ height: WEEK_ROW_HEIGHT + DAY_ROW_HEIGHT }}>
                 <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: WEEK_ROW_HEIGHT }}>
                   {weekGroups.map((g, i) => (
                     <div
@@ -1012,7 +1125,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     >
                       <div
                         title={`${m.name} — ${formatDate(m.date)}`}
-                        className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-amber-600 dark:text-amber-400"
+                        className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-emerald-600 dark:text-emerald-400"
                         style={{ left }}
                       >
                         ◆
@@ -1022,9 +1135,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 }
 
                 const { item, hasChildren } = row
-                const range = effectiveRange(item)
-                const isGroup = hasChildren
-                const barColor = isGroup ? 'bg-slate-600' : 'bg-sky-600'
+                const isPhase = item.type === 'Phase'
+                const range = rangeOf(item)
+                const barColor = isPhase ? TYPE_BAR_COLOR.Phase : hasChildren ? 'bg-slate-600' : TYPE_BAR_COLOR.Task
                 const blocked = item.blockingWorkItemIds.length > 0
 
                 return (
@@ -1035,10 +1148,13 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   >
                     {range && (
                       <div
-                        onPointerDown={handlePointerDown(item)}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp(item)}
-                        className={`absolute flex cursor-grab items-center rounded ${barColor} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
+                        // A Phase's bar is rolled up live from its subtasks (see phaseRange) - it
+                        // isn't its own thing to drag/resize, so no pointer handlers or handles.
+                        onPointerDown={isPhase ? undefined : handlePointerDown(item)}
+                        onPointerMove={isPhase ? undefined : handlePointerMove}
+                        onPointerUp={isPhase ? undefined : handlePointerUp(item)}
+                        title={isPhase ? `${item.title} — ${formatDate(range.start.toISOString())} bis ${formatDate(range.finish.toISOString())}` : undefined}
+                        className={`absolute flex items-center rounded ${barColor} ${isPhase ? '' : 'cursor-grab'} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
                         style={{
                           left: diffDays(range.start, rangeStart) * dayWidth,
                           width: Math.max((diffDays(range.finish, range.start) + 1) * dayWidth - 4, dayWidth - 4),
@@ -1046,9 +1162,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                           height: ROW_HEIGHT - 12,
                         }}
                       >
-                        <div data-handle="start" className="absolute left-0 h-full w-1.5 cursor-ew-resize" />
+                        {!isPhase && <div data-handle="start" className="absolute left-0 h-full w-1.5 cursor-ew-resize" />}
                         <span className="truncate px-2 text-[11px] text-white select-none">{item.title}</span>
-                        <div data-handle="end" className="absolute right-0 h-full w-1.5 cursor-ew-resize" />
+                        {!isPhase && <div data-handle="end" className="absolute right-0 h-full w-1.5 cursor-ew-resize" />}
                       </div>
                     )}
                   </div>
@@ -1073,6 +1189,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 placeholder="Titel der Aufgabe"
                 className="w-48 rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
               />
+              <select value={newType} onChange={(e) => setNewType(e.target.value as WorkItemType)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
+                <option value="Task">{TYPE_LABELS.Task}</option>
+                <option value="Phase">{TYPE_LABELS.Phase}</option>
+              </select>
               <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
                 <option value="">Keine übergeordnete Aufgabe</option>
                 {workItems.map((w) => (
@@ -1081,8 +1201,14 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   </option>
                 ))}
               </select>
-              <input required type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} title="Anfangsdatum" className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
-              <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} title="Enddatum (optional)" className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+              {newType === 'Task' ? (
+                <>
+                  <input required type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} title="Anfangsdatum" className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+                  <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} title="Enddatum (optional)" className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+                </>
+              ) : (
+                <span className="text-xs text-slate-500 dark:text-slate-400">Zeitraum ergibt sich automatisch aus den Unteraufgaben</span>
+              )}
               <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
                 Anlegen
               </button>
