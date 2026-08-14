@@ -59,7 +59,7 @@ export default function ProjectPage() {
     <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar project={{ id: project.id, name: project.name }} activeTab={activeTab} />
 
-      <div className="flex-1">
+      <div className="min-w-0 flex-1">
         <main className="p-6">
           {activeTab === 'timeline' && (
             <TimelineView

@@ -106,11 +106,6 @@ function formatDate(iso: string | null) {
   return new Date(iso).toLocaleDateString('de-DE')
 }
 
-function toDateInputValue(iso: string | null) {
-  if (!iso) return ''
-  return new Date(iso).toISOString().slice(0, 10)
-}
-
 const STATUS_DOT: Record<string, string> = {
   Todo: 'bg-slate-500',
   InProgress: 'bg-amber-400',
@@ -187,6 +182,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [drag, setDrag] = useState<DragState | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const containerRef = useRef<HTMLDivElement>(null)
+  const bodyScrollRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
   const [visibleDayCount, setVisibleDayCount] = useState<number | null>(null)
   const [activePreset, setActivePreset] = useState<string | null>(null)
@@ -229,7 +225,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   }, [workItems])
 
   const workItemById = useMemo(() => new Map(workItems.map((w) => [w.id, w])), [workItems])
-  const undatedItems = workItems.filter((w) => !w.startDate && !w.dueDate)
 
   const groupIds = useMemo(
     () => new Set([...itemsByParent.keys()].filter((k): k is string => k !== null && (itemsByParent.get(k)?.length ?? 0) > 0)),
@@ -308,8 +303,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const dayWidth =
     containerWidth > 0
       ? visibleDayCount != null
-        ? Math.max((containerWidth - LABEL_WIDTH) / Math.min(visibleDayCount, MAX_FIT_DAYS), 1)
-        : Math.max((containerWidth - LABEL_WIDTH) / dayCount, MIN_DAY_WIDTH)
+        ? Math.max(containerWidth / Math.min(visibleDayCount, MAX_FIT_DAYS), 1)
+        : Math.max(containerWidth / dayCount, MIN_DAY_WIDTH)
       : MIN_DAY_WIDTH
   const chartWidth = renderedDayCount * dayWidth
   const todayOffset = diffDays(startOfDay(new Date()), rangeStart)
@@ -322,8 +317,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     const el = containerRef.current
     const prevDayWidth = prevDayWidthRef.current
     if (el && prevDayWidth !== dayWidth) {
-      const ratio = dayWidth / prevDayWidth
-      el.scrollLeft = el.scrollLeft > LABEL_WIDTH ? LABEL_WIDTH + (el.scrollLeft - LABEL_WIDTH) * ratio : el.scrollLeft * ratio
+      el.scrollLeft = el.scrollLeft * (dayWidth / prevDayWidth)
     }
     prevDayWidthRef.current = dayWidth
   }, [dayWidth])
@@ -364,8 +358,24 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   function scrollToToday() {
     const el = containerRef.current
     if (!el || todayOffset < 0 || todayOffset >= renderedDayCount) return
-    const target = LABEL_WIDTH + todayOffset * dayWidth - (el.clientWidth - LABEL_WIDTH) / 2
+    const target = todayOffset * dayWidth - el.clientWidth / 2
     el.scrollLeft = Math.max(target, 0)
+  }
+
+  // The visible scrollbar lives under the day header; the row area below scrolls in lockstep
+  // with its own scrollbar hidden, so it looks like a single view with one scrollbar up top.
+  function handleHeaderScroll() {
+    const body = bodyScrollRef.current
+    if (body && containerRef.current && body.scrollLeft !== containerRef.current.scrollLeft) {
+      body.scrollLeft = containerRef.current.scrollLeft
+    }
+  }
+
+  function handleBodyScroll() {
+    const header = containerRef.current
+    if (header && bodyScrollRef.current && header.scrollLeft !== bodyScrollRef.current.scrollLeft) {
+      header.scrollLeft = bodyScrollRef.current.scrollLeft
+    }
   }
 
   function taskRows(parentId: string | null, depth: number): TaskRow[] {
@@ -517,7 +527,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     event.preventDefault()
     setError(null)
     const title = newTitle.trim()
-    if (!title) return
+    if (!title || !newStart) return
 
     const target = firstTodoColumn(boards)
     if (!target?.column) {
@@ -527,7 +537,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
     const created = await createWorkItem(target.board.id, target.column.id, title, 'Task', 'Medium', undefined, {
       parentWorkItemId: newParentId || undefined,
-      startDate: newStart ? new Date(newStart).toISOString() : undefined,
+      startDate: new Date(newStart).toISOString(),
       dueDate: newEnd ? new Date(newEnd).toISOString() : undefined,
     })
     onWorkItemsChange([...workItems, created])
@@ -536,13 +546,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     setNewStart('')
     setNewEnd('')
     setShowTaskForm(false)
-  }
-
-  async function handleAssignDates(item: WorkItem, startValue: string, endValue: string) {
-    if (!startValue && !endValue) return
-    const start = startValue ? new Date(startValue) : new Date(endValue)
-    const finish = endValue ? new Date(endValue) : new Date(startValue)
-    await commitDateChange(item, start, finish)
   }
 
   async function handleCreateMilestone(event: FormEvent) {
@@ -564,11 +567,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
   const weekendBackground = `repeating-linear-gradient(to right, rgba(148,163,184,0.05) 0, rgba(148,163,184,0.05) ${dayWidth}px, transparent ${dayWidth}px, transparent ${dayWidth * 2}px)`
 
-  function LabelCell({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  function LabelRow({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
     return (
       <div
-        className="sticky left-0 z-20 flex shrink-0 items-center bg-white dark:bg-slate-900"
-        style={{ width: LABEL_WIDTH, ...style }}
+        className="flex items-center border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
+        style={{ height: ROW_HEIGHT, ...style }}
       >
         {children}
       </div>
@@ -837,202 +840,223 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         </div>
       </div>
 
-      <section
-        ref={containerRef}
-        className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900"
-      >
-        <div className="relative" style={{ width: LABEL_WIDTH + chartWidth }}>
-          {todayOffset >= 0 && todayOffset < renderedDayCount && (
-            <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: LABEL_WIDTH + todayOffset * dayWidth }}>
-              <div className="absolute -left-px h-2 w-2 -translate-x-1/2 rotate-45 bg-red-500" />
-            </div>
-          )}
-
-          {/* header */}
-          <div className="flex border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
-            <LabelCell>
-              <span style={{ width: COL_ID }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
-                ID
-              </span>
-              <span className="flex-1 px-2 text-[10px] font-medium uppercase text-slate-500">Betreff</span>
-              <span style={{ width: COL_TYPE }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
-                Typ
-              </span>
-              <span style={{ width: COL_STATUS }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
-                Status
-              </span>
-              <span style={{ width: COL_PRIORITY }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
-                Priorität
-              </span>
-            </LabelCell>
-            <div className="flex shrink-0 flex-col" style={{ width: chartWidth }}>
-              <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: MONTH_ROW_HEIGHT }}>
-                {monthGroups.map((g, i) => (
-                  <div
-                    key={g.key}
-                    className={`absolute top-0 flex h-full items-center overflow-hidden border-l border-slate-200 px-1.5 text-[10px] font-medium text-slate-600 dark:border-slate-800/60 dark:text-slate-300 ${
-                      i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
-                    }`}
-                    style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
-                  >
-                    <span className="truncate">{g.label}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: WEEK_ROW_HEIGHT }}>
-                {weekGroups.map((g, i) => (
-                  <div
-                    key={g.key}
-                    className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-l border-slate-200/70 text-[9px] text-slate-400 dark:border-slate-800/40 dark:text-slate-500 ${
-                      i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
-                    }`}
-                    style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
-                  >
-                    <span className="truncate">{g.label}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="relative" style={{ height: DAY_ROW_HEIGHT, backgroundImage: weekendBackground }}>
-                {days.map((d, i) => (
-                  <div
-                    key={i}
-                    className="absolute top-0 flex h-full items-center justify-center border-l border-slate-200 text-[10px] text-slate-500 dark:border-slate-800/60"
-                    style={{ left: i * dayWidth, width: dayWidth }}
-                  >
-                    {d.getDate()}
-                  </div>
-                ))}
-              </div>
-            </div>
+      <section className="flex overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        {/* fixed label column - not part of the horizontal scroll, so the scrollbar below only spans the day chart */}
+        <div className="shrink-0" style={{ width: LABEL_WIDTH }}>
+          <div className="flex items-center border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
+            <span style={{ width: COL_ID }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
+              ID
+            </span>
+            <span className="flex-1 px-2 text-[10px] font-medium uppercase text-slate-500">Betreff</span>
+            <span style={{ width: COL_TYPE }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
+              Typ
+            </span>
+            <span style={{ width: COL_STATUS }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
+              Status
+            </span>
+            <span style={{ width: COL_PRIORITY }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
+              Priorität
+            </span>
           </div>
 
-          {/* connector overlay, spans all rows */}
-          <svg
-            className="pointer-events-none absolute z-10"
-            style={{ left: LABEL_WIDTH, top: HEADER_HEIGHT, width: chartWidth, height: rows.length * ROW_HEIGHT }}
-          >
-            {connectors.map((c) => (
-              <path key={c.key} d={c.d} stroke="rgb(129 140 248)" strokeWidth={1.5} fill="none" />
-            ))}
-          </svg>
-
           {rows.length === 0 && (
-            <div className="flex" style={{ height: ROW_HEIGHT }}>
-              <LabelCell style={{ paddingLeft: 8 }}>
-                <span className="text-xs text-slate-500">Noch keine Aufgaben oder Meilensteine mit Termin.</span>
-              </LabelCell>
-              <div style={{ width: chartWidth }} />
-            </div>
+            <LabelRow style={{ paddingLeft: 8 }}>
+              <span className="text-xs text-slate-500">Noch keine Aufgaben oder Meilensteine mit Termin.</span>
+            </LabelRow>
           )}
 
           {rows.map((row) => {
             if (row.kind === 'milestone') {
               const m = row.milestone
-              const left = diffDays(startOfDay(new Date(m.date)), rangeStart) * dayWidth + dayWidth / 2
               return (
-                <div key={row.key} className="flex border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20" style={{ height: ROW_HEIGHT }}>
-                  <LabelCell>
-                    <span style={{ width: COL_ID }} className="px-2 text-[10px] text-slate-500" />
-                    <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs">
-                      {m.name}
-                      <button
-                        onClick={() => handleDeleteMilestone(m)}
-                        className="text-slate-400 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
-                      >
-                        ✕
-                      </button>
-                    </span>
-                    <span style={{ width: COL_TYPE }} className="px-2 text-[11px] text-amber-600 dark:text-amber-400">
-                      Meilenstein
-                    </span>
-                    <span style={{ width: COL_STATUS }} className="px-2" />
-                    <span style={{ width: COL_PRIORITY }} className="px-2" />
-                  </LabelCell>
-                  <div className="relative shrink-0 overflow-hidden" style={{ width: chartWidth, height: ROW_HEIGHT }}>
-                    <div
-                      title={`${m.name} — ${formatDate(m.date)}`}
-                      className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-amber-600 dark:text-amber-400"
-                      style={{ left }}
+                <LabelRow key={row.key}>
+                  <span style={{ width: COL_ID }} className="px-2 text-[10px] text-slate-500" />
+                  <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs">
+                    {m.name}
+                    <button
+                      onClick={() => handleDeleteMilestone(m)}
+                      className="text-slate-400 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
                     >
-                      ◆
-                    </div>
-                  </div>
-                </div>
+                      ✕
+                    </button>
+                  </span>
+                  <span style={{ width: COL_TYPE }} className="px-2 text-[11px] text-amber-600 dark:text-amber-400">
+                    Meilenstein
+                  </span>
+                  <span style={{ width: COL_STATUS }} className="px-2" />
+                  <span style={{ width: COL_PRIORITY }} className="px-2" />
+                </LabelRow>
               )
             }
 
             const { item, depth, hasChildren } = row
-            const range = effectiveRange(item)
-            const isGroup = hasChildren
-            const barColor = isGroup ? 'bg-slate-600' : 'bg-sky-600'
-            const blocked = item.blockingWorkItemIds.length > 0
-
             return (
-              <div key={row.key} className="flex border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20" style={{ height: ROW_HEIGHT }}>
-                <LabelCell>
-                  <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-[10px] text-slate-500">
-                    {item.referenceCode}
-                  </span>
-                  <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs" style={{ paddingLeft: depth * 16 }}>
-                    {hasChildren && (
-                      <button
-                        onClick={() => toggleCollapse(item.id)}
-                        className="w-3 shrink-0 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
-                      >
-                        {collapsed.has(item.id) ? '▸' : '▾'}
-                      </button>
-                    )}
-                    <span className="truncate">{item.title}</span>
-                  </span>
-                  <span style={{ width: COL_TYPE }} className="truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    {item.type}
-                  </span>
-                  <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
-                    {item.columnName}
-                  </span>
-                  <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
-                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
-                    {item.priority}
-                  </span>
-                </LabelCell>
-                <div className="relative shrink-0 overflow-hidden" style={{ width: chartWidth, height: ROW_HEIGHT }}>
-                  {range && (
-                    <div
-                      onPointerDown={handlePointerDown(item)}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={handlePointerUp(item)}
-                      className={`absolute flex cursor-grab items-center rounded ${barColor} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
-                      style={{
-                        left: diffDays(range.start, rangeStart) * dayWidth,
-                        width: Math.max((diffDays(range.finish, range.start) + 1) * dayWidth - 4, dayWidth - 4),
-                        top: 6,
-                        height: ROW_HEIGHT - 12,
-                      }}
+              <LabelRow key={row.key}>
+                <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-[10px] text-slate-500">
+                  {item.referenceCode}
+                </span>
+                <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs" style={{ paddingLeft: depth * 16 }}>
+                  {hasChildren && (
+                    <button
+                      onClick={() => toggleCollapse(item.id)}
+                      className="w-3 shrink-0 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
                     >
-                      <div data-handle="start" className="absolute left-0 h-full w-1.5 cursor-ew-resize" />
-                      <span className="truncate px-2 text-[11px] text-white select-none">{item.title}</span>
-                      <div data-handle="end" className="absolute right-0 h-full w-1.5 cursor-ew-resize" />
-                    </div>
+                      {collapsed.has(item.id) ? '▸' : '▾'}
+                    </button>
                   )}
-                </div>
-              </div>
+                  <span className="truncate">{item.title}</span>
+                </span>
+                <span style={{ width: COL_TYPE }} className="truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  {item.type}
+                </span>
+                <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
+                  {item.columnName}
+                </span>
+                <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
+                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
+                  {item.priority}
+                </span>
+              </LabelRow>
             )
           })}
         </div>
-      </section>
 
-      <section className="space-y-2">
-        <h2 className="text-sm font-medium text-slate-700 dark:text-slate-300">Ohne Termin</h2>
-        {undatedItems.length === 0 ? (
-          <p className="text-sm text-slate-500">Alle Aufgaben haben einen Termin.</p>
-        ) : (
-          <ul className="space-y-1">
-            {undatedItems.map((item) => (
-              <UndatedRow key={item.id} item={item} onAssign={handleAssignDates} />
-            ))}
-          </ul>
-        )}
+        {/* scrollable day chart: a header row with the one visible scrollbar (right under the
+            days), and a row body below it whose own scrollbar is hidden but kept in sync -
+            looks and behaves like a single scroll area with the scrollbar anchored at the top */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div ref={containerRef} className="overflow-x-auto" onScroll={handleHeaderScroll}>
+            <div className="relative" style={{ width: chartWidth }}>
+              {todayOffset >= 0 && todayOffset < renderedDayCount && (
+                <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }}>
+                  <div className="absolute -left-px h-2 w-2 -translate-x-1/2 rotate-45 bg-red-500" />
+                </div>
+              )}
+
+              {/* header */}
+              <div className="flex flex-col border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
+                <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: MONTH_ROW_HEIGHT }}>
+                  {monthGroups.map((g, i) => (
+                    <div
+                      key={g.key}
+                      className={`absolute top-0 flex h-full items-center overflow-hidden border-l border-slate-200 px-1.5 text-[10px] font-medium text-slate-600 dark:border-slate-800/60 dark:text-slate-300 ${
+                        i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
+                      }`}
+                      style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
+                    >
+                      <span className="truncate">{g.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: WEEK_ROW_HEIGHT }}>
+                  {weekGroups.map((g, i) => (
+                    <div
+                      key={g.key}
+                      className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-l border-slate-200/70 text-[9px] text-slate-400 dark:border-slate-800/40 dark:text-slate-500 ${
+                        i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
+                      }`}
+                      style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
+                    >
+                      <span className="truncate">{g.label}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="relative" style={{ height: DAY_ROW_HEIGHT, backgroundImage: weekendBackground }}>
+                  {days.map((d, i) => (
+                    <div
+                      key={i}
+                      className="absolute top-0 flex h-full items-center justify-center border-l border-slate-200 text-[10px] text-slate-500 dark:border-slate-800/60"
+                      style={{ left: i * dayWidth, width: dayWidth }}
+                    >
+                      {d.getDate()}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            ref={bodyScrollRef}
+            onScroll={handleBodyScroll}
+            className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
+            style={{ scrollbarWidth: 'none' }}
+          >
+            <div className="relative" style={{ width: chartWidth }}>
+              {todayOffset >= 0 && todayOffset < renderedDayCount && (
+                <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }} />
+              )}
+
+              {/* connector overlay, spans all rows */}
+              <svg
+                className="pointer-events-none absolute z-10"
+                style={{ left: 0, top: 0, width: chartWidth, height: rows.length * ROW_HEIGHT }}
+              >
+                {connectors.map((c) => (
+                  <path key={c.key} d={c.d} stroke="rgb(129 140 248)" strokeWidth={1.5} fill="none" />
+                ))}
+              </svg>
+
+              {rows.length === 0 && <div style={{ height: ROW_HEIGHT }} />}
+
+              {rows.map((row) => {
+                if (row.kind === 'milestone') {
+                  const m = row.milestone
+                  const left = diffDays(startOfDay(new Date(m.date)), rangeStart) * dayWidth + dayWidth / 2
+                  return (
+                    <div
+                      key={row.key}
+                      className="relative overflow-hidden border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
+                      style={{ height: ROW_HEIGHT }}
+                    >
+                      <div
+                        title={`${m.name} — ${formatDate(m.date)}`}
+                        className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-amber-600 dark:text-amber-400"
+                        style={{ left }}
+                      >
+                        ◆
+                      </div>
+                    </div>
+                  )
+                }
+
+                const { item, hasChildren } = row
+                const range = effectiveRange(item)
+                const isGroup = hasChildren
+                const barColor = isGroup ? 'bg-slate-600' : 'bg-sky-600'
+                const blocked = item.blockingWorkItemIds.length > 0
+
+                return (
+                  <div
+                    key={row.key}
+                    className="relative overflow-hidden border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
+                    style={{ height: ROW_HEIGHT }}
+                  >
+                    {range && (
+                      <div
+                        onPointerDown={handlePointerDown(item)}
+                        onPointerMove={handlePointerMove}
+                        onPointerUp={handlePointerUp(item)}
+                        className={`absolute flex cursor-grab items-center rounded ${barColor} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
+                        style={{
+                          left: diffDays(range.start, rangeStart) * dayWidth,
+                          width: Math.max((diffDays(range.finish, range.start) + 1) * dayWidth - 4, dayWidth - 4),
+                          top: 6,
+                          height: ROW_HEIGHT - 12,
+                        }}
+                      >
+                        <div data-handle="start" className="absolute left-0 h-full w-1.5 cursor-ew-resize" />
+                        <span className="truncate px-2 text-[11px] text-white select-none">{item.title}</span>
+                        <div data-handle="end" className="absolute right-0 h-full w-1.5 cursor-ew-resize" />
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
       </section>
 
       {(showTaskForm || showMilestoneForm) && (
@@ -1057,8 +1081,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   </option>
                 ))}
               </select>
-              <input type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
-              <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+              <input required type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} title="Anfangsdatum" className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+              <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} title="Enddatum (optional)" className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
               <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
                 Anlegen
               </button>
@@ -1100,36 +1124,5 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         </section>
       )}
     </div>
-  )
-}
-
-function UndatedRow({ item, onAssign }: { item: WorkItem; onAssign: (item: WorkItem, start: string, end: string) => void }) {
-  const [start, setStart] = useState(toDateInputValue(item.startDate))
-  const [end, setEnd] = useState(toDateInputValue(item.dueDate))
-
-  return (
-    <li className="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-1.5 text-sm dark:border-slate-800 dark:bg-slate-900">
-      <span className="font-mono text-xs text-slate-500">{item.referenceCode}</span>
-      <span className="flex-1 truncate">{item.title}</span>
-      <input
-        type="date"
-        value={start}
-        onChange={(e) => setStart(e.target.value)}
-        className="rounded border border-slate-300 bg-slate-50 px-1 py-0.5 text-xs dark:border-slate-700 dark:bg-slate-800"
-      />
-      <input
-        type="date"
-        value={end}
-        onChange={(e) => setEnd(e.target.value)}
-        className="rounded border border-slate-300 bg-slate-50 px-1 py-0.5 text-xs dark:border-slate-700 dark:bg-slate-800"
-      />
-      <button
-        onClick={() => onAssign(item, start, end)}
-        disabled={!start && !end}
-        className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
-      >
-        Setzen
-      </button>
-    </li>
   )
 }
