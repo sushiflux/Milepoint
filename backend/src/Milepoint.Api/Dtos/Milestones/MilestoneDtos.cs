@@ -4,6 +4,8 @@ namespace Milepoint.Api.Dtos.Milestones;
 
 public record CreateMilestoneRequest(string Name, string? Description, DateTimeOffset Date, string? ParentWorkItemId);
 
+public record UpdateMilestoneRequest(string Name, string? Description, DateTimeOffset Date, string? ParentWorkItemId);
+
 public record AddMilestoneDependencyRequest(string WorkItemId, MilestoneDependencyDirection Direction);
 
 public record MilestoneDto(

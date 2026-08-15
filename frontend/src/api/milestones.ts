@@ -9,6 +9,19 @@ export const createMilestone = (projectId: string, name: string, date: string, d
     body: JSON.stringify({ name, description, date, parentWorkItemId: parentWorkItemId || null }),
   })
 
+export const updateMilestone = (
+  projectId: string,
+  milestoneId: string,
+  name: string,
+  date: string,
+  description?: string,
+  parentWorkItemId?: string | null,
+) =>
+  apiFetch<Milestone>(`/projects/${projectId}/milestones/${milestoneId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name, description, date, parentWorkItemId: parentWorkItemId || null }),
+  })
+
 export const deleteMilestone = (projectId: string, milestoneId: string) =>
   apiFetch<void>(`/projects/${projectId}/milestones/${milestoneId}`, { method: 'DELETE' })
 

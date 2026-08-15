@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { createMilestone, deleteMilestone } from '../api/milestones'
-import { createWorkItem, updateWorkItem } from '../api/workItems'
+import { addMilestoneDependency, createMilestone, deleteMilestone, removeMilestoneDependency, updateMilestone } from '../api/milestones'
+import { getTimeline } from '../api/timeline'
+import { addDependency, createWorkItem, deleteWorkItem, removeDependency, updateWorkItem } from '../api/workItems'
 import type { Board, BoardColumnType, Milestone, WorkItem, WorkItemPriority, WorkItemType } from '../api/types'
 import AddButton from '../components/AddButton'
+import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
 
 interface Props {
   projectId: string
@@ -60,6 +62,62 @@ function addDays(d: Date, days: number) {
 
 function diffDays(a: Date, b: Date) {
   return Math.round((startOfDay(a).getTime() - startOfDay(b).getTime()) / 86_400_000)
+}
+
+// Local YYYY-MM-DD for an <input type="date"> value - not toISOString (that's UTC and can land
+// on the wrong day depending on the browser's timezone).
+function toDateInputValue(d: Date) {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+// Finish-to-start auto-scheduling (same as MS Project/OpenProject's automatic mode): when a task's
+// finish date moves, anything it blocks that would now overlap gets pushed to start the day after,
+// preserving its own duration - and that cascades transitively to whatever THAT task blocks in turn.
+// A visited-set guards against cycles (which the backend doesn't otherwise prevent).
+function computeCascadeShifts(rootId: string, newFinish: Date, items: WorkItem[]) {
+  const byId = new Map(items.map((w) => [w.id, w]))
+  const dependentsOf = new Map<string, string[]>()
+  for (const w of items) {
+    for (const blockingId of w.blockingWorkItemIds) {
+      const list = dependentsOf.get(blockingId) ?? []
+      list.push(w.id)
+      dependentsOf.set(blockingId, list)
+    }
+  }
+
+  const shifts = new Map<string, { start: Date; finish: Date }>()
+  const finishOf = new Map<string, Date>([[rootId, newFinish]])
+  const visited = new Set([rootId])
+  const queue = [rootId]
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!
+    const currentFinish = finishOf.get(currentId)!
+    const earliestAllowedStart = addDays(startOfDay(currentFinish), 1)
+
+    for (const depId of dependentsOf.get(currentId) ?? []) {
+      if (visited.has(depId)) continue
+      const dep = byId.get(depId)
+      if (!dep?.startDate || !dep.dueDate) continue
+
+      const depStart = startOfDay(new Date(dep.startDate))
+      const depFinish = startOfDay(new Date(dep.dueDate))
+      if (depStart >= earliestAllowedStart) continue
+
+      const shiftDays = diffDays(earliestAllowedStart, depStart)
+      const newStart = addDays(depStart, shiftDays)
+      const newDepFinish = addDays(depFinish, shiftDays)
+      shifts.set(depId, { start: newStart, finish: newDepFinish })
+      finishOf.set(depId, newDepFinish)
+      visited.add(depId)
+      queue.push(depId)
+    }
+  }
+
+  return shifts
 }
 
 // ISO 8601: week 1 is the week containing the year's first Thursday, weeks start Monday.
@@ -208,17 +266,38 @@ type Row = TaskRow | MilestoneRow
 export default function TimelineView({ projectId, boards, workItems, milestones, onWorkItemsChange, onMilestonesChange }: Props) {
   const [newTitle, setNewTitle] = useState('')
   const [newType, setNewType] = useState<WorkItemType>('Task')
+  const [newPriority, setNewPriority] = useState<WorkItemPriority>('Medium')
   const [newParentId, setNewParentId] = useState('')
   const [newStart, setNewStart] = useState('')
   const [newEnd, setNewEnd] = useState('')
   const [milestoneName, setMilestoneName] = useState('')
   const [milestoneDate, setMilestoneDate] = useState('')
+  const [milestoneParentId, setMilestoneParentId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [showTaskForm, setShowTaskForm] = useState(false)
   const [showMilestoneForm, setShowMilestoneForm] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
+  const [depMenuRow, setDepMenuRow] = useState<string | null>(null)
+  const [depMenuSelection, setDepMenuSelection] = useState('')
+  const depMenuRef = useRef<HTMLDivElement>(null)
+  const [contextMenu, setContextMenu] = useState<
+    | { kind: 'empty'; date: Date; x: number; y: number }
+    | { kind: 'phase' | 'task'; row: TaskRow; x: number; y: number }
+    | { kind: 'milestone'; milestone: Milestone; x: number; y: number }
+    | null
+  >(null)
+  // Set right before opening the create form from a task's context menu ("...als Abhängigkeit")
+  // - once that form successfully creates its item, this links the new item as blocked by the
+  // task instead of the usual "add as subtask"/"add as top-level" behavior.
+  const [pendingBlockerLink, setPendingBlockerLink] = useState<string | null>(null)
+  const [editTarget, setEditTarget] = useState<{ kind: 'workItem'; item: WorkItem } | { kind: 'milestone'; milestone: Milestone } | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editStart, setEditStart] = useState('')
+  const [editEnd, setEditEnd] = useState('')
+  const [editPriority, setEditPriority] = useState<WorkItemPriority>('Medium')
+  const [editDate, setEditDate] = useState('')
   const scrollbarRef = useRef<HTMLDivElement>(null)
   const monthScrollRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -243,15 +322,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   }, [])
 
   useEffect(() => {
-    if (!rangeMenuOpen && !filterMenuOpen) return
+    if (!rangeMenuOpen && !filterMenuOpen && !depMenuRow) return
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as Node
       if (rangeMenuRef.current && !rangeMenuRef.current.contains(target)) setRangeMenuOpen(false)
       if (filterMenuRef.current && !filterMenuRef.current.contains(target)) setFilterMenuOpen(false)
+      if (depMenuRef.current && !depMenuRef.current.contains(target)) setDepMenuRow(null)
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [rangeMenuOpen, filterMenuOpen])
+  }, [rangeMenuOpen, filterMenuOpen, depMenuRow])
 
   const itemsByParent = useMemo(() => {
     const map = new Map<string | null, WorkItem[]>()
@@ -444,45 +524,44 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
 
-  function taskRows(parentId: string | null, depth: number): TaskRow[] {
-    const children = (itemsByParent.get(parentId) ?? []).filter((w) => w.startDate || w.dueDate)
-    return children.flatMap((item) => {
-      const allChildren = itemsByParent.get(item.id) ?? []
-      const row: TaskRow = { kind: 'task', key: item.id, depth, item, hasChildren: allChildren.length > 0 }
-      const nested = collapsed.has(item.id) ? [] : taskRows(item.id, depth + 1)
+  // Phases have no dates of their own - sort by their rolled-up range (rangeOf), and put ones
+  // with no dated descendants yet (nothing to roll up) last instead of defaulting to epoch 0.
+  function rowSortKey(r: Row) {
+    if (r.kind === 'milestone') return new Date(r.milestone.date).getTime()
+    const range = rangeOf(r.item)
+    return range ? range.start.getTime() : Number.POSITIVE_INFINITY
+  }
+
+  // Builds the row tree for one level (top-level for parentId=null, or one item's subtree) -
+  // task/phase children and milestone children of the same parent are interleaved by date, and
+  // each task/phase child's own subtree (which may itself mix tasks and milestones) follows
+  // immediately after it, recursively. This is how a milestone ends up nested inside its phase
+  // instead of always sitting flat at the top level.
+  function buildRows(parentId: string | null, depth: number): Row[] {
+    const taskChildren = (itemsByParent.get(parentId) ?? []).filter((w) => w.type === 'Phase' || w.startDate || w.dueDate)
+    const milestoneChildren = milestonesByParent.get(parentId) ?? []
+
+    const taskRowsHere: TaskRow[] = taskChildren.map((item) => ({
+      kind: 'task',
+      key: item.id,
+      depth,
+      item,
+      hasChildren: (itemsByParent.get(item.id)?.length ?? 0) > 0 || (milestonesByParent.get(item.id)?.length ?? 0) > 0,
+    }))
+    const milestoneRowsHere: MilestoneRow[] = milestoneChildren.map((m) => ({ kind: 'milestone', key: `m-${m.id}`, depth, milestone: m }))
+
+    const sorted = [...taskRowsHere, ...milestoneRowsHere].sort((a, b) => rowSortKey(a) - rowSortKey(b))
+
+    return sorted.flatMap((row) => {
+      if (row.kind === 'milestone') return [row]
+      const nested = collapsed.has(row.item.id) ? [] : buildRows(row.item.id, depth + 1)
       return [row, ...nested]
     })
   }
 
   const rows: Row[] = useMemo(() => {
-    const topTasks = taskRows(null, 0)
-    const milestoneRows: MilestoneRow[] = milestones.map((m) => ({ kind: 'milestone', key: `m-${m.id}`, depth: 0, milestone: m }))
-
-    const sortKey = (r: Row) => (r.kind === 'milestone' ? new Date(r.milestone.date).getTime() : new Date((r.item.startDate ?? r.item.dueDate)!).getTime())
-
-    const topLevelKeys = new Set(topTasks.filter((r) => r.depth === 0).map((r) => r.key))
-    const remaining = [...topTasks]
-    const sortedTop: Row[] = [
-      ...topTasks.filter((r) => topLevelKeys.has(r.key)),
-      ...milestoneRows,
-    ].sort((a, b) => sortKey(a) - sortKey(b))
-
-    const merged: Row[] = []
-    for (const top of sortedTop) {
-      if (top.kind === 'milestone') {
-        merged.push(top)
-        continue
-      }
-      const idx = remaining.findIndex((r) => r.key === top.key)
-      if (idx === -1) continue
-      merged.push(remaining[idx])
-      let j = idx + 1
-      while (j < remaining.length && remaining[j].depth > 0) {
-        merged.push(remaining[j])
-        j++
-      }
-    }
-    return merged.filter((r) => r.kind === 'milestone' || matchesFilters(r.item))
+    return buildRows(null, 0).filter((r) => r.kind === 'milestone' || matchesFilters(r.item))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workItems, milestones, collapsed, filterStatuses, filterPriorities, filterAssignees])
 
   const rowIndexByTaskId = useMemo(() => {
@@ -667,6 +746,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   }, [rows, rowIndexByTaskId, rowIndexByMilestoneId, workItemById, milestoneById, milestones, itemsByParent, milestonesByParent, rangeStart, dayWidth])
 
   async function commitDateChange(item: WorkItem, start: Date, finish: Date) {
+    const shifts = computeCascadeShifts(item.id, finish, workItems)
+
     const updated = await updateWorkItem(item.boardId, item.id, {
       title: item.title,
       description: item.description,
@@ -677,7 +758,25 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       startDate: start.toISOString(),
       dueDate: finish.toISOString(),
     })
-    onWorkItemsChange(workItems.map((w) => (w.id === updated.id ? updated : w)))
+
+    const cascaded = await Promise.all(
+      [...shifts.entries()].map(([id, range]) => {
+        const dep = workItemById.get(id)!
+        return updateWorkItem(dep.boardId, dep.id, {
+          title: dep.title,
+          description: dep.description,
+          type: dep.type,
+          priority: dep.priority,
+          assigneeId: dep.assigneeId,
+          parentWorkItemId: dep.parentWorkItemId,
+          startDate: range.start.toISOString(),
+          dueDate: range.finish.toISOString(),
+        })
+      }),
+    )
+
+    const updatedById = new Map([updated, ...cascaded].map((w) => [w.id, w]))
+    onWorkItemsChange(workItems.map((w) => updatedById.get(w.id) ?? w))
   }
 
   function handlePointerDown(item: WorkItem) {
@@ -720,14 +819,26 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       return
     }
 
-    const created = await createWorkItem(target.board.id, target.column.id, title, newType, 'Medium', undefined, {
+    // A Phase has no dates of its own - its bar is rolled up live from its subtasks (see phaseRange).
+    const created = await createWorkItem(target.board.id, target.column.id, title, newType, newPriority, undefined, {
       parentWorkItemId: newParentId || undefined,
       startDate: newType === 'Phase' ? undefined : new Date(newStart).toISOString(),
       dueDate: newType === 'Phase' ? undefined : newEnd ? new Date(newEnd).toISOString() : undefined,
     })
-    onWorkItemsChange([...workItems, created])
+
+    if (pendingBlockerLink) {
+      // Quick-created from a task's context menu ("...als Abhängigkeit") - a standalone item
+      // blocked by that task, not a subtask, so refetch rather than just appending `created`.
+      await addDependency(created.boardId, created.id, pendingBlockerLink)
+      setPendingBlockerLink(null)
+      await refreshTimelineData()
+    } else {
+      onWorkItemsChange([...workItems, created])
+    }
+
     setNewTitle('')
     setNewType('Task')
+    setNewPriority('Medium')
     setNewParentId('')
     setNewStart('')
     setNewEnd('')
@@ -739,27 +850,346 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     setError(null)
     if (!milestoneName.trim() || !milestoneDate) return
 
-    const created = await createMilestone(projectId, milestoneName.trim(), new Date(milestoneDate).toISOString())
-    onMilestonesChange([...milestones, created])
+    const created = await createMilestone(projectId, milestoneName.trim(), new Date(milestoneDate).toISOString(), undefined, milestoneParentId || null)
+
+    if (pendingBlockerLink) {
+      await addMilestoneDependency(projectId, created.id, pendingBlockerLink, 'WorkItemBlocksMilestone')
+      setPendingBlockerLink(null)
+      await refreshTimelineData()
+    } else {
+      onMilestonesChange([...milestones, created])
+    }
+
     setMilestoneName('')
     setMilestoneDate('')
+    setMilestoneParentId('')
     setShowMilestoneForm(false)
   }
 
   async function handleDeleteMilestone(milestone: Milestone) {
+    if (!window.confirm(`Meilenstein "${milestone.name}" wirklich löschen?`)) return
     await deleteMilestone(projectId, milestone.id)
     onMilestonesChange(milestones.filter((m) => m.id !== milestone.id))
   }
 
+  async function handleDeleteWorkItem(row: TaskRow) {
+    const message = row.hasChildren
+      ? `"${row.item.title}" wirklich löschen? Alle Unteraufgaben und zugehörigen Meilensteine werden mit gelöscht.`
+      : `"${row.item.title}" wirklich löschen?`
+    if (!window.confirm(message)) return
+    await deleteWorkItem(row.item.boardId, row.item.id)
+    await refreshTimelineData()
+  }
+
+  // Dependency/delete calls don't return the full updated picture themselves (204 No Content, or
+  // a cascading delete whose exact scope is computed server-side) - simplest to just refetch both
+  // lists from the one source of truth after any change that could touch either of them.
+  async function refreshTimelineData() {
+    const timeline = await getTimeline(projectId)
+    onWorkItemsChange(timeline.workItems)
+    onMilestonesChange(timeline.milestones)
+  }
+
+  function toggleDepMenu(rowKey: string) {
+    setDepMenuRow((prev) => (prev === rowKey ? null : rowKey))
+    setDepMenuSelection('')
+  }
+
+  // What currently blocks this row, resolved to a display label - a task row can be blocked by
+  // other tasks/phases and by milestones; a milestone row can only be blocked by tasks/phases.
+  function currentBlockers(row: Row): { kind: 'task' | 'milestone'; id: string; label: string }[] {
+    if (row.kind === 'milestone') {
+      return row.milestone.blockedByWorkItemIds
+        .map((id) => workItemById.get(id))
+        .filter((w): w is WorkItem => Boolean(w))
+        .map((w) => ({ kind: 'task', id: w.id, label: `${w.referenceCode} · ${w.title}` }))
+    }
+    const taskBlockers = row.item.blockingWorkItemIds
+      .map((id) => workItemById.get(id))
+      .filter((w): w is WorkItem => Boolean(w))
+      .map((w) => ({ kind: 'task' as const, id: w.id, label: `${w.referenceCode} · ${w.title}` }))
+    const milestoneBlockers = row.item.blockedByMilestoneIds
+      .map((id) => milestoneById.get(id))
+      .filter((m): m is Milestone => Boolean(m))
+      .map((m) => ({ kind: 'milestone' as const, id: m.id, label: `◆ ${m.name}` }))
+    return [...taskBlockers, ...milestoneBlockers]
+  }
+
+  // What can still be added as a blocker - excludes itself and anything already linked.
+  function blockerOptions(row: Row): { value: string; label: string }[] {
+    if (row.kind === 'milestone') {
+      const linked = new Set(row.milestone.blockedByWorkItemIds)
+      return workItems.filter((w) => !linked.has(w.id)).map((w) => ({ value: `task:${w.id}`, label: `${w.referenceCode} · ${w.title}` }))
+    }
+    const linkedTasks = new Set(row.item.blockingWorkItemIds)
+    const linkedMilestones = new Set(row.item.blockedByMilestoneIds)
+    const taskOptions = workItems
+      .filter((w) => w.id !== row.item.id && !linkedTasks.has(w.id))
+      .map((w) => ({ value: `task:${w.id}`, label: `${w.referenceCode} · ${w.title}` }))
+    const milestoneOptions = milestones
+      .filter((m) => !linkedMilestones.has(m.id))
+      .map((m) => ({ value: `milestone:${m.id}`, label: `◆ ${m.name} (${formatDate(m.date)})` }))
+    return [...taskOptions, ...milestoneOptions]
+  }
+
+  async function handleAddBlocker(row: Row) {
+    if (!depMenuSelection) return
+    const [kind, id] = depMenuSelection.split(':')
+    if (row.kind === 'milestone') {
+      await addMilestoneDependency(projectId, row.milestone.id, id, 'WorkItemBlocksMilestone')
+    } else if (kind === 'task') {
+      await addDependency(row.item.boardId, row.item.id, id)
+    } else {
+      await addMilestoneDependency(projectId, id, row.item.id, 'MilestoneBlocksWorkItem')
+    }
+    setDepMenuSelection('')
+    await refreshTimelineData()
+  }
+
+  async function handleRemoveBlocker(row: Row, blocker: { kind: 'task' | 'milestone'; id: string }) {
+    if (row.kind === 'milestone') {
+      await removeMilestoneDependency(projectId, row.milestone.id, blocker.id)
+    } else if (blocker.kind === 'task') {
+      await removeDependency(row.item.boardId, row.item.id, blocker.id)
+    } else {
+      await removeMilestoneDependency(projectId, blocker.id, row.item.id)
+    }
+    await refreshTimelineData()
+  }
+
+  function openEmptyContextMenu(event: React.MouseEvent, date: Date) {
+    event.preventDefault()
+    setContextMenu({ kind: 'empty', date, x: event.clientX, y: event.clientY })
+  }
+
+  function openRowContextMenu(event: React.MouseEvent, row: TaskRow) {
+    event.preventDefault()
+    event.stopPropagation()
+    setContextMenu({ kind: row.item.type === 'Phase' ? 'phase' : 'task', row, x: event.clientX, y: event.clientY })
+  }
+
+  function contextMenuItems(): ContextMenuEntry[] {
+    if (!contextMenu) return []
+
+    if (contextMenu.kind === 'milestone') {
+      const m = contextMenu.milestone
+      return [
+        { label: 'Bearbeiten', onClick: () => openEditMilestone(m) },
+        'divider',
+        { label: 'Meilenstein löschen', onClick: () => handleDeleteMilestone(m), danger: true },
+      ]
+    }
+
+    if (contextMenu.kind === 'empty') {
+      const date = contextMenu.date
+      return [
+        {
+          label: 'Phase hinzufügen',
+          onClick: () => {
+            setNewType('Phase')
+            setNewParentId('')
+            setPendingBlockerLink(null)
+            setShowTaskForm(true)
+          },
+        },
+        {
+          label: 'Aufgabe hinzufügen',
+          onClick: () => {
+            setNewType('Task')
+            setNewParentId('')
+            setNewStart(toDateInputValue(date))
+            setNewEnd('')
+            setPendingBlockerLink(null)
+            setShowTaskForm(true)
+          },
+        },
+        {
+          label: 'Meilenstein hinzufügen',
+          onClick: () => {
+            setMilestoneParentId('')
+            setMilestoneDate(toDateInputValue(date))
+            setPendingBlockerLink(null)
+            setShowMilestoneForm(true)
+          },
+        },
+      ]
+    }
+
+    const { item } = contextMenu.row
+
+    if (contextMenu.kind === 'phase') {
+      return [
+        { label: 'Aufgabe hinzufügen', onClick: () => openChildForm(item.id) },
+        'divider',
+        { label: 'Bearbeiten', onClick: () => openEditWorkItem(item) },
+        { label: 'Phase löschen', onClick: () => handleDeleteWorkItem(contextMenu.row), danger: true },
+      ]
+    }
+
+    return [
+      {
+        label: 'Unteraufgabe erstellen (als Abhängigkeit)',
+        onClick: () => {
+          setNewType('Task')
+          setNewParentId('')
+          setPendingBlockerLink(item.id)
+          setShowTaskForm(true)
+        },
+      },
+      {
+        label: 'Meilenstein hinzufügen (als Abhängigkeit)',
+        onClick: () => {
+          setMilestoneParentId('')
+          setPendingBlockerLink(item.id)
+          setShowMilestoneForm(true)
+        },
+      },
+      'divider',
+      { label: 'Bearbeiten', onClick: () => openEditWorkItem(item) },
+      { label: 'Aufgabe löschen', onClick: () => handleDeleteWorkItem(contextMenu.row), danger: true },
+    ]
+  }
+
+  function openEditWorkItem(item: WorkItem) {
+    setEditTarget({ kind: 'workItem', item })
+    setEditName(item.title)
+    setEditStart(item.startDate ? toDateInputValue(new Date(item.startDate)) : '')
+    setEditEnd(item.dueDate ? toDateInputValue(new Date(item.dueDate)) : '')
+    setEditPriority(item.priority)
+  }
+
+  function openEditMilestone(milestone: Milestone) {
+    setEditTarget({ kind: 'milestone', milestone })
+    setEditName(milestone.name)
+    setEditDate(toDateInputValue(new Date(milestone.date)))
+  }
+
+  function closeEdit() {
+    setEditTarget(null)
+  }
+
+  async function handleSubmitEdit(event: FormEvent) {
+    event.preventDefault()
+    if (!editTarget) return
+    const name = editName.trim()
+    if (!name) return
+
+    if (editTarget.kind === 'milestone') {
+      if (!editDate) return
+      const updated = await updateMilestone(
+        projectId,
+        editTarget.milestone.id,
+        name,
+        new Date(editDate).toISOString(),
+        editTarget.milestone.description ?? undefined,
+        editTarget.milestone.parentWorkItemId,
+      )
+      onMilestonesChange(milestones.map((m) => (m.id === updated.id ? updated : m)))
+    } else {
+      const item = editTarget.item
+      if (item.type === 'Task' && !editStart) return
+      const updated = await updateWorkItem(item.boardId, item.id, {
+        title: name,
+        description: item.description,
+        type: item.type,
+        priority: editPriority,
+        assigneeId: item.assigneeId,
+        parentWorkItemId: item.parentWorkItemId,
+        startDate: item.type === 'Phase' ? null : new Date(editStart).toISOString(),
+        dueDate: item.type === 'Phase' ? null : editEnd ? new Date(editEnd).toISOString() : null,
+      })
+      onWorkItemsChange(workItems.map((w) => (w.id === updated.id ? updated : w)))
+    }
+
+    closeEdit()
+  }
+
   const weekendBackground = `repeating-linear-gradient(to right, rgba(148,163,184,0.05) 0, rgba(148,163,184,0.05) ${dayWidth}px, transparent ${dayWidth}px, transparent ${dayWidth * 2}px)`
 
-  function LabelRow({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  function LabelRow({
+    children,
+    style,
+    onContextMenu,
+  }: {
+    children: React.ReactNode
+    style?: React.CSSProperties
+    onContextMenu?: (event: React.MouseEvent) => void
+  }) {
     return (
       <div
+        onContextMenu={onContextMenu}
         className="flex items-center border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
         style={{ height: ROW_HEIGHT, ...style }}
       >
         {children}
+      </div>
+    )
+  }
+
+  function DependencyButton({ row }: { row: Row }) {
+    const open = depMenuRow === row.key
+    const blockers = currentBlockers(row)
+    const options = blockerOptions(row)
+    return (
+      <div ref={open ? depMenuRef : undefined} className="relative inline-flex shrink-0">
+        <button
+          onClick={() => toggleDepMenu(row.key)}
+          title="Abhängigkeiten"
+          aria-label="Abhängigkeiten"
+          className={`flex h-3 w-3 items-center justify-center ${
+            blockers.length > 0
+              ? 'text-amber-500 dark:text-amber-400'
+              : 'text-slate-400 hover:text-indigo-500 dark:text-slate-600 dark:hover:text-indigo-400'
+          }`}
+        >
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+            <path d="M7.5 9.5 5.6 11.4a2.2 2.2 0 1 0 3.1 3.1L10.6 12.6M12.5 10.5l1.9-1.9a2.2 2.2 0 1 0-3.1-3.1L9.4 7.4" />
+          </svg>
+        </button>
+
+        {open && (
+          <div className="absolute left-0 top-full z-40 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-3 text-left shadow-lg dark:border-slate-800 dark:bg-slate-900">
+            <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Blockiert durch</p>
+            {blockers.length === 0 && <p className="mb-2 text-xs text-slate-500">Keine Abhängigkeiten</p>}
+            {blockers.length > 0 && (
+              <ul className="mb-2 space-y-1">
+                {blockers.map((b) => (
+                  <li key={`${b.kind}-${b.id}`} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate">{b.label}</span>
+                    <button
+                      onClick={() => handleRemoveBlocker(row, b)}
+                      className="shrink-0 text-slate-400 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-1 border-t border-slate-200 pt-2 dark:border-slate-800">
+              <select
+                value={depMenuSelection}
+                onChange={(e) => setDepMenuSelection(e.target.value)}
+                className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+              >
+                <option value="">Blocker wählen…</option>
+                {options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => handleAddBlocker(row)}
+                disabled={!depMenuSelection}
+                className="shrink-0 rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -1040,10 +1470,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             if (row.kind === 'milestone') {
               const m = row.milestone
               return (
-                <LabelRow key={row.key}>
+                <LabelRow
+                  key={row.key}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setContextMenu({ kind: 'milestone', milestone: m, x: e.clientX, y: e.clientY })
+                  }}
+                >
                   <span style={{ width: COL_ID }} className="px-2 text-[10px] text-slate-500" />
-                  <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs">
+                  <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs" style={{ paddingLeft: row.depth * 16 }}>
                     {m.name}
+                    <DependencyButton row={row} />
                     <button
                       onClick={() => handleDeleteMilestone(m)}
                       className="text-slate-400 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
@@ -1062,7 +1499,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
             const { item, depth, hasChildren } = row
             return (
-              <LabelRow key={row.key}>
+              <LabelRow
+                key={row.key}
+                onContextMenu={(e) => openRowContextMenu(e, row)}
+              >
                 <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-[10px] text-slate-500">
                   {item.referenceCode}
                 </span>
@@ -1081,6 +1521,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     </button>
                   )}
                   <span className="truncate">{item.title}</span>
+                  {item.type !== 'Phase' && <DependencyButton row={row} />}
                   <button
                     onClick={() => openChildForm(item.id)}
                     title="Unteraufgabe hinzufügen"
@@ -1169,6 +1610,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   {days.map((d, i) => (
                     <div
                       key={i}
+                      onContextMenu={(e) => openEmptyContextMenu(e, d)}
                       className="absolute top-0 flex h-full items-center justify-center border-l border-slate-200 text-[10px] text-slate-500 dark:border-slate-800/60"
                       style={{ left: i * dayWidth, width: dayWidth }}
                     >
@@ -1259,11 +1701,12 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 const isPhase = item.type === 'Phase'
                 const range = rangeOf(item)
                 const barColor = isPhase ? TYPE_BAR_COLOR.Phase : hasChildren ? 'bg-slate-600' : getBarColor(item.columnName, item.columnType)
-                const blocked = item.blockingWorkItemIds.length > 0
+                const blocked = item.blockingWorkItemIds.length > 0 || item.blockedByMilestoneIds.length > 0
 
                 return (
                   <div
                     key={row.key}
+                    onContextMenu={(e) => openRowContextMenu(e, row)}
                     className="relative overflow-hidden border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
                     style={{ height: ROW_HEIGHT }}
                   >
@@ -1314,6 +1757,13 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <option value="Task">{TYPE_LABELS.Task}</option>
                 <option value="Phase">{TYPE_LABELS.Phase}</option>
               </select>
+              <select value={newPriority} onChange={(e) => setNewPriority(e.target.value as WorkItemPriority)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
+                {PRIORITY_OPTIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {PRIORITY_LABELS[p]}
+                  </option>
+                ))}
+              </select>
               <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
                 <option value="">Keine übergeordnete Aufgabe</option>
                 {workItems.map((w) => (
@@ -1356,6 +1806,14 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
               />
               <input type="date" value={milestoneDate} onChange={(e) => setMilestoneDate(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
+              <select value={milestoneParentId} onChange={(e) => setMilestoneParentId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
+                <option value="">Kein übergeordnetes Element</option>
+                {workItems.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.referenceCode} · {w.title}
+                  </option>
+                ))}
+              </select>
               <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
                 Anlegen
               </button>
@@ -1369,6 +1827,80 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             </form>
           )}
         </section>
+      )}
+
+      {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenuItems()} onClose={() => setContextMenu(null)} />}
+
+      {editTarget && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40" onClick={closeEdit}>
+          <form
+            onSubmit={handleSubmitEdit}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+          >
+            <h3 className="text-sm font-semibold">
+              {editTarget.kind === 'milestone' ? 'Meilenstein bearbeiten' : editTarget.item.type === 'Phase' ? 'Phase bearbeiten' : 'Aufgabe bearbeiten'}
+            </h3>
+
+            <div>
+              <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Name</label>
+              <input
+                autoFocus
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') closeEdit()
+                }}
+                className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950"
+              />
+            </div>
+
+            {editTarget.kind === 'milestone' ? (
+              <div>
+                <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Datum</label>
+                <input required type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950" />
+              </div>
+            ) : (
+              <>
+                {editTarget.item.type === 'Task' && (
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Anfang</label>
+                      <input required type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Ende</label>
+                      <input type="date" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950" />
+                    </div>
+                  </div>
+                )}
+                <div>
+                  <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Priorität</label>
+                  <select
+                    value={editPriority}
+                    onChange={(e) => setEditPriority(e.target.value as WorkItemPriority)}
+                    className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950"
+                  >
+                    {PRIORITY_OPTIONS.map((p) => (
+                      <option key={p} value={p}>
+                        {PRIORITY_LABELS[p]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={closeEdit} className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">
+                Abbrechen
+              </button>
+              <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500">
+                Speichern
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   )

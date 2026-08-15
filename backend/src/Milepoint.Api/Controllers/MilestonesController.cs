@@ -62,6 +62,34 @@ public class MilestonesController : ControllerBase
         return CreatedAtAction(nameof(GetAll), new { projectId }, MilestoneMapper.ToDto(milestone));
     }
 
+    [HttpPut("{milestoneId}")]
+    public async Task<ActionResult<MilestoneDto>> Update(string projectId, string milestoneId, UpdateMilestoneRequest request)
+    {
+        var milestone = await _db.Milestones
+            .Include(m => m.WorkItemLinks)
+            .FirstOrDefaultAsync(m => m.Id == milestoneId && m.ProjectId == projectId);
+
+        if (milestone is null)
+        {
+            return NotFound();
+        }
+
+        if (request.ParentWorkItemId is not null &&
+            !await _db.WorkItems.AnyAsync(w => w.Id == request.ParentWorkItemId && w.ProjectId == projectId))
+        {
+            return BadRequest("Übergeordnete Aufgabe gehört nicht zu diesem Projekt.");
+        }
+
+        milestone.Name = request.Name;
+        milestone.Description = request.Description;
+        milestone.Date = request.Date;
+        milestone.ParentWorkItemId = request.ParentWorkItemId;
+
+        await _db.SaveChangesAsync();
+
+        return Ok(MilestoneMapper.ToDto(milestone));
+    }
+
     [HttpDelete("{milestoneId}")]
     public async Task<IActionResult> Delete(string projectId, string milestoneId)
     {
