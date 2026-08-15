@@ -11,6 +11,19 @@ import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
 type ViewMode = 'tiles' | 'list'
 const VIEW_MODE_STORAGE_KEY = 'pm.dashboard.viewMode'
 
+const AVATAR_COLORS = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-sky-500', 'bg-rose-500', 'bg-violet-500']
+
+function avatarColor(id: string) {
+  let hash = 0
+  for (const ch of id) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+  return AVATAR_COLORS[hash % AVATAR_COLORS.length]
+}
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/)
+  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?'
+}
+
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [name, setName] = useState('')
@@ -208,9 +221,10 @@ export default function ProjectsPage() {
         <div>
           <span className="font-mono text-xs text-slate-500">#{shortId(project.id)}</span>
           <h2 className="text-base font-medium">{project.name}</h2>
+          {project.description && <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{project.description}</p>}
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500 dark:text-slate-400">
+        <div className="mt-3 grid grid-cols-3 gap-3 text-xs text-slate-500 dark:text-slate-400">
           <div>
             <p className="text-slate-500 dark:text-slate-500">Meine Aufgaben</p>
             <p className="text-sm text-slate-700 dark:text-slate-200">
@@ -221,6 +235,37 @@ export default function ProjectsPage() {
             <p className="text-slate-500 dark:text-slate-500">{progressLabel}</p>
             <p className="text-sm text-slate-700 dark:text-slate-200">{project.completionPercent}%</p>
           </div>
+          <div>
+            <p className="text-slate-500 dark:text-slate-500">Offene Tickets</p>
+            <p className="text-sm text-slate-700 dark:text-slate-200">{project.openTicketCount}</p>
+          </div>
+        </div>
+
+        {project.nextMilestoneName && (
+          <p className="mt-2 truncate text-xs text-slate-500 dark:text-slate-400">
+            Nächster Meilenstein: <span className="text-slate-700 dark:text-slate-200">{project.nextMilestoneName}</span>
+            {project.nextMilestoneDate && ` · ${new Date(project.nextMilestoneDate).toLocaleDateString('de-DE')}`}
+          </p>
+        )}
+
+        <div className="mt-3 flex items-center justify-between">
+          <div className="flex -space-x-1.5">
+            {project.members.slice(0, 5).map((member) => (
+              <span
+                key={member.id}
+                title={member.displayName}
+                className={`flex h-6 w-6 items-center justify-center rounded-full border-2 border-white text-[10px] font-medium text-white dark:border-slate-900 ${avatarColor(member.id)}`}
+              >
+                {initials(member.displayName)}
+              </span>
+            ))}
+            {project.members.length > 5 && (
+              <span className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-slate-400 text-[10px] font-medium text-white dark:border-slate-900">
+                +{project.members.length - 5}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] text-slate-400 dark:text-slate-500">Aktiv: {new Date(project.lastActivityAt).toLocaleDateString('de-DE')}</span>
         </div>
       </button>
     )
@@ -230,8 +275,8 @@ export default function ProjectsPage() {
     <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar />
 
-      <div className="min-w-0 flex-1">
-        <main className="space-y-6 p-6" onContextMenu={handleAreaContextMenu}>
+      <div className="min-w-0 flex-1" onContextMenu={handleAreaContextMenu}>
+        <main className="space-y-6 p-6">
         {projects === null ? (
           <p className="text-sm text-slate-500">Lade Projekte…</p>
         ) : projects.length === 0 && !showCreateForm ? (

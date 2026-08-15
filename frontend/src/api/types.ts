@@ -7,6 +7,11 @@ export interface AuthResponse {
   roles: string[]
 }
 
+export interface ProjectMemberSummary {
+  id: string
+  displayName: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -17,6 +22,11 @@ export interface Project {
   myCompletedTaskCount: number
   /** Project-wide completion if isOwner, otherwise your own task completion. */
   completionPercent: number
+  openTicketCount: number
+  lastActivityAt: string
+  nextMilestoneName: string | null
+  nextMilestoneDate: string | null
+  members: ProjectMemberSummary[]
 }
 
 export type BoardColumnType = 'Todo' | 'InProgress' | 'Done'

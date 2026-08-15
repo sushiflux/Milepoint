@@ -37,17 +37,36 @@ public class ProjectsController : ControllerBase
                 _db.WorkItems.Any(w => w.ProjectId == p.Id && w.AssigneeId == currentUserId));
         }
 
-        var projects = await projectsQuery.OrderBy(p => p.Name).ToListAsync();
+        var projects = await projectsQuery.Include(p => p.CreatedByUser).OrderBy(p => p.Name).ToListAsync();
         var projectIds = projects.Select(p => p.Id).ToList();
 
         var items = await _db.WorkItems
             .Where(w => projectIds.Contains(w.ProjectId))
             .Include(w => w.Column)
             .ToListAsync();
-
         var itemsByProject = items.ToLookup(w => w.ProjectId);
 
-        var dtos = projects.Select(p => ToDto(p, itemsByProject[p.Id].ToList(), currentUserId)).ToList();
+        var now = DateTimeOffset.UtcNow;
+        var upcomingMilestones = await _db.Milestones
+            .Where(m => projectIds.Contains(m.ProjectId) && m.Date >= now)
+            .OrderBy(m => m.Date)
+            .ToListAsync();
+        var nextMilestoneByProject = upcomingMilestones.ToLookup(m => m.ProjectId);
+
+        var memberRows = await _db.ProjectMembers
+            .Where(m => projectIds.Contains(m.ProjectId))
+            .Include(m => m.User)
+            .ToListAsync();
+        var membersByProject = memberRows.ToLookup(m => m.ProjectId);
+
+        var dtos = projects
+            .Select(p => ToDto(
+                p,
+                itemsByProject[p.Id].ToList(),
+                currentUserId,
+                nextMilestoneByProject[p.Id].FirstOrDefault(),
+                BuildMembers(p, membersByProject[p.Id])))
+            .ToList();
         return Ok(dtos);
     }
 
@@ -91,7 +110,9 @@ public class ProjectsController : ControllerBase
         });
         await _db.SaveChangesAsync();
 
-        var dto = ToDto(project, [], currentUserId);
+        var currentUser = await _userManager.GetUserAsync(User);
+        var owner = new ProjectMemberSummaryDto(currentUserId, currentUser?.DisplayName ?? string.Empty);
+        var dto = ToDto(project, [], currentUserId, null, [owner]);
         return CreatedAtAction(nameof(GetAll), dto);
     }
 
@@ -111,10 +132,20 @@ public class ProjectsController : ControllerBase
 
         project.Name = request.Name;
         await _db.SaveChangesAsync();
+        await _db.Entry(project).Reference(p => p.CreatedByUser).LoadAsync();
 
         var currentUserId = _userManager.GetUserId(User);
         var items = await _db.WorkItems.Where(w => w.ProjectId == projectId).Include(w => w.Column).ToListAsync();
-        return Ok(ToDto(project, items, currentUserId));
+
+        var now = DateTimeOffset.UtcNow;
+        var nextMilestone = await _db.Milestones
+            .Where(m => m.ProjectId == projectId && m.Date >= now)
+            .OrderBy(m => m.Date)
+            .FirstOrDefaultAsync();
+
+        var members = await _db.ProjectMembers.Where(m => m.ProjectId == projectId).Include(m => m.User).ToListAsync();
+
+        return Ok(ToDto(project, items, currentUserId, nextMilestone, BuildMembers(project, members)));
     }
 
     [HttpDelete("{projectId}")]
@@ -131,13 +162,31 @@ public class ProjectsController : ControllerBase
             return Forbid();
         }
 
-        // WorkItem.ParentWorkItemId is a Restrict FK (self-referencing, see PmDbContextBase), so
-        // the cascade from Project -> Board -> BoardColumn -> WorkItem can violate that
-        // constraint for projects with Phase/subtask hierarchies unless parent links are
-        // cleared first.
+        var workItemIds = await _db.WorkItems.Where(w => w.ProjectId == projectId).Select(w => w.Id).ToListAsync();
+        var noteIds = await _db.Notes.Where(n => n.ProjectId == projectId).Select(n => n.Id).ToListAsync();
+        var labelIds = await _db.Labels.Where(l => l.ProjectId == projectId).Select(l => l.Id).ToListAsync();
+
+        // WorkItem.ParentWorkItemId is Restrict, and WorkItemDependency / NoteLink / the
+        // WorkItemLabel join table are all NoAction on their WorkItem/Note/Label FKs (see
+        // PmDbContextBase - avoids SQL Server's multi-cascade-path error). None of that is
+        // cleaned up by the Project -> Board -> BoardColumn -> WorkItem / Project -> Note
+        // cascade, so it has to be cleared explicitly or the delete is rejected with an FK
+        // violation for any project that has dependencies, subtasks, note links or labels.
         await _db.WorkItems
             .Where(w => w.ProjectId == projectId && w.ParentWorkItemId != null)
             .ExecuteUpdateAsync(s => s.SetProperty(w => w.ParentWorkItemId, (string?)null));
+
+        await _db.WorkItemDependencies
+            .Where(d => workItemIds.Contains(d.DependentWorkItemId) || workItemIds.Contains(d.BlockingWorkItemId))
+            .ExecuteDeleteAsync();
+
+        await _db.NoteLinks
+            .Where(l => noteIds.Contains(l.SourceNoteId) || noteIds.Contains(l.TargetNoteId))
+            .ExecuteDeleteAsync();
+
+        await _db.Set<Dictionary<string, object>>("WorkItemLabel")
+            .Where(x => workItemIds.Contains(EF.Property<string>(x, "WorkItemsId")) || labelIds.Contains(EF.Property<Guid>(x, "LabelsId")))
+            .ExecuteDeleteAsync();
 
         _db.Projects.Remove(project);
         await _db.SaveChangesAsync();
@@ -209,7 +258,21 @@ public class ProjectsController : ControllerBase
         return project.CreatedByUserId == currentUserId;
     }
 
-    private static ProjectDto ToDto(Project project, List<WorkItem> items, string? currentUserId)
+    private static List<ProjectMemberSummaryDto> BuildMembers(Project project, IEnumerable<ProjectMember> members)
+    {
+        var list = new List<ProjectMemberSummaryDto> { new(project.CreatedByUserId, project.CreatedByUser?.DisplayName ?? string.Empty) };
+        list.AddRange(members
+            .Where(m => m.UserId != project.CreatedByUserId)
+            .Select(m => new ProjectMemberSummaryDto(m.UserId, m.User.DisplayName)));
+        return list;
+    }
+
+    private static ProjectDto ToDto(
+        Project project,
+        List<WorkItem> items,
+        string? currentUserId,
+        Milestone? nextMilestone,
+        List<ProjectMemberSummaryDto> members)
     {
         var isOwner = project.CreatedByUserId == currentUserId;
 
@@ -234,6 +297,9 @@ public class ProjectsController : ControllerBase
                 : (double)myCompletedTaskCount / myAssignedTaskCount * 100;
         }
 
+        var openTicketCount = items.Count(w => w.Column.Type != BoardColumnType.Done);
+        var lastActivityAt = items.Count == 0 ? project.CreatedAt : items.Max(w => w.UpdatedAt);
+
         return new ProjectDto(
             project.Id,
             project.Name,
@@ -242,6 +308,11 @@ public class ProjectsController : ControllerBase
             isOwner,
             myAssignedTaskCount,
             myCompletedTaskCount,
-            Math.Round(completionPercent, 1));
+            Math.Round(completionPercent, 1),
+            openTicketCount,
+            lastActivityAt,
+            nextMilestone?.Name,
+            nextMilestone?.Date,
+            members);
     }
 }
