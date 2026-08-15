@@ -176,6 +176,13 @@ public class ProjectsController : ControllerBase
             .Where(w => w.ProjectId == projectId && w.ParentWorkItemId != null)
             .ExecuteUpdateAsync(s => s.SetProperty(w => w.ParentWorkItemId, (string?)null));
 
+        // Milestone.ParentWorkItemId is NoAction too (same reasoning) - MilestoneDependencies
+        // don't need the same treatment since their own WorkItemId side isn't in play here and
+        // the MilestoneId side cascades.
+        await _db.Milestones
+            .Where(m => m.ProjectId == projectId && m.ParentWorkItemId != null)
+            .ExecuteUpdateAsync(s => s.SetProperty(m => m.ParentWorkItemId, (string?)null));
+
         await _db.WorkItemDependencies
             .Where(d => workItemIds.Contains(d.DependentWorkItemId) || workItemIds.Contains(d.BlockingWorkItemId))
             .ExecuteDeleteAsync();

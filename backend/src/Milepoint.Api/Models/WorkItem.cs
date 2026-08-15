@@ -41,4 +41,7 @@ public class WorkItem
 
     // Tasks that must reach a Done column before this one may move out of its Todo column.
     public ICollection<WorkItemDependency> Dependencies { get; set; } = new List<WorkItemDependency>();
+
+    // Both directions of milestone linkage live in one collection - filter by Direction.
+    public ICollection<MilestoneDependency> MilestoneLinks { get; set; } = new List<MilestoneDependency>();
 }

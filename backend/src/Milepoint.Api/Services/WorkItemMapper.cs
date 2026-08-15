@@ -4,7 +4,7 @@ using Milepoint.Api.Models;
 namespace Milepoint.Api.Services;
 
 // Shared by WorkItemsController and TimelineController. Callers must have loaded Assignee, Labels,
-// Column, and Dependencies (see the .Include calls in each controller).
+// Column, Dependencies, and MilestoneLinks (see the .Include calls in each controller).
 public static class WorkItemMapper
 {
     public static WorkItemDto ToDto(WorkItem item) => new(
@@ -27,5 +27,6 @@ public static class WorkItemMapper
         item.CreatedAt,
         item.UpdatedAt,
         item.Labels.Select(l => l.Id).ToList(),
-        item.Dependencies.Select(d => d.BlockingWorkItemId).ToList());
+        item.Dependencies.Select(d => d.BlockingWorkItemId).ToList(),
+        item.MilestoneLinks.Where(l => l.Direction == MilestoneDependencyDirection.MilestoneBlocksWorkItem).Select(l => l.MilestoneId).ToList());
 }

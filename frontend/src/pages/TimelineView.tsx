@@ -137,15 +137,35 @@ const TYPE_LABELS: Record<WorkItemType, string> = {
   Phase: 'Phase',
 }
 
-// Matches the OpenProject color convention: phases orange, tasks blue, milestones green.
 const TYPE_TEXT_COLOR: Record<WorkItemType, string> = {
   Task: 'text-sky-600 dark:text-sky-400',
   Phase: 'text-orange-600 dark:text-orange-400',
 }
 
+const STATUS_BAR_COLOR: Record<BoardColumnType, string> = {
+  Todo: 'bg-gradient-to-b from-slate-400 to-slate-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-slate-700/50',
+  InProgress: 'bg-gradient-to-b from-sky-400 to-sky-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-sky-700/50',
+  Done: 'bg-gradient-to-b from-emerald-400 to-emerald-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-emerald-700/50',
+}
+
+const KNOWN_BAR_COLORS: Record<string, string> = {
+  'pausiert': 'bg-gradient-to-b from-amber-400 to-amber-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-amber-700/50',
+  'blockiert': 'bg-gradient-to-b from-red-400 to-red-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-red-700/50',
+  'review': 'bg-gradient-to-b from-purple-400 to-purple-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-purple-700/50',
+  'neu': 'bg-gradient-to-b from-slate-400 to-slate-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-slate-700/50',
+}
+
+function getBarColor(columnName: string, columnType: BoardColumnType) {
+  const lowerName = columnName.toLowerCase();
+  for (const [key, color] of Object.entries(KNOWN_BAR_COLORS)) {
+    if (lowerName.includes(key)) return color;
+  }
+  return STATUS_BAR_COLOR[columnType] || STATUS_BAR_COLOR.Todo;
+}
+
 const TYPE_BAR_COLOR: Record<WorkItemType, string> = {
-  Task: 'bg-sky-600',
-  Phase: 'bg-orange-600',
+  Task: 'bg-gradient-to-b from-sky-400 to-sky-600 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-sky-700/50',
+  Phase: 'bg-gradient-to-b from-orange-400 to-orange-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-orange-700/50',
 }
 
 const STATUS_OPTIONS: BoardColumnType[] = ['Todo', 'InProgress', 'Done']
@@ -198,6 +218,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [showMilestoneForm, setShowMilestoneForm] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
   const scrollbarRef = useRef<HTMLDivElement>(null)
   const monthScrollRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -243,7 +264,19 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return map
   }, [workItems])
 
+  const milestonesByParent = useMemo(() => {
+    const map = new Map<string | null, Milestone[]>()
+    for (const m of milestones) {
+      const key = m.parentWorkItemId ?? null
+      const list = map.get(key) ?? []
+      list.push(m)
+      map.set(key, list)
+    }
+    return map
+  }, [milestones])
+
   const workItemById = useMemo(() => new Map(workItems.map((w) => [w.id, w])), [workItems])
+  const milestoneById = useMemo(() => new Map(milestones.map((m) => [m.id, m])), [milestones])
 
   const groupIds = useMemo(
     () => new Set([...itemsByParent.keys()].filter((k): k is string => k !== null && (itemsByParent.get(k)?.length ?? 0) > 0)),
@@ -284,10 +317,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return { rangeStart: start, dayCount: Math.max(diffDays(end, start), 14) }
   }, [workItems, milestones])
 
-  // When a range is explicitly selected, it becomes the rendered window exactly - not padded
-  // to the actual data span (dead space if data is shorter, e.g. 12 Monate) and not extended
-  // by it either (endless scrolling if data is longer, e.g. 3 Tage on a long project).
-  // Items outside that window are clipped instead of inflating the scrollable width.
   const renderedDayCount = visibleDayCount ?? dayCount
   const days = useMemo(
     () => Array.from({ length: renderedDayCount }, (_, i) => addDays(rangeStart, i)),
@@ -314,11 +343,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       ),
     [days],
   )
-  // Derived live from containerWidth (not stored as a fixed pixel value) so a selected
-  // range keeps exactly filling the available width as the window is resized. Ranges up to
-  // MAX_FIT_DAYS fit the window exactly (even below MIN_DAY_WIDTH, e.g. 3 Monate); beyond
-  // that (6/12 Monate), only MAX_FIT_DAYS worth fits the window and the rest scrolls, so day
-  // columns never get squeezed unreadably thin.
   const dayWidth =
     containerWidth > 0
       ? visibleDayCount != null
@@ -328,9 +352,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const chartWidth = renderedDayCount * dayWidth
   const todayOffset = diffDays(startOfDay(new Date()), rangeStart)
 
-  // scrollLeft is a raw pixel offset, so a day-width change (preset/zoom) alone would leave
-  // the view scrolled to a completely different date - re-anchor it to whatever date was
-  // actually visible before the change instead of letting the chart appear to "go empty".
   const prevDayWidthRef = useRef(dayWidth)
   useEffect(() => {
     const el = containerRef.current
@@ -361,9 +382,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     setVisibleDayCount(null)
   }
 
-  // Mirrors OpenProject's "Create new child" (right-click on a work package) - opens the same
-  // task form, just pre-scoped to a parent instead of forcing a fixed wizard order, so a
-  // hierarchy of any depth can grow ad-hoc from wherever it's needed.
   function openChildForm(parentId: string) {
     setNewParentId(parentId)
     setShowTaskForm(true)
@@ -389,10 +407,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     el.scrollLeft = Math.max(target, 0)
   }
 
-  // The one visible scrollbar lives in its own thin strip above the month/year row; the month
-  // row, the week/day header rows, and the row area below all scroll in lockstep with their own
-  // scrollbars hidden, so it looks like a single view with the scrollbar anchored above the
-  // month/year level.
   function syncScrollLeft(source: HTMLDivElement | null, targets: (HTMLDivElement | null)[]) {
     if (!source) return
     for (const target of targets) {
@@ -416,11 +430,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     syncScrollLeft(bodyScrollRef.current, [scrollbarRef.current, monthScrollRef.current, containerRef.current])
   }
 
-  // Mouse-wheel scrolling anywhere over the chart moves it left/right instead of the page up/down
-  // - there's no vertical scroll to preserve inside the chart itself (the page scrolls for tall
-  // row lists), so repurposing the wheel axis entirely for horizontal scroll is unambiguous.
-  // A native (non-React) listener is required: React registers onWheel as a passive listener,
-  // which silently ignores preventDefault() and would let the page scroll vertically underneath.
   const chartWheelRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = chartWheelRef.current
@@ -451,15 +460,14 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
     const sortKey = (r: Row) => (r.kind === 'milestone' ? new Date(r.milestone.date).getTime() : new Date((r.item.startDate ?? r.item.dueDate)!).getTime())
 
-    // Only top-level entries get interleaved by date; nested task rows stay attached right after their parent.
     const topLevelKeys = new Set(topTasks.filter((r) => r.depth === 0).map((r) => r.key))
-    const merged: Row[] = []
     const remaining = [...topTasks]
     const sortedTop: Row[] = [
       ...topTasks.filter((r) => topLevelKeys.has(r.key)),
       ...milestoneRows,
     ].sort((a, b) => sortKey(a) - sortKey(b))
 
+    const merged: Row[] = []
     for (const top of sortedTop) {
       if (top.kind === 'milestone') {
         merged.push(top)
@@ -475,13 +483,20 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       }
     }
     return merged.filter((r) => r.kind === 'milestone' || matchesFilters(r.item))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workItems, milestones, collapsed, filterStatuses, filterPriorities, filterAssignees])
 
   const rowIndexByTaskId = useMemo(() => {
     const map = new Map<string, number>()
     rows.forEach((r, i) => {
       if (r.kind === 'task') map.set(r.item.id, i)
+    })
+    return map
+  }, [rows])
+
+  const rowIndexByMilestoneId = useMemo(() => {
+    const map = new Map<string, number>()
+    rows.forEach((r, i) => {
+      if (r.kind === 'milestone') map.set(r.milestone.id, i)
     })
     return map
   }, [rows])
@@ -510,9 +525,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return { start, finish }
   }
 
-  // A Phase has no dates of its own - its bar is the union of its descendants' ranges (earliest
-  // start to latest finish), recursively, so nested phases roll up too. No bar until at least one
-  // descendant actually has a date.
   function phaseRange(item: WorkItem): { start: Date; finish: Date } | null {
     let start: Date | null = null
     let finish: Date | null = null
@@ -530,33 +542,129 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   }
 
   const connectors = useMemo(() => {
-    const paths: { key: string; d: string }[] = []
+    const paths: { key: string; d: string; blockingId: string; dependentId: string; isParentChild?: boolean }[] = []
+
+    function orthogonal(x1: number, y1: number, x2: number, y2: number) {
+      const offset = 12
+      if (x2 >= x1 + offset) {
+        const midX = x1 + offset
+        return `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
+      } else {
+        const midY = (y1 + y2) / 2
+        const dropX = x1 + offset
+        const backX = x2 - offset
+        return `M ${x1} ${y1} L ${dropX} ${y1} L ${dropX} ${midY} L ${backX} ${midY} L ${backX} ${y2} L ${x2} ${y2}`
+      }
+    }
+
     for (const row of rows) {
       if (row.kind !== 'task') continue
-      const dependentIndex = rowIndexByTaskId.get(row.item.id)
-      if (dependentIndex === undefined) continue
-      const depRange = effectiveRange(row.item)
-      if (!depRange) continue
-      const x2 = diffDays(depRange.start, rangeStart) * dayWidth
-      const y2 = dependentIndex * ROW_HEIGHT + ROW_HEIGHT / 2
+      const myIndex = rowIndexByTaskId.get(row.item.id)
+      if (myIndex === undefined) continue
+      const myRange = rangeOf(row.item)
+      if (!myRange) continue
 
-      for (const blockingId of row.item.blockingWorkItemIds) {
+      const x1Blocker = (diffDays(myRange.finish, rangeStart) + 1) * dayWidth
+      const y1Blocker = myIndex * ROW_HEIGHT + ROW_HEIGHT / 2
+
+      for (const dependentId of row.item.blockingWorkItemIds) {
+        const dependentIndex = rowIndexByTaskId.get(dependentId)
+        if (dependentIndex === undefined) continue
+        const dependentItem = workItemById.get(dependentId)
+        if (!dependentItem) continue
+        const depRange = rangeOf(dependentItem)
+        if (!depRange) continue
+
+        const x2Dep = diffDays(depRange.start, rangeStart) * dayWidth
+        const y2Dep = dependentIndex * ROW_HEIGHT + ROW_HEIGHT / 2
+        paths.push({ key: `${row.item.id}-${dependentId}`, d: orthogonal(x1Blocker, y1Blocker, x2Dep, y2Dep), blockingId: row.item.id, dependentId })
+      }
+
+      if (row.item.parentWorkItemId) {
+        const taskSiblings = itemsByParent.get(row.item.parentWorkItemId) || []
+        const milestoneSiblings = milestonesByParent.get(row.item.parentWorkItemId) || []
+        const siblings = [...taskSiblings, ...milestoneSiblings]
+        
+        const sortedSiblings = siblings.filter(s => !('type' in s) || s.type !== 'Phase').sort((a, b) => {
+          const startA = ('date' in a) ? new Date(a.date).getTime() : (rangeOf(a)?.start?.getTime() || 0);
+          const startB = ('date' in b) ? new Date(b.date).getTime() : (rangeOf(b)?.start?.getTime() || 0);
+          return startA - startB;
+        });
+        
+        const myIndexInSiblings = sortedSiblings.findIndex(s => s.id === row.item.id);
+        if (myIndexInSiblings > 0) {
+          const prevSibling = sortedSiblings[myIndexInSiblings - 1];
+          const prevIndex = rowIndexByTaskId.get(prevSibling.id) ?? rowIndexByMilestoneId.get(prevSibling.id);
+          const prevRange = ('date' in prevSibling) ? { start: startOfDay(new Date(prevSibling.date)), finish: startOfDay(new Date(prevSibling.date)) } : rangeOf(prevSibling);
+          if (prevIndex !== undefined && prevRange) {
+             const x1 = ('date' in prevSibling) ? diffDays(prevRange.finish, rangeStart) * dayWidth + dayWidth / 2 : (diffDays(prevRange.finish, rangeStart) + 1) * dayWidth;
+             const y1 = prevIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
+             const x2Dep = diffDays(myRange.start, rangeStart) * dayWidth;
+             const y2Dep = myIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
+             paths.push({ key: `sibling-${prevSibling.id}-${row.item.id}`, d: orthogonal(x1, y1, x2Dep, y2Dep), blockingId: prevSibling.id, dependentId: row.item.id, isParentChild: true })
+          }
+        }
+      }
+
+      for (const milestoneId of row.item.blockedByMilestoneIds) {
+        const milestoneIndex = rowIndexByMilestoneId.get(milestoneId)
+        const milestone = milestoneById.get(milestoneId)
+        if (milestoneIndex === undefined || !milestone) continue
+
+        const x1 = diffDays(startOfDay(new Date(milestone.date)), rangeStart) * dayWidth + dayWidth / 2
+        const y1 = milestoneIndex * ROW_HEIGHT + ROW_HEIGHT / 2
+        const dependentId = `milestone-${milestoneId}`
+        const x2Dep = diffDays(myRange.start, rangeStart) * dayWidth
+        const y2Dep = myIndex * ROW_HEIGHT + ROW_HEIGHT / 2
+        paths.push({ key: `${dependentId}-${row.item.id}`, d: orthogonal(x1, y1, x2Dep, y2Dep), blockingId: dependentId, dependentId: row.item.id })
+      }
+    }
+
+    for (const m of milestones) {
+      const milestoneIndex = rowIndexByMilestoneId.get(m.id)
+      if (milestoneIndex === undefined) continue
+      const x2Dep = diffDays(startOfDay(new Date(m.date)), rangeStart) * dayWidth + dayWidth / 2
+      const y2Dep = milestoneIndex * ROW_HEIGHT + ROW_HEIGHT / 2
+      const dependentId = `milestone-${m.id}`
+
+      if (m.parentWorkItemId) {
+        const taskSiblings = itemsByParent.get(m.parentWorkItemId) || []
+        const milestoneSiblings = milestonesByParent.get(m.parentWorkItemId) || []
+        const siblings = [...taskSiblings, ...milestoneSiblings]
+        
+        const sortedSiblings = siblings.filter(s => !('type' in s) || s.type !== 'Phase').sort((a, b) => {
+          const startA = ('date' in a) ? new Date(a.date).getTime() : (rangeOf(a)?.start?.getTime() || 0);
+          const startB = ('date' in b) ? new Date(b.date).getTime() : (rangeOf(b)?.start?.getTime() || 0);
+          return startA - startB;
+        });
+        
+        const myIndexInSiblings = sortedSiblings.findIndex(s => s.id === m.id);
+        if (myIndexInSiblings > 0) {
+          const prevSibling = sortedSiblings[myIndexInSiblings - 1];
+          const prevIndex = rowIndexByTaskId.get(prevSibling.id) ?? rowIndexByMilestoneId.get(prevSibling.id);
+          const prevRange = ('date' in prevSibling) ? { start: startOfDay(new Date(prevSibling.date)), finish: startOfDay(new Date(prevSibling.date)) } : rangeOf(prevSibling);
+          if (prevIndex !== undefined && prevRange) {
+             const x1 = ('date' in prevSibling) ? diffDays(prevRange.finish, rangeStart) * dayWidth + dayWidth / 2 : (diffDays(prevRange.finish, rangeStart) + 1) * dayWidth;
+             const y1 = prevIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
+             paths.push({ key: `sibling-${prevSibling.id}-${dependentId}`, d: orthogonal(x1, y1, x2Dep, y2Dep), blockingId: prevSibling.id, dependentId, isParentChild: true })
+          }
+        }
+      }
+
+      for (const blockingId of m.blockedByWorkItemIds) {
         const blockingIndex = rowIndexByTaskId.get(blockingId)
-        if (blockingIndex === undefined) continue
         const blockingItem = workItemById.get(blockingId)
-        if (!blockingItem) continue
-        const blockRange = effectiveRange(blockingItem)
+        if (blockingIndex === undefined || !blockingItem) continue
+        const blockRange = rangeOf(blockingItem)
         if (!blockRange) continue
 
         const x1 = (diffDays(blockRange.finish, rangeStart) + 1) * dayWidth
         const y1 = blockingIndex * ROW_HEIGHT + ROW_HEIGHT / 2
-        const midX = x1 + 10
-        paths.push({ key: `${blockingId}-${row.item.id}`, d: `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}` })
+        paths.push({ key: `${blockingId}-${dependentId}`, d: orthogonal(x1, y1, x2Dep, y2Dep), blockingId, dependentId })
       }
     }
     return paths
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, rowIndexByTaskId, workItemById, rangeStart, dayWidth, drag])
+  }, [rows, rowIndexByTaskId, rowIndexByMilestoneId, workItemById, milestoneById, milestones, itemsByParent, milestonesByParent, rangeStart, dayWidth])
 
   async function commitDateChange(item: WorkItem, start: Date, finish: Date) {
     const updated = await updateWorkItem(item.boardId, item.id, {
@@ -606,14 +714,12 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     if (!title) return
     if (newType === 'Task' && !newStart) return
 
-    // ProjectPage guarantees a board with columns exists before this view even renders.
     const target = firstTodoColumn(boards)
     if (!target?.column) {
       setError('Board hat keine Spalten - im Kanban-Tab prüfen.')
       return
     }
 
-    // A Phase has no dates of its own - its bar is rolled up live from its subtasks (see phaseRange).
     const created = await createWorkItem(target.board.id, target.column.id, title, newType, 'Medium', undefined, {
       parentWorkItemId: newParentId || undefined,
       startDate: newType === 'Phase' ? undefined : new Date(newStart).toISOString(),
@@ -906,9 +1012,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       </div>
 
       <section className="flex overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        {/* fixed label column - not part of the horizontal scroll, so the scrollbar strip only spans the day chart */}
         <div className="shrink-0" style={{ width: LABEL_WIDTH }}>
-          {/* spacer matching the scrollbar strip above the chart's month row, so the column labels stay aligned */}
           <div style={{ height: SCROLLBAR_ROW_HEIGHT }} />
           <div className="flex items-center border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
             <span style={{ width: COL_ID }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
@@ -962,7 +1066,12 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-[10px] text-slate-500">
                   {item.referenceCode}
                 </span>
-                <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs" style={{ paddingLeft: depth * 16 }}>
+                <span 
+                  className="flex flex-1 items-center gap-1 truncate px-2 text-xs" 
+                  style={{ paddingLeft: depth * 16 }}
+                  onMouseEnter={() => setHoveredTaskId(item.id)}
+                  onMouseLeave={() => setHoveredTaskId(null)}
+                >
                   {hasChildren && (
                     <button
                       onClick={() => toggleCollapse(item.id)}
@@ -997,9 +1106,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           })}
         </div>
 
-        {/* scrollable day chart: a thin strip holds the one visible scrollbar, anchored above
-            the month/year row; the month row, week/day header rows, and the row body below all
-            scroll in lockstep with their own scrollbars hidden, looking like a single view */}
         <div ref={chartWheelRef} className="flex min-w-0 flex-1 flex-col">
           <div ref={scrollbarRef} className="overflow-x-auto" onScroll={handleScrollbarScroll} style={{ height: SCROLLBAR_ROW_HEIGHT }}>
             <div style={{ width: chartWidth, height: 1 }} />
@@ -1045,7 +1151,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }} />
               )}
 
-              {/* header: week + day rows */}
               <div className="flex flex-col border-b border-slate-200 dark:border-slate-800" style={{ height: WEEK_ROW_HEIGHT + DAY_ROW_HEIGHT }}>
                 <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: WEEK_ROW_HEIGHT }}>
                   {weekGroups.map((g, i) => (
@@ -1086,14 +1191,45 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }} />
               )}
 
-              {/* connector overlay, spans all rows */}
               <svg
-                className="pointer-events-none absolute z-10"
+                className="pointer-events-none absolute z-20 overflow-visible"
                 style={{ left: 0, top: 0, width: chartWidth, height: rows.length * ROW_HEIGHT }}
               >
-                {connectors.map((c) => (
-                  <path key={c.key} d={c.d} stroke="rgb(129 140 248)" strokeWidth={1.5} fill="none" />
-                ))}
+                <defs>
+                  <marker id="arrow-normal" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" className="text-slate-500 dark:text-slate-400" />
+                  </marker>
+                  <marker id="arrow-hovered" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" className="text-indigo-500" />
+                  </marker>
+                </defs>
+                {connectors.map((c) => {
+                  const isHovered = hoveredTaskId === c.blockingId || hoveredTaskId === c.dependentId;
+                  if (c.isParentChild) {
+                    return (
+                      <path 
+                        key={c.key} 
+                        d={c.d} 
+                        stroke="currentColor"
+                        strokeWidth={1.5} 
+                        strokeDasharray="5 5"
+                        className={`transition-all duration-300 ${isHovered ? 'text-indigo-400 drop-shadow-md' : 'text-slate-400 dark:text-slate-500 opacity-80'}`}
+                        fill="none" 
+                      />
+                    )
+                  }
+                  return (
+                    <path 
+                      key={c.key} 
+                      d={c.d} 
+                      stroke="currentColor"
+                      strokeWidth={isHovered ? 2.5 : 1.5} 
+                      className={`transition-all duration-300 ${isHovered ? 'text-indigo-500 drop-shadow-md' : 'text-slate-500 dark:text-slate-400'}`}
+                      fill="none" 
+                      markerEnd={isHovered ? "url(#arrow-hovered)" : "url(#arrow-normal)"}
+                    />
+                  )
+                })}
               </svg>
 
               {rows.length === 0 && <div style={{ height: ROW_HEIGHT }} />}
@@ -1122,7 +1258,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 const { item, hasChildren } = row
                 const isPhase = item.type === 'Phase'
                 const range = rangeOf(item)
-                const barColor = isPhase ? TYPE_BAR_COLOR.Phase : hasChildren ? 'bg-slate-600' : TYPE_BAR_COLOR.Task
+                const barColor = isPhase ? TYPE_BAR_COLOR.Phase : hasChildren ? 'bg-slate-600' : getBarColor(item.columnName, item.columnType)
                 const blocked = item.blockingWorkItemIds.length > 0
 
                 return (

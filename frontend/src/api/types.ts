@@ -70,7 +70,11 @@ export interface WorkItem {
   updatedAt: string
   labelIds: string[]
   blockingWorkItemIds: string[]
+  /** Milestones that must be reached (date passed) before this work item may leave Todo. */
+  blockedByMilestoneIds: string[]
 }
+
+export type MilestoneDependencyDirection = 'WorkItemBlocksMilestone' | 'MilestoneBlocksWorkItem'
 
 export interface Milestone {
   id: string
@@ -78,6 +82,12 @@ export interface Milestone {
   description: string | null
   date: string
   createdAt: string
+  /** Visual nesting under a Phase/Task's subtree on the Timeline - null means top-level. */
+  parentWorkItemId: string | null
+  /** Work items that must reach a Done column before this milestone counts as reached. */
+  blockedByWorkItemIds: string[]
+  /** Work items that may not leave Todo until this milestone's date has passed. */
+  blockingWorkItemIds: string[]
 }
 
 export interface Timeline {

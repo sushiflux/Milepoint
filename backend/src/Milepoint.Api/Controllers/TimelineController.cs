@@ -37,10 +37,10 @@ public class TimelineController : ControllerBase
 
         var milestones = await _db.Milestones
             .Where(m => m.ProjectId == projectId)
+            .Include(m => m.WorkItemLinks)
             .OrderBy(m => m.Date)
-            .Select(m => new MilestoneDto(m.Id, m.Name, m.Description, m.Date, m.CreatedAt))
             .ToListAsync();
 
-        return Ok(new TimelineDto(items.Select(WorkItemMapper.ToDto).ToList(), milestones));
+        return Ok(new TimelineDto(items.Select(WorkItemMapper.ToDto).ToList(), milestones.Select(MilestoneMapper.ToDto).ToList()));
     }
 }

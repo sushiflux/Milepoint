@@ -58,3 +58,8 @@ export const removeDependency = (boardId: string, workItemId: string, blockingWo
   apiFetch<void>(`/boards/${boardId}/workitems/${workItemId}/dependencies/${blockingWorkItemId}`, {
     method: 'DELETE',
   })
+
+// Deletes the whole subtree (the item and all its descendants), plus any milestones nested under
+// it - the backend does the cascading, this call itself returns no body.
+export const deleteWorkItem = (boardId: string, workItemId: string) =>
+  apiFetch<void>(`/boards/${boardId}/workitems/${workItemId}`, { method: 'DELETE' })

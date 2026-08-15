@@ -327,6 +327,10 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)");
 
+                    b.Property<string>("ParentWorkItemId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<string>("ProjectId")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -334,9 +338,31 @@ namespace Milepoint.Api.Data.Migrations.Postgres
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ParentWorkItemId");
+
                     b.HasIndex("ProjectId");
 
                     b.ToTable("Milestones");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.MilestoneDependency", b =>
+                {
+                    b.Property<string>("MilestoneId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("WorkItemId")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<int>("Direction")
+                        .HasColumnType("integer");
+
+                    b.HasKey("MilestoneId", "WorkItemId");
+
+                    b.HasIndex("WorkItemId");
+
+                    b.ToTable("MilestoneDependencies");
                 });
 
             modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
@@ -641,13 +667,39 @@ namespace Milepoint.Api.Data.Migrations.Postgres
 
             modelBuilder.Entity("Milepoint.Api.Models.Milestone", b =>
                 {
+                    b.HasOne("Milepoint.Api.Models.WorkItem", "ParentWorkItem")
+                        .WithMany()
+                        .HasForeignKey("ParentWorkItemId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("Milepoint.Api.Models.Project", "Project")
                         .WithMany()
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.Navigation("ParentWorkItem");
+
                     b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.MilestoneDependency", b =>
+                {
+                    b.HasOne("Milepoint.Api.Models.Milestone", "Milestone")
+                        .WithMany("WorkItemLinks")
+                        .HasForeignKey("MilestoneId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Milepoint.Api.Models.WorkItem", "WorkItem")
+                        .WithMany("MilestoneLinks")
+                        .HasForeignKey("WorkItemId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.Navigation("Milestone");
+
+                    b.Navigation("WorkItem");
                 });
 
             modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
@@ -779,6 +831,11 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Navigation("WorkItems");
                 });
 
+            modelBuilder.Entity("Milepoint.Api.Models.Milestone", b =>
+                {
+                    b.Navigation("WorkItemLinks");
+                });
+
             modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
                 {
                     b.Navigation("IncomingLinks");
@@ -800,6 +857,8 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Navigation("Children");
 
                     b.Navigation("Dependencies");
+
+                    b.Navigation("MilestoneLinks");
                 });
 #pragma warning restore 612, 618
         }

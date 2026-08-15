@@ -19,6 +19,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
     public DbSet<Milestone> Milestones => Set<Milestone>();
     public DbSet<WorkItemDependency> WorkItemDependencies => Set<WorkItemDependency>();
+    public DbSet<MilestoneDependency> MilestoneDependencies => Set<MilestoneDependency>();
     public DbSet<Note> Notes => Set<Note>();
     public DbSet<NoteLink> NoteLinks => Set<NoteLink>();
 
@@ -139,6 +140,15 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
                 .WithMany()
                 .HasForeignKey(m => m.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // NoAction, same reasoning as WorkItemDependency/MilestoneDependency above - WorkItem
+            // already has a cascade path via Project -> Board -> BoardColumn. ProjectsController
+            // clears this before deleting a project, same as it does for WorkItem.ParentWorkItemId.
+            entity.Property(m => m.ParentWorkItemId).HasMaxLength(40);
+            entity.HasOne(m => m.ParentWorkItem)
+                .WithMany()
+                .HasForeignKey(m => m.ParentWorkItemId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         builder.Entity<WorkItemDependency>(entity =>
@@ -157,6 +167,27 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
             entity.HasOne(d => d.BlockingWorkItem)
                 .WithMany()
                 .HasForeignKey(d => d.BlockingWorkItemId)
+                .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<MilestoneDependency>(entity =>
+        {
+            entity.HasKey(d => new { d.MilestoneId, d.WorkItemId });
+            entity.Property(d => d.MilestoneId).HasMaxLength(40);
+            entity.Property(d => d.WorkItemId).HasMaxLength(40);
+
+            // WorkItemId is NoAction, same reasoning as WorkItemDependency above (WorkItem already
+            // has a cascade path via Project -> Board -> BoardColumn). MilestoneId can cascade since
+            // it's the only path into this table - deleting a project's milestones this way also
+            // clears their dependency rows before the WorkItem side of the cascade runs.
+            entity.HasOne(d => d.Milestone)
+                .WithMany(m => m.WorkItemLinks)
+                .HasForeignKey(d => d.MilestoneId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(d => d.WorkItem)
+                .WithMany(w => w.MilestoneLinks)
+                .HasForeignKey(d => d.WorkItemId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
 

@@ -46,4 +46,6 @@ public record WorkItemDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     List<Guid> LabelIds,
-    List<string> BlockingWorkItemIds);
+    List<string> BlockingWorkItemIds,
+    // Milestones that must be reached (date passed) before this work item may leave Todo.
+    List<string> BlockedByMilestoneIds);

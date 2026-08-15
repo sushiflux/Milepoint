@@ -33,6 +33,7 @@ public class WorkItemsController : ControllerBase
             .Include(w => w.Labels)
             .Include(w => w.Column)
             .Include(w => w.Dependencies)
+            .Include(w => w.MilestoneLinks)
             .OrderBy(w => w.Position)
             .ToListAsync();
 
@@ -101,6 +102,7 @@ public class WorkItemsController : ControllerBase
             .Include(w => w.Labels)
             .Include(w => w.Column)
             .Include(w => w.Dependencies)
+            .Include(w => w.MilestoneLinks)
             .FirstOrDefaultAsync(w => w.Id == workItemId && w.BoardId == boardId);
 
         if (item is null)
@@ -161,6 +163,19 @@ public class WorkItemsController : ControllerBase
             {
                 return Conflict($"Blockiert durch noch nicht fertige Aufgabe(n): {string.Join(", ", unfinishedBlockers)}");
             }
+
+            var now = DateTimeOffset.UtcNow;
+            var unreachedMilestones = await _db.MilestoneDependencies
+                .Where(d => d.WorkItemId == workItemId && d.Direction == MilestoneDependencyDirection.MilestoneBlocksWorkItem)
+                .Include(d => d.Milestone)
+                .Where(d => d.Milestone.Date > now)
+                .Select(d => d.Milestone.Name)
+                .ToListAsync();
+
+            if (unreachedMilestones.Count > 0)
+            {
+                return Conflict($"Blockiert durch noch nicht erreichte(n) Meilenstein(e): {string.Join(", ", unreachedMilestones)}");
+            }
         }
 
         item.ColumnId = request.TargetColumnId;
@@ -207,6 +222,58 @@ public class WorkItemsController : ControllerBase
             });
             await _db.SaveChangesAsync();
         }
+
+        return NoContent();
+    }
+
+    [HttpDelete("{workItemId}")]
+    public async Task<IActionResult> Delete(string boardId, string workItemId)
+    {
+        var item = await _db.WorkItems.FirstOrDefaultAsync(w => w.Id == workItemId && w.BoardId == boardId);
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        // Deleting a Phase/Task takes its whole subtree with it - gather every descendant level
+        // by level, since WorkItem.ParentWorkItemId is Restrict (no built-in cascade to lean on).
+        var subtreeIds = new List<string> { workItemId };
+        var frontier = new List<string> { workItemId };
+        while (frontier.Count > 0)
+        {
+            var children = await _db.WorkItems.Where(w => frontier.Contains(w.ParentWorkItemId!)).Select(w => w.Id).ToListAsync();
+            if (children.Count == 0) break;
+            subtreeIds.AddRange(children);
+            frontier = children;
+        }
+
+        var milestoneIds = await _db.Milestones.Where(m => subtreeIds.Contains(m.ParentWorkItemId!)).Select(m => m.Id).ToListAsync();
+
+        // Break the self-referencing parent links inside the subtree first (same reasoning as
+        // ProjectsController.Delete) so the bulk WorkItem delete below can't hit its own Restrict FK.
+        await _db.WorkItems
+            .Where(w => subtreeIds.Contains(w.Id) && w.ParentWorkItemId != null)
+            .ExecuteUpdateAsync(s => s.SetProperty(w => w.ParentWorkItemId, (string?)null));
+
+        await _db.WorkItemDependencies
+            .Where(d => subtreeIds.Contains(d.DependentWorkItemId) || subtreeIds.Contains(d.BlockingWorkItemId))
+            .ExecuteDeleteAsync();
+
+        // MilestoneId side of MilestoneDependency cascades on its own when the milestone rows
+        // below are deleted - only the WorkItemId (NoAction) side needs clearing here, covering
+        // milestones outside this subtree that referenced a task we're about to remove.
+        await _db.MilestoneDependencies
+            .Where(d => subtreeIds.Contains(d.WorkItemId))
+            .ExecuteDeleteAsync();
+
+        await _db.Set<Dictionary<string, object>>("WorkItemLabel")
+            .Where(x => subtreeIds.Contains(EF.Property<string>(x, "WorkItemsId")))
+            .ExecuteDeleteAsync();
+
+        await _db.Milestones.Where(m => milestoneIds.Contains(m.Id)).ExecuteDeleteAsync();
+        await _db.WorkItems.Where(w => subtreeIds.Contains(w.Id)).ExecuteDeleteAsync();
+
+        await _hub.Clients.Group(KanbanHub.GroupName(boardId)).SendAsync("workItemDeleted", subtreeIds);
 
         return NoContent();
     }

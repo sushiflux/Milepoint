@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { createWorkItem, moveWorkItem, updateWorkItem } from '../api/workItems'
-import type { Board, BoardColumn, WorkItem } from '../api/types'
+import type { Board, BoardColumn, BoardColumnType, WorkItem } from '../api/types'
 import type { UserSummary } from '../api/users'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
-import AddButton from '../components/AddButton'
 
 interface Props {
   board: Board
@@ -59,7 +58,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
 
   const itemsByColumn = useMemo(() => {
     const map = new Map<string, WorkItem[]>()
+    // A Phase is a Timeline grouping construct, not a piece of work someone moves through
+    // Todo/In Arbeit/Fertig - it never shows up as a Kanban card.
     for (const item of items) {
+      if (item.type === 'Phase') continue
       const list = map.get(item.columnId) ?? []
       list.push(item)
       map.set(item.columnId, list)
@@ -107,97 +109,169 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     })
     onItemsChange((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
   }
+  function getInitials(name?: string) {
+    if (!name) return '?'
+    const parts = name.split(' ').filter(Boolean)
+    if (parts.length === 0) return '?'
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase()
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+  }
+
+  const PRIORITY_COLORS: Record<string, string> = {
+    Low: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
+    Medium: 'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400',
+    High: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
+    Critical: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
+  }
+
+  const COLUMN_BORDER_COLORS: Record<string, string> = {
+    Todo: 'bg-slate-400 dark:bg-slate-500',
+    InProgress: 'bg-sky-400 dark:bg-sky-500',
+    Done: 'bg-emerald-400 dark:bg-emerald-500',
+  }
+
+  const KNOWN_BORDER_COLORS: Record<string, string> = {
+    'pausiert': 'bg-amber-400 dark:bg-amber-500',
+    'blockiert': 'bg-red-400 dark:bg-red-500',
+    'review': 'bg-purple-400 dark:bg-purple-500',
+    'neu': 'bg-slate-400 dark:bg-slate-500',
+  }
+
+  function getColumnBorderColor(columnName: string, columnType: BoardColumnType) {
+    const lowerName = columnName.toLowerCase();
+    for (const [key, color] of Object.entries(KNOWN_BORDER_COLORS)) {
+      if (lowerName.includes(key)) return color;
+    }
+    return COLUMN_BORDER_COLORS[columnType] || 'bg-slate-400';
+  }
 
   return (
-    <div className="flex gap-4 overflow-x-auto">
+    <div className="flex h-full gap-5 overflow-x-auto pb-8 pt-2 pl-2">
       {board.columns.map((column) => (
         <section
           key={column.id}
-          className="w-72 shrink-0 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900"
+          className="flex flex-col w-[340px] shrink-0 rounded-md border border-slate-200/50 bg-slate-50/50 dark:border-slate-700/50 dark:bg-slate-800/30 backdrop-blur-sm shadow-sm relative overflow-hidden"
         >
-          <h2 className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-            {column.name}
-            <span className="text-xs text-slate-500">{itemsByColumn.get(column.id)?.length ?? 0}</span>
-            {!openAddColumns.has(column.id) && (
-              <span className="ml-auto">
-                <AddButton onClick={() => toggleAddColumn(column.id, true)} label="Neues Item" />
-              </span>
-            )}
-          </h2>
+          {/* Status Color Line */}
+          <div className={`absolute top-0 left-0 w-full h-1 ${getColumnBorderColor(column.name, column.type)}`} />
 
-          <ul className="space-y-2">
+          {/* Column Header */}
+          <div className="flex items-center justify-between border-b border-slate-200/50 bg-white/50 px-4 py-3 dark:border-slate-700/50 dark:bg-slate-800/50">
+            <h2 className="flex items-center gap-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1">
+              {column.name}
+              <span className="flex h-5 items-center justify-center rounded-full bg-slate-200 px-2 text-[10px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+                {itemsByColumn.get(column.id)?.length ?? 0}
+              </span>
+            </h2>
+            {!openAddColumns.has(column.id) && (
+              <button
+                onClick={() => toggleAddColumn(column.id, true)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                title="Neue Aufgabe in dieser Spalte"
+              >
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
+              </button>
+            )}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-3 space-y-3 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 dark:[&::-webkit-scrollbar-thumb]:bg-slate-600">
+            {openAddColumns.has(column.id) && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  handleCreate(column)
+                }}
+                className="rounded-md border border-indigo-200 bg-white p-3 shadow-md dark:border-indigo-500/30 dark:bg-slate-800"
+              >
+                <input
+                  autoFocus
+                  value={newTitleByColumn[column.id] ?? ''}
+                  onChange={(e) => setNewTitleByColumn((prev) => ({ ...prev, [column.id]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') toggleAddColumn(column.id, false)
+                  }}
+                  placeholder="Titel eingeben..."
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-indigo-500"
+                />
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => toggleAddColumn(column.id, false)}
+                    className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                  >
+                    Abbrechen
+                  </button>
+                  <button type="submit" disabled={!(newTitleByColumn[column.id] ?? '').trim()} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50">
+                    Speichern
+                  </button>
+                </div>
+              </form>
+            )}
+
             {(itemsByColumn.get(column.id) ?? []).map((item) => (
               <li
                 key={item.id}
-                className="rounded border border-slate-200 bg-slate-50 p-3 text-sm dark:border-slate-800 dark:bg-slate-800/60"
+                className="group relative flex flex-col gap-3 rounded-md border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-md dark:border-slate-700/60 dark:bg-slate-800"
               >
-                <p className="font-mono text-xs text-slate-500">{item.referenceCode}</p>
-                <p className="font-medium">{item.title}</p>
-                <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                  <span>{item.type}</span>
-                  <select
-                    value={column.id}
-                    onChange={(e) => {
-                      const target = board.columns.find((c) => c.id === e.target.value)
-                      if (target) handleMove(item, target)
-                    }}
-                    className="rounded border border-slate-300 bg-white px-1 py-0.5 dark:border-slate-700 dark:bg-slate-900"
-                  >
-                    {board.columns.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-medium text-slate-800 dark:text-slate-100 leading-snug">{item.title}</h3>
+                  <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-500 dark:bg-slate-700/50 dark:text-slate-400">
+                    {item.referenceCode}
+                  </span>
                 </div>
-                <select
-                  value={item.assigneeId ?? ''}
-                  onChange={(e) => handleAssign(item, e.target.value)}
-                  className="mt-2 w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
-                >
-                  <option value="">Nicht zugewiesen</option>
-                  {users.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.displayName}
-                    </option>
-                  ))}
-                </select>
+                
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${item.type === 'Phase' ? 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
+                    {item.type}
+                  </span>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.Medium}`}>
+                    {item.priority}
+                  </span>
+                </div>
+                
+                <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-700/50">
+                  {/* Assignee Avatar Dropdown */}
+                  <div className="relative" title="Zuständigen ändern">
+                    <select
+                      value={item.assigneeId ?? ''}
+                      onChange={(e) => handleAssign(item, e.target.value)}
+                      className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
+                    >
+                      <option value="">Nicht zugewiesen</option>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.id}>{u.displayName}</option>
+                      ))}
+                    </select>
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white transition-all group-hover:ring-indigo-50 dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-800 dark:group-hover:ring-indigo-900/30">
+                      {item.assigneeId ? getInitials(users.find(u => u.id === item.assigneeId)?.displayName) : (
+                        <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-50"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* Column Move Pill */}
+                  <div className="relative flex items-center" title="Spalte wechseln">
+                    <select
+                      value={column.id}
+                      onChange={(e) => {
+                        const target = board.columns.find((c) => c.id === e.target.value)
+                        if (target) handleMove(item, target)
+                      }}
+                      className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
+                    >
+                      {board.columns.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-1 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 transition-colors group-hover:bg-indigo-50 group-hover:text-indigo-600 dark:bg-slate-800/50 dark:text-slate-400 dark:group-hover:bg-indigo-500/10 dark:group-hover:text-indigo-400">
+                      {column.name}
+                      <svg viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+                    </div>
+                  </div>
+                </div>
               </li>
             ))}
-          </ul>
-
-          {openAddColumns.has(column.id) && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault()
-                handleCreate(column)
-              }}
-              className="mt-3 space-y-1"
-            >
-              <input
-                autoFocus
-                value={newTitleByColumn[column.id] ?? ''}
-                onChange={(e) => setNewTitleByColumn((prev) => ({ ...prev, [column.id]: e.target.value }))}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') toggleAddColumn(column.id, false)
-                }}
-                placeholder="Titel der Aufgabe"
-                className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-              />
-              <div className="flex gap-2">
-                <button type="submit" className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500">
-                  Anlegen
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleAddColumn(column.id, false)}
-                  className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-                >
-                  Abbrechen
-                </button>
-              </div>
-            </form>
-          )}
+          </div>
         </section>
       ))}
     </div>
