@@ -95,6 +95,55 @@ public class ProjectsController : ControllerBase
         return CreatedAtAction(nameof(GetAll), dto);
     }
 
+    [HttpPatch("{projectId}")]
+    public async Task<ActionResult<ProjectDto>> Rename(string projectId, UpdateProjectRequest request)
+    {
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
+        if (project is null)
+        {
+            return NotFound();
+        }
+
+        if (!await CanManageProjectAsync(project))
+        {
+            return Forbid();
+        }
+
+        project.Name = request.Name;
+        await _db.SaveChangesAsync();
+
+        var currentUserId = _userManager.GetUserId(User);
+        var items = await _db.WorkItems.Where(w => w.ProjectId == projectId).Include(w => w.Column).ToListAsync();
+        return Ok(ToDto(project, items, currentUserId));
+    }
+
+    [HttpDelete("{projectId}")]
+    public async Task<IActionResult> Delete(string projectId)
+    {
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
+        if (project is null)
+        {
+            return NotFound();
+        }
+
+        if (!await CanManageProjectAsync(project))
+        {
+            return Forbid();
+        }
+
+        // WorkItem.ParentWorkItemId is a Restrict FK (self-referencing, see PmDbContextBase), so
+        // the cascade from Project -> Board -> BoardColumn -> WorkItem can violate that
+        // constraint for projects with Phase/subtask hierarchies unless parent links are
+        // cleared first.
+        await _db.WorkItems
+            .Where(w => w.ProjectId == projectId && w.ParentWorkItemId != null)
+            .ExecuteUpdateAsync(s => s.SetProperty(w => w.ParentWorkItemId, (string?)null));
+
+        _db.Projects.Remove(project);
+        await _db.SaveChangesAsync();
+        return NoContent();
+    }
+
     [HttpPost("{projectId}/members")]
     public async Task<IActionResult> AddMember(string projectId, AddProjectMemberRequest request)
     {
@@ -104,7 +153,7 @@ public class ProjectsController : ControllerBase
             return NotFound();
         }
 
-        if (!await CanManageMembersAsync(project))
+        if (!await CanManageProjectAsync(project))
         {
             return Forbid();
         }
@@ -134,7 +183,7 @@ public class ProjectsController : ControllerBase
             return NotFound();
         }
 
-        if (!await CanManageMembersAsync(project))
+        if (!await CanManageProjectAsync(project))
         {
             return Forbid();
         }
@@ -149,7 +198,7 @@ public class ProjectsController : ControllerBase
         return NoContent();
     }
 
-    private async Task<bool> CanManageMembersAsync(Project project)
+    private async Task<bool> CanManageProjectAsync(Project project)
     {
         if (User.IsInRole("Projektleiter"))
         {

@@ -2,6 +2,8 @@ namespace Milepoint.Api.Dtos.Projects;
 
 public record CreateProjectRequest(string Name, string? Description);
 
+public record UpdateProjectRequest(string Name);
+
 public record AddProjectMemberRequest(string Username);
 
 public record ProjectDto(

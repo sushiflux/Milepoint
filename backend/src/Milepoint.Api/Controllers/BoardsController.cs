@@ -14,10 +14,10 @@ public class BoardsController : ControllerBase
 {
     internal static readonly (string Name, BoardColumnType Type)[] DefaultColumns =
     [
-        ("Backlog", BoardColumnType.Todo),
+        ("Neu", BoardColumnType.Todo),
         ("In Arbeit", BoardColumnType.InProgress),
-        ("Review", BoardColumnType.InProgress),
-        ("Fertig", BoardColumnType.Done)
+        ("Fertig", BoardColumnType.Done),
+        ("Pausiert", BoardColumnType.Todo)
     ];
 
     private readonly PmDbContextBase _db;

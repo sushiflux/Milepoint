@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createProject, getProjects } from '../api/projects'
+import { createProject, deleteProject, getProjects, renameProject } from '../api/projects'
 import type { Project } from '../api/types'
 import { validateRequired } from '../lib/validation'
 import { shortId } from '../lib/ids'
 import Sidebar from '../components/Sidebar'
 import AddButton from '../components/AddButton'
+import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
 
 type ViewMode = 'tiles' | 'list'
 const VIEW_MODE_STORAGE_KEY = 'pm.dashboard.viewMode'
@@ -20,6 +21,9 @@ export default function ProjectsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>(
     () => (localStorage.getItem(VIEW_MODE_STORAGE_KEY) as ViewMode | null) ?? 'tiles',
   )
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; project: Project | null } | null>(null)
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
 
   const navigate = useNavigate()
 
@@ -65,6 +69,64 @@ export default function ProjectsPage() {
     }
   }
 
+  function handleTileContextMenu(event: React.MouseEvent, project: Project) {
+    event.preventDefault()
+    event.stopPropagation()
+    setContextMenu({ x: event.clientX, y: event.clientY, project })
+  }
+
+  function handleAreaContextMenu(event: React.MouseEvent) {
+    event.preventDefault()
+    setContextMenu({ x: event.clientX, y: event.clientY, project: null })
+  }
+
+  function startRename(project: Project) {
+    setRenamingProjectId(project.id)
+    setRenameValue(project.name)
+  }
+
+  function cancelRename() {
+    setRenamingProjectId(null)
+  }
+
+  async function submitRename(project: Project) {
+    const trimmed = renameValue.trim()
+    if (!trimmed || trimmed === project.name) {
+      setRenamingProjectId(null)
+      return
+    }
+    try {
+      await renameProject(project.id, trimmed)
+      setRenamingProjectId(null)
+      await loadProjects()
+    } catch {
+      setError('Projekt konnte nicht umbenannt werden.')
+    }
+  }
+
+  async function handleDeleteProject(project: Project) {
+    if (!window.confirm(`Projekt "${project.name}" wirklich löschen? Boards, Aufgaben und Notizen gehen dabei unwiderruflich verloren.`)) {
+      return
+    }
+    try {
+      await deleteProject(project.id)
+      await loadProjects()
+    } catch {
+      setError('Projekt konnte nicht gelöscht werden.')
+    }
+  }
+
+  function projectMenuItems(project: Project): ContextMenuEntry[] {
+    return [
+      { label: 'Projekt öffnen', onClick: () => navigate(`/projects/${project.id}`) },
+      { label: 'Kanban', onClick: () => navigate(`/projects/${project.id}/kanban`) },
+      { label: 'Notizen', onClick: () => navigate(`/projects/${project.id}/notes`) },
+      'divider',
+      { label: 'Projekt umbenennen', onClick: () => startRename(project) },
+      { label: 'Projekt löschen', onClick: () => handleDeleteProject(project), danger: true },
+    ]
+  }
+
   const nameMsg = fieldMessage('name', nameError)
 
   const createForm = (
@@ -105,8 +167,44 @@ export default function ProjectsPage() {
   function renderProject(project: Project) {
     const progressLabel = project.isOwner ? 'Projekt-Fortschritt' : 'Meine Aufgaben'
 
+    if (renamingProjectId === project.id) {
+      return (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            submitRename(project)
+          }}
+          className="flex items-center gap-2"
+        >
+          <input
+            autoFocus
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') cancelRename()
+            }}
+            className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-900"
+          />
+          <button type="submit" className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium hover:bg-indigo-500">
+            Speichern
+          </button>
+          <button
+            type="button"
+            onClick={cancelRename}
+            className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            Abbrechen
+          </button>
+        </form>
+      )
+    }
+
     return (
-      <button onClick={() => navigate(`/projects/${project.id}`)} className="w-full text-left">
+      <button
+        onClick={() => navigate(`/projects/${project.id}`)}
+        onContextMenu={(e) => handleTileContextMenu(e, project)}
+        className="w-full text-left"
+      >
         <div>
           <span className="font-mono text-xs text-slate-500">#{shortId(project.id)}</span>
           <h2 className="text-base font-medium">{project.name}</h2>
@@ -133,7 +231,7 @@ export default function ProjectsPage() {
       <Sidebar />
 
       <div className="min-w-0 flex-1">
-        <main className="space-y-6 p-6">
+        <main className="space-y-6 p-6" onContextMenu={handleAreaContextMenu}>
         {projects === null ? (
           <p className="text-sm text-slate-500">Lade Projekte…</p>
         ) : projects.length === 0 && !showCreateForm ? (
@@ -201,6 +299,15 @@ export default function ProjectsPage() {
         )}
         </main>
       </div>
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.project ? projectMenuItems(contextMenu.project) : [{ label: 'Neues Projekt anlegen', onClick: () => setShowCreateForm(true) }]}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
