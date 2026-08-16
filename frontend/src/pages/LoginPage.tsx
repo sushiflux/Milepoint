@@ -6,7 +6,11 @@ import { ApiError } from '../api/client'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import { validateEmail, validateMinLength, validateRequired } from '../lib/validation'
 import ThemeToggle from '../components/ThemeToggle'
-import wordmark from '../assets/wordmark-dark.svg'
+import { useTheme } from '../context/ThemeContext'
+import wordmarkDark from '../assets/wordmark-dark.svg'
+import wordmarkLight from '../assets/wordmark-light.svg'
+import logoDark from '../assets/logo-dark.svg'
+import logoLight from '../assets/logo-light.svg'
 
 export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login')
@@ -24,6 +28,7 @@ export default function LoginPage() {
 
   const { signIn } = useAuth()
   const navigate = useNavigate()
+  const { theme } = useTheme()
 
   const usernameFormatError = validateRequired(username, 'Benutzername') ?? validateMinLength(username, 3, 'Benutzername')
   const displayNameError = mode === 'register' ? validateRequired(displayName, 'Anzeigename') : null
@@ -103,7 +108,8 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       <div className="hidden w-2/3 flex-col items-center justify-center gap-6 bg-gradient-to-br from-indigo-600 to-slate-900 p-12 lg:flex">
-        <img src={wordmark} alt="Milepoint" className="w-full max-w-md" />
+        <img src={logoDark} alt="" className="h-16 w-auto" />
+        <img src={wordmarkDark} alt="Milepoint" className="w-full max-w-md" />
         <p className="max-w-sm text-center text-sm text-indigo-100">
           Projekte, Aufgaben, Timeline, Notizen — an einem Ort, für Entwickler-Teams gebaut.
         </p>
@@ -114,7 +120,10 @@ export default function LoginPage() {
           <ThemeToggle />
         </div>
         <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-4">
-          <h1 className="text-xl font-semibold lg:hidden">Milepoint</h1>
+          <div className="flex items-center gap-2 lg:hidden">
+            <img src={theme === 'dark' ? logoDark : logoLight} alt="" className="h-7 w-auto" />
+            <img src={theme === 'dark' ? wordmarkDark : wordmarkLight} alt="Milepoint" className="h-5 w-auto" />
+          </div>
           <h1 className="hidden text-xl font-semibold lg:block">{mode === 'login' ? 'Anmeldung' : 'Registrierung'}</h1>
 
           <div>

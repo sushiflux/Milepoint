@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createProject, deleteProject, getProjects, renameProject } from '../api/projects'
-import type { Project } from '../api/types'
+import type { ColumnTicketCount, Project } from '../api/types'
 import { validateRequired } from '../lib/validation'
 import { shortId } from '../lib/ids'
 import Sidebar from '../components/Sidebar'
 import AddButton from '../components/AddButton'
 import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
+import { useAuth } from '../context/AuthContext'
 
 type ViewMode = 'tiles' | 'list'
 const VIEW_MODE_STORAGE_KEY = 'pm.dashboard.viewMode'
@@ -24,6 +25,21 @@ function initials(name: string) {
   return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?'
 }
 
+function TicketBadgeRow({ items }: { items: ColumnTicketCount[] }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((c) => (
+        <span
+          key={c.columnName}
+          className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-800/50 dark:text-slate-300"
+        >
+          {c.columnName} <span className="font-medium text-slate-800 dark:text-slate-100">{c.count}</span>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [name, setName] = useState('')
@@ -39,6 +55,7 @@ export default function ProjectsPage() {
   const [renameValue, setRenameValue] = useState('')
 
   const navigate = useNavigate()
+  const { isProjectLeader } = useAuth()
 
   const nameError = validateRequired(name, 'Projektname')
 
@@ -179,6 +196,7 @@ export default function ProjectsPage() {
 
   function renderProject(project: Project) {
     const progressLabel = project.isOwner ? 'Projekt-Fortschritt' : 'Meine Aufgaben'
+    const showsFullBreakdown = project.isOwner || isProjectLeader
 
     if (renamingProjectId === project.id) {
       return (
@@ -224,22 +242,24 @@ export default function ProjectsPage() {
           {project.description && <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{project.description}</p>}
         </div>
 
-        <div className="mt-3 grid grid-cols-3 gap-3 text-xs text-slate-500 dark:text-slate-400">
-          <div>
-            <p className="text-slate-500 dark:text-slate-500">Meine Aufgaben</p>
-            <p className="text-sm text-slate-700 dark:text-slate-200">
-              {project.myCompletedTaskCount} / {project.myAssignedTaskCount} erledigt
-            </p>
-          </div>
-          <div>
-            <p className="text-slate-500 dark:text-slate-500">{progressLabel}</p>
-            <p className="text-sm text-slate-700 dark:text-slate-200">{project.completionPercent}%</p>
-          </div>
-          <div>
-            <p className="text-slate-500 dark:text-slate-500">Offene Tickets</p>
-            <p className="text-sm text-slate-700 dark:text-slate-200">{project.openTicketCount}</p>
-          </div>
+        <div>
+          <p className="text-xs text-slate-500 dark:text-slate-500">{progressLabel}</p>
+          <p className="text-sm text-slate-700 dark:text-slate-200">{project.completionPercent}%</p>
         </div>
+
+        {showsFullBreakdown && project.openTicketsByColumn.length > 0 && (
+          <div className="mt-2">
+            <p className="mb-1 text-[10px] font-medium uppercase text-slate-400 dark:text-slate-500">Gesamt</p>
+            <TicketBadgeRow items={project.openTicketsByColumn} />
+          </div>
+        )}
+
+        {project.myTicketsByColumn.length > 0 && (
+          <div className="mt-2">
+            {showsFullBreakdown && <p className="mb-1 text-[10px] font-medium uppercase text-slate-400 dark:text-slate-500">Meine</p>}
+            <TicketBadgeRow items={project.myTicketsByColumn} />
+          </div>
+        )}
 
         {project.nextMilestoneName && (
           <p className="mt-2 truncate text-xs text-slate-500 dark:text-slate-400">

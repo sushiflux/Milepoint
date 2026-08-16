@@ -46,6 +46,16 @@ public class ProjectsController : ControllerBase
             .ToListAsync();
         var itemsByProject = items.ToLookup(w => w.ProjectId);
 
+        // One board per project (see BoardsController) - used for the open-tickets-by-column
+        // breakdown, keyed on whichever board is oldest in the (now practically impossible)
+        // case more than one exists.
+        var boards = await _db.Boards
+            .Where(b => projectIds.Contains(b.ProjectId))
+            .Include(b => b.Columns)
+            .OrderBy(b => b.CreatedAt)
+            .ToListAsync();
+        var boardByProject = boards.ToLookup(b => b.ProjectId);
+
         var now = DateTimeOffset.UtcNow;
         var upcomingMilestones = await _db.Milestones
             .Where(m => projectIds.Contains(m.ProjectId) && m.Date >= now)
@@ -65,7 +75,8 @@ public class ProjectsController : ControllerBase
                 itemsByProject[p.Id].ToList(),
                 currentUserId,
                 nextMilestoneByProject[p.Id].FirstOrDefault(),
-                BuildMembers(p, membersByProject[p.Id])))
+                BuildMembers(p, membersByProject[p.Id]),
+                boardByProject[p.Id].FirstOrDefault()))
             .ToList();
         return Ok(dtos);
     }
@@ -100,19 +111,20 @@ public class ProjectsController : ControllerBase
 
         // ...and a default board, so Timeline task/phase creation always has a column to land
         // in - no "create a board first" detour before the project is usable.
-        _db.Boards.Add(new Board
+        var board = new Board
         {
             ProjectId = project.Id,
             Name = "Board",
             Columns = BoardsController.DefaultColumns
                 .Select((c, index) => new BoardColumn { Name = c.Name, Order = index, Type = c.Type })
                 .ToList()
-        });
+        };
+        _db.Boards.Add(board);
         await _db.SaveChangesAsync();
 
         var currentUser = await _userManager.GetUserAsync(User);
         var owner = new ProjectMemberSummaryDto(currentUserId, currentUser?.DisplayName ?? string.Empty);
-        var dto = ToDto(project, [], currentUserId, null, [owner]);
+        var dto = ToDto(project, [], currentUserId, null, [owner], board);
         return CreatedAtAction(nameof(GetAll), dto);
     }
 
@@ -145,7 +157,9 @@ public class ProjectsController : ControllerBase
 
         var members = await _db.ProjectMembers.Where(m => m.ProjectId == projectId).Include(m => m.User).ToListAsync();
 
-        return Ok(ToDto(project, items, currentUserId, nextMilestone, BuildMembers(project, members)));
+        var board = await _db.Boards.Where(b => b.ProjectId == projectId).Include(b => b.Columns).OrderBy(b => b.CreatedAt).FirstOrDefaultAsync();
+
+        return Ok(ToDto(project, items, currentUserId, nextMilestone, BuildMembers(project, members), board));
     }
 
     [HttpDelete("{projectId}")]
@@ -274,12 +288,32 @@ public class ProjectsController : ControllerBase
         return list;
     }
 
+    private static List<ColumnTicketCountDto> BuildColumnCounts(Board? board, IEnumerable<WorkItem> items)
+    {
+        if (board is null)
+        {
+            return [];
+        }
+
+        var taskCountByColumn = items
+            .Where(w => w.Type == WorkItemType.Task)
+            .GroupBy(w => w.ColumnId)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        return board.Columns
+            .Where(c => c.Type != BoardColumnType.Done)
+            .OrderBy(c => c.Order)
+            .Select(c => new ColumnTicketCountDto(c.Name, taskCountByColumn.GetValueOrDefault(c.Id, 0)))
+            .ToList();
+    }
+
     private static ProjectDto ToDto(
         Project project,
         List<WorkItem> items,
         string? currentUserId,
         Milestone? nextMilestone,
-        List<ProjectMemberSummaryDto> members)
+        List<ProjectMemberSummaryDto> members,
+        Board? board)
     {
         var isOwner = project.CreatedByUserId == currentUserId;
 
@@ -304,7 +338,6 @@ public class ProjectsController : ControllerBase
                 : (double)myCompletedTaskCount / myAssignedTaskCount * 100;
         }
 
-        var openTicketCount = items.Count(w => w.Column.Type != BoardColumnType.Done);
         var lastActivityAt = items.Count == 0 ? project.CreatedAt : items.Max(w => w.UpdatedAt);
 
         return new ProjectDto(
@@ -313,10 +346,9 @@ public class ProjectsController : ControllerBase
             project.Description,
             project.CreatedAt,
             isOwner,
-            myAssignedTaskCount,
-            myCompletedTaskCount,
             Math.Round(completionPercent, 1),
-            openTicketCount,
+            BuildColumnCounts(board, items),
+            BuildColumnCounts(board, myTasks),
             lastActivityAt,
             nextMilestone?.Name,
             nextMilestone?.Date,

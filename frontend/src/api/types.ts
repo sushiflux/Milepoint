@@ -12,17 +12,23 @@ export interface ProjectMemberSummary {
   displayName: string
 }
 
+export interface ColumnTicketCount {
+  columnName: string
+  count: number
+}
+
 export interface Project {
   id: string
   name: string
   description: string | null
   createdAt: string
   isOwner: boolean
-  myAssignedTaskCount: number
-  myCompletedTaskCount: number
   /** Project-wide completion if isOwner, otherwise your own task completion. */
   completionPercent: number
-  openTicketCount: number
+  /** Open (non-Done) Task counts per board column, in column order - e.g. Neu / In Arbeit / Pausiert. */
+  openTicketsByColumn: ColumnTicketCount[]
+  /** Same breakdown, but only counting Tasks assigned to the current user. */
+  myTicketsByColumn: ColumnTicketCount[]
   lastActivityAt: string
   nextMilestoneName: string | null
   nextMilestoneDate: string | null

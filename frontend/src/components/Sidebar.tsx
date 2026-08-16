@@ -2,6 +2,11 @@ import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import ThemeToggle from './ThemeToggle'
 import { useAuth } from '../context/AuthContext'
+import { useTheme } from '../context/ThemeContext'
+import logoDark from '../assets/logo-dark.svg'
+import logoLight from '../assets/logo-light.svg'
+import wordmarkDark from '../assets/wordmark-dark.svg'
+import wordmarkLight from '../assets/wordmark-light.svg'
 
 type ProjectTab = 'timeline' | 'kanban' | 'notes'
 
@@ -70,7 +75,10 @@ function navLinkClass(active: boolean, collapsed: boolean) {
 
 export default function Sidebar({ project, activeTab }: Props) {
   const { displayName, signOut } = useAuth()
+  const { theme } = useTheme()
   const [collapsed, setCollapsed] = useState(readInitialCollapsed)
+  const logo = theme === 'dark' ? logoDark : logoLight
+  const wordmark = theme === 'dark' ? wordmarkDark : wordmarkLight
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -85,7 +93,14 @@ export default function Sidebar({ project, activeTab }: Props) {
       className={`flex ${collapsed ? 'w-14' : 'w-56'} shrink-0 flex-col border-r border-slate-200 bg-white ${collapsed ? 'p-2' : 'p-4'} dark:border-slate-800 dark:bg-slate-900`}
     >
       <div className={`mb-6 flex items-center ${collapsed ? 'flex-col-reverse gap-2' : 'justify-between px-3'}`}>
-        {!collapsed && <span className="text-sm font-semibold">Milepoint</span>}
+        {collapsed ? (
+          <img src={logo} alt="Milepoint" className="h-5 w-auto" />
+        ) : (
+          <span className="flex items-center gap-1.5">
+            <img src={logo} alt="" className="h-5 w-auto" />
+            <img src={wordmark} alt="Milepoint" className="h-3.5 w-auto" />
+          </span>
+        )}
         <button
           onClick={toggleCollapsed}
           title={collapsed ? 'Sidebar ausklappen' : 'Sidebar einklappen'}
