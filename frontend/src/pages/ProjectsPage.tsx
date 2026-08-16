@@ -4,7 +4,7 @@ import { createProject, deleteProject, getProjects, renameProject } from '../api
 import type { ColumnTicketCount, Project } from '../api/types'
 import { validateRequired } from '../lib/validation'
 import { shortId } from '../lib/ids'
-import Sidebar from '../components/Sidebar'
+import Header from '../components/Header'
 import AddButton from '../components/AddButton'
 import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
 import { useAuth } from '../context/AuthContext'
@@ -247,16 +247,17 @@ export default function ProjectsPage() {
         className="w-full text-left group"
       >
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-brand-primary to-brand-accent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-        <div className="mb-2 flex items-center justify-between">
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-mono text-[10px] font-bold tracking-wider text-slate-500 dark:bg-slate-700 dark:text-slate-200">#{shortId(project.id)}</span>
+        <div className="mb-1">
+          <span className="font-mono text-[10px] font-bold tracking-wider text-slate-500 dark:text-slate-400">#{shortId(project.id)}</span>
         </div>
         <div>
           <h2 className="text-xl font-bold text-slate-800 transition-colors group-hover:text-brand-accent dark:text-white dark:group-hover:text-brand-accent-light">{project.name}</h2>
           {project.description && <p className="mt-2 line-clamp-2 text-sm text-slate-500 dark:text-slate-200 leading-relaxed">{project.description}</p>}
         </div>
 
-        <div className="mt-5 rounded-lg bg-slate-50 p-3 dark:bg-slate-900/50 border border-slate-100 dark:border-slate-700/50 shadow-sm dark:shadow-inner">
-          <div className="flex items-center justify-between mb-2">
+        <div className="mt-5 relative pt-5">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
+          <div className="mb-2 flex items-center justify-between">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">{progressLabel}</p>
             <p className="text-[11px] font-bold text-brand-primary dark:text-white">{project.completionPercent}%</p>
           </div>
@@ -265,28 +266,34 @@ export default function ProjectsPage() {
           </div>
         </div>
 
-        {showsFullBreakdown && project.openTicketsByColumn.length > 0 && (
-          <div className="mt-4">
+        {showsFullBreakdown && project.openTicketsByColumn.some((c) => c.count > 0) && (
+          <div className="mt-5 relative pt-5">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
             <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-300">Gesamtübersicht</p>
             <TicketBadgeRow items={project.openTicketsByColumn} overdueCount={project.overdueCount} />
           </div>
         )}
 
-        {project.myTicketsByColumn.length > 0 && (
-          <div className="mt-4">
+        {project.myTicketsByColumn.some((c) => c.count > 0) && (
+          <div className="mt-5 relative pt-5">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
             {showsFullBreakdown && <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-brand-accent">Meine Aufgaben</p>}
             <TicketBadgeRow items={project.myTicketsByColumn} overdueCount={project.myOverdueCount} />
           </div>
         )}
 
         {project.nextMilestoneName && (
-          <p className="mt-2 truncate text-xs text-slate-500 dark:text-slate-300">
-            Nächster Meilenstein: <span className="text-slate-700 dark:text-slate-100">{project.nextMilestoneName}</span>
-            {project.nextMilestoneDate && ` · ${new Date(project.nextMilestoneDate).toLocaleDateString('de-DE')}`}
-          </p>
+          <div className="mt-5 relative pt-5">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
+            <p className="truncate text-xs text-slate-500 dark:text-slate-300">
+              Nächster Meilenstein: <span className="text-slate-700 dark:text-slate-100">{project.nextMilestoneName}</span>
+              {project.nextMilestoneDate && ` · ${new Date(project.nextMilestoneDate).toLocaleDateString('de-DE')}`}
+            </p>
+          </div>
         )}
 
-        <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
+        <div className="mt-5 relative flex items-center justify-between pt-5">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
           <div className="flex -space-x-2">
             {project.members.slice(0, 5).map((member) => (
               <span
@@ -313,8 +320,8 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-transparent">
-      <Sidebar />
+    <div className="flex min-h-screen flex-col bg-transparent">
+      <Header />
 
       <div className="min-w-0 flex-1" onContextMenu={handleAreaContextMenu}>
         <main className="space-y-6 p-6">
@@ -341,15 +348,21 @@ export default function ProjectsPage() {
               <div className="ml-4 flex shrink-0 rounded-lg p-1 glass-panel">
                 <button
                   onClick={() => changeViewMode('tiles')}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'tiles' ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                  title="Kachel-Ansicht"
+                  className={`rounded-md p-1.5 transition-colors ${viewMode === 'tiles' ? 'bg-white text-brand-accent shadow-sm dark:bg-slate-700 dark:text-brand-accent-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
                 >
-                  Kacheln
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                  </svg>
                 </button>
                 <button
                   onClick={() => changeViewMode('list')}
-                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
+                  title="Listen-Ansicht"
+                  className={`rounded-md p-1.5 transition-colors ${viewMode === 'list' ? 'bg-white text-brand-accent shadow-sm dark:bg-slate-700 dark:text-brand-accent-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
                 >
-                  Liste
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+                  </svg>
                 </button>
               </div>
             </div>

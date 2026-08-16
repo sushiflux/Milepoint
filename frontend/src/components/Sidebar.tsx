@@ -1,12 +1,5 @@
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import ThemeToggle from './ThemeToggle'
-import { useAuth } from '../context/AuthContext'
-import { useTheme } from '../context/ThemeContext'
-import logoDark from '../assets/logo-dark.svg'
-import logoLight from '../assets/logo-light.svg'
-import wordmarkDark from '../assets/wordmark-dark.svg'
-import wordmarkLight from '../assets/wordmark-light.svg'
 
 type ProjectTab = 'timeline' | 'kanban' | 'notes'
 
@@ -42,23 +35,6 @@ const TAB_ICONS: Record<ProjectTab, ReactNode> = {
   ),
 }
 
-const DASHBOARD_ICON = (
-  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
-    <rect x="2.5" y="2.5" width="6" height="6" rx="1" />
-    <rect x="11.5" y="2.5" width="6" height="6" rx="1" />
-    <rect x="2.5" y="11.5" width="6" height="6" rx="1" />
-    <rect x="11.5" y="11.5" width="6" height="6" rx="1" />
-  </svg>
-)
-
-const LOGOUT_ICON = (
-  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
-    <path d="M7.5 17.5H4a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1h3.5" />
-    <path d="M13 14l4-4-4-4" />
-    <path d="M17 10H7.5" />
-  </svg>
-)
-
 const STORAGE_KEY = 'pm.sidebarCollapsed'
 
 function readInitialCollapsed() {
@@ -66,19 +42,15 @@ function readInitialCollapsed() {
 }
 
 function navLinkClass(active: boolean, collapsed: boolean) {
-  return `flex items-center gap-2 truncate rounded py-1.5 text-sm ${collapsed ? 'justify-center px-2' : 'px-3'} ${
+  return `flex items-center gap-3 truncate rounded-md py-2 text-sm font-medium transition-colors ${collapsed ? 'justify-center px-2' : 'px-3'} ${
     active
-      ? 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
-      : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900'
+      ? 'bg-brand-primary/10 text-brand-primary dark:bg-brand-primary/20 dark:text-brand-primary-light'
+      : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800/50'
   }`
 }
 
 export default function Sidebar({ project, activeTab }: Props) {
-  const { displayName, signOut } = useAuth()
-  const { theme } = useTheme()
   const [collapsed, setCollapsed] = useState(readInitialCollapsed)
-  const logo = theme === 'dark' ? logoDark : logoLight
-  const wordmark = theme === 'dark' ? wordmarkDark : wordmarkLight
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -88,24 +60,21 @@ export default function Sidebar({ project, activeTab }: Props) {
     })
   }
 
+  // If there is no project context, the sidebar doesn't have much to show in this layout.
+  if (!project) return null
+
   return (
     <aside
-      className={`flex ${collapsed ? 'w-14' : 'w-56'} shrink-0 flex-col border-r border-slate-200 bg-white ${collapsed ? 'p-2' : 'p-4'} dark:border-slate-800 dark:bg-slate-900`}
+      className={`flex ${collapsed ? 'w-16' : 'w-64'} shrink-0 flex-col border-r border-slate-200 bg-slate-50/50 ${collapsed ? 'p-2' : 'p-4'} transition-all duration-300 dark:border-slate-800 dark:bg-[#0b0a1a]`}
+      style={{ minHeight: 'calc(100vh - 3.5rem)' }} // Subtract Header height
     >
-      <div className={`mb-6 flex items-center ${collapsed ? 'flex-col-reverse gap-2' : 'justify-between px-3'}`}>
-        {collapsed ? (
-          <img src={logo} alt="Milepoint" className="h-5 w-auto" />
-        ) : (
-          <span className="flex items-center gap-1.5">
-            <img src={logo} alt="" className="h-5 w-auto" />
-            <img src={wordmark} alt="Milepoint" className="h-3.5 w-auto" />
-          </span>
-        )}
+      <div className={`mb-6 flex items-center ${collapsed ? 'justify-center' : 'justify-between px-2'}`}>
+        {!collapsed && <h3 className="truncate text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Module</h3>}
         <button
           onClick={toggleCollapsed}
           title={collapsed ? 'Sidebar ausklappen' : 'Sidebar einklappen'}
           aria-label={collapsed ? 'Sidebar ausklappen' : 'Sidebar einklappen'}
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-200 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300"
         >
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
             <path d={collapsed ? 'M8 5l5 5-5 5' : 'M12 5l-5 5 5 5'} />
@@ -113,16 +82,9 @@ export default function Sidebar({ project, activeTab }: Props) {
         </button>
       </div>
 
-      <nav className="space-y-1">
-        <Link to="/" title="Dashboard" className={navLinkClass(!project, collapsed)}>
-          {DASHBOARD_ICON}
-          {!collapsed && 'Dashboard'}
-        </Link>
-      </nav>
-
-      {project && (
-        <div className="mt-6">
-          {!collapsed && <p className="mb-2 truncate px-3 text-xs font-medium uppercase text-slate-500">{project.name}</p>}
+      <div className="flex-1 space-y-6">
+        <div>
+          {!collapsed && <p className="mb-3 truncate px-3 text-[11px] font-bold uppercase tracking-wider text-brand-accent">{project.name}</p>}
           <nav className="space-y-1">
             {(Object.keys(TAB_LABELS) as ProjectTab[]).map((tab) => (
               <Link
@@ -137,31 +99,6 @@ export default function Sidebar({ project, activeTab }: Props) {
             ))}
           </nav>
         </div>
-      )}
-
-      <div className={`mt-auto space-y-1 border-t border-slate-200 pt-4 dark:border-slate-800 ${collapsed ? 'flex flex-col items-center' : ''}`}>
-        {collapsed ? (
-          <span
-            title={displayName ?? undefined}
-            className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-          >
-            {(displayName ?? '?').slice(0, 1).toUpperCase()}
-          </span>
-        ) : (
-          <p className="truncate px-3 text-sm text-slate-600 dark:text-slate-400">{displayName}</p>
-        )}
-        <button
-          onClick={signOut}
-          title="Abmelden"
-          aria-label="Abmelden"
-          className={`flex items-center gap-2 rounded text-sm text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900 ${
-            collapsed ? 'h-6 w-6 justify-center' : 'w-full px-3 py-1.5 text-left'
-          }`}
-        >
-          {LOGOUT_ICON}
-          {!collapsed && 'Abmelden'}
-        </button>
-        <ThemeToggle />
       </div>
     </aside>
   )

@@ -9,6 +9,7 @@ import TimelineView from './TimelineView'
 import KanbanBoard from './KanbanBoard'
 import NotesView from './NotesView'
 import Sidebar from '../components/Sidebar'
+import Header from '../components/Header'
 
 type Tab = 'timeline' | 'kanban' | 'notes'
 const VALID_TABS: Tab[] = ['timeline', 'kanban', 'notes']
@@ -62,11 +63,13 @@ export default function ProjectPage() {
   }
 
   return (
-    <div className="flex min-h-screen bg-transparent">
-      <Sidebar project={{ id: project.id, name: project.name }} activeTab={activeTab} />
+    <div className="flex min-h-screen flex-col bg-transparent">
+      <Header />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar project={{ id: project.id, name: project.name }} activeTab={activeTab} />
 
-      <div className="min-w-0 flex-1">
-        <main className="p-6">
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <main className="p-6">
           {activeTab === 'timeline' && (
             <TimelineView
               projectId={projectId}
@@ -81,7 +84,8 @@ export default function ProjectPage() {
           {activeTab === 'kanban' && <KanbanBoard board={board} items={workItems} users={users} onItemsChange={setWorkItems} />}
 
           {activeTab === 'notes' && <NotesView projectId={projectId} notes={notes} onNotesChange={setNotes} />}
-        </main>
+          </main>
+        </div>
       </div>
     </div>
   )

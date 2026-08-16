@@ -4,6 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Milepoint</title>
+    <style>
+      /* Matches body's bg-slate-50 / .dark background in index.css - applied natively before
+         the Vite-injected stylesheet loads, so there's no flash of the browser's default white
+         background while the theme class below is already correct but unstyled. */
+      html {
+        background: #f8fafc;
+      }
+      html.dark {
+        background: #0b0a1a;
+      }
+    </style>
     <script>
       if (localStorage.getItem('pm.theme') === 'dark') {
         document.documentElement.classList.add('dark')
