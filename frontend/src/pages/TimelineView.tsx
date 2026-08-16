@@ -1780,13 +1780,13 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               ) : (
                 <span className="text-xs text-slate-500 dark:text-slate-400">Zeitraum ergibt sich automatisch aus den Unteraufgaben</span>
               )}
-              <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
+              <button type="submit" className="rounded-lg bg-brand-accent px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-accent-light transition-all">
                 Anlegen
               </button>
               <button
                 type="button"
                 onClick={() => setShowTaskForm(false)}
-                className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                className="rounded-lg border border-slate-300 px-4 py-1.5 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
               >
                 Abbrechen
               </button>
@@ -1814,13 +1814,13 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   </option>
                 ))}
               </select>
-              <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium hover:bg-indigo-500">
+              <button type="submit" className="rounded-lg bg-brand-accent px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-accent-light transition-all">
                 Anlegen
               </button>
               <button
                 type="button"
                 onClick={() => setShowMilestoneForm(false)}
-                className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                className="rounded-lg border border-slate-300 px-4 py-1.5 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
               >
                 Abbrechen
               </button>
@@ -1836,7 +1836,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           <form
             onSubmit={handleSubmitEdit}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-xl dark:border-slate-800 dark:bg-slate-900"
+            className="glass w-full max-w-sm space-y-4 rounded-xl p-5"
           >
             <h3 className="text-sm font-semibold">
               {editTarget.kind === 'milestone' ? 'Meilenstein bearbeiten' : editTarget.item.type === 'Phase' ? 'Phase bearbeiten' : 'Aufgabe bearbeiten'}
@@ -1851,14 +1851,14 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 onKeyDown={(e) => {
                   if (e.key === 'Escape') closeEdit()
                 }}
-                className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950"
+                className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
               />
             </div>
 
             {editTarget.kind === 'milestone' ? (
               <div>
                 <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Datum</label>
-                <input required type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950" />
+                <input required type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
               </div>
             ) : (
               <>
@@ -1866,11 +1866,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   <div className="flex gap-2">
                     <div className="flex-1">
                       <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Anfang</label>
-                      <input required type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950" />
+                      <input required type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
                     </div>
                     <div className="flex-1">
                       <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Ende</label>
-                      <input type="date" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950" />
+                      <input type="date" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
                     </div>
                   </div>
                 )}
@@ -1879,7 +1879,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   <select
                     value={editPriority}
                     onChange={(e) => setEditPriority(e.target.value as WorkItemPriority)}
-                    className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-950"
+                    className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                   >
                     {PRIORITY_OPTIONS.map((p) => (
                       <option key={p} value={p}>
@@ -1892,10 +1892,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             )}
 
             <div className="flex justify-end gap-2 pt-1">
-              <button type="button" onClick={closeEdit} className="rounded border border-slate-300 px-3 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800">
+              <button type="button" onClick={closeEdit} className="rounded-lg border border-slate-300 px-4 py-2 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800">
                 Abbrechen
               </button>
-              <button type="submit" className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500">
+              <button type="submit" className="rounded-lg bg-brand-accent px-4 py-2 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-accent-light hover:shadow-brand-accent/30">
                 Speichern
               </button>
             </div>

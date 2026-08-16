@@ -150,14 +150,14 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
       {board.columns.map((column) => (
         <section
           key={column.id}
-          className="flex flex-col w-[340px] shrink-0 rounded-md border border-slate-200/50 bg-slate-50/50 dark:border-slate-700/50 dark:bg-slate-800/30 backdrop-blur-sm shadow-sm relative overflow-hidden"
+          className="glass-panel flex flex-col w-[340px] shrink-0 rounded-xl relative overflow-hidden"
         >
           {/* Status Color Line */}
-          <div className={`absolute top-0 left-0 w-full h-1 ${getColumnBorderColor(column.name, column.type)}`} />
+          <div className={`absolute top-0 left-0 w-full h-1.5 ${getColumnBorderColor(column.name, column.type)}`} />
 
           {/* Column Header */}
-          <div className="flex items-center justify-between border-b border-slate-200/50 bg-white/50 px-4 py-3 dark:border-slate-700/50 dark:bg-slate-800/50">
-            <h2 className="flex items-center gap-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 mt-1">
+          <div className="flex items-center justify-between border-b border-slate-200/50 bg-white/40 px-5 py-4 dark:border-slate-700/50 dark:bg-slate-800/40">
+            <h2 className="flex items-center gap-3 text-sm font-bold text-slate-800 dark:text-slate-100 mt-1">
               {column.name}
               <span className="flex h-5 items-center justify-center rounded-full bg-slate-200 px-2 text-[10px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
                 {itemsByColumn.get(column.id)?.length ?? 0}
@@ -181,7 +181,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                   e.preventDefault()
                   handleCreate(column)
                 }}
-                className="rounded-md border border-indigo-200 bg-white p-3 shadow-md dark:border-indigo-500/30 dark:bg-slate-800"
+                className="glass rounded-xl p-4"
               >
                 <input
                   autoFocus
@@ -191,7 +191,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                     if (e.key === 'Escape') toggleAddColumn(column.id, false)
                   }}
                   placeholder="Titel eingeben..."
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm placeholder-slate-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100 dark:focus:border-indigo-500"
+                  className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm placeholder-slate-400 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                 />
                 <div className="mt-3 flex items-center justify-end gap-2">
                   <button
@@ -201,7 +201,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                   >
                     Abbrechen
                   </button>
-                  <button type="submit" disabled={!(newTitleByColumn[column.id] ?? '').trim()} className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50">
+                  <button type="submit" disabled={!(newTitleByColumn[column.id] ?? '').trim()} className="rounded-lg bg-brand-accent px-4 py-2 text-xs font-semibold text-white shadow-md transition-all hover:bg-brand-accent-light hover:shadow-brand-accent/30 disabled:opacity-50 disabled:shadow-none">
                     Speichern
                   </button>
                 </div>
@@ -211,7 +211,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
             {(itemsByColumn.get(column.id) ?? []).map((item) => (
               <li
                 key={item.id}
-                className="group relative flex flex-col gap-3 rounded-md border border-slate-200/60 bg-white p-4 shadow-sm transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-md dark:border-slate-700/60 dark:bg-slate-800"
+                className="group relative flex flex-col gap-3 rounded-xl border border-slate-200/50 bg-white/70 p-5 shadow-sm backdrop-blur-md transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-lg hover:shadow-brand-primary/10 dark:border-slate-700/50 dark:bg-slate-800/70"
               >
                 <div className="flex items-start justify-between gap-3">
                   <h3 className="font-medium text-slate-800 dark:text-slate-100 leading-snug">{item.title}</h3>
@@ -242,7 +242,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                         <option key={u.id} value={u.id}>{u.displayName}</option>
                       ))}
                     </select>
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white transition-all group-hover:ring-indigo-50 dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-800 dark:group-hover:ring-indigo-900/30">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white transition-all group-hover:ring-brand-primary/30 dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-800 dark:group-hover:ring-brand-primary/30">
                       {item.assigneeId ? getInitials(users.find(u => u.id === item.assigneeId)?.displayName) : (
                         <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-50"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
                       )}
@@ -263,7 +263,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
-                    <div className="flex items-center gap-1 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 transition-colors group-hover:bg-indigo-50 group-hover:text-indigo-600 dark:bg-slate-800/50 dark:text-slate-400 dark:group-hover:bg-indigo-500/10 dark:group-hover:text-indigo-400">
+                    <div className="flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-500 transition-colors group-hover:bg-brand-primary/10 group-hover:text-brand-primary dark:bg-slate-800/50 dark:text-slate-400 dark:group-hover:bg-brand-primary/20 dark:group-hover:text-brand-primary-light">
                       {column.name}
                       <svg viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
                     </div>

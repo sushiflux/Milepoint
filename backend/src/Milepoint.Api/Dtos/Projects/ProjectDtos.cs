@@ -24,6 +24,9 @@ public record ProjectDto(
     List<ColumnTicketCountDto> OpenTicketsByColumn,
     // Same breakdown, but only counting Tasks assigned to the current user.
     List<ColumnTicketCountDto> MyTicketsByColumn,
+    // Open Tasks with a DueDate in the past - project-wide, and just the current user's.
+    int OverdueCount,
+    int MyOverdueCount,
     // Newest WorkItem.UpdatedAt in the project, or CreatedAt if it has no work items yet.
     DateTimeOffset LastActivityAt,
     string? NextMilestoneName,

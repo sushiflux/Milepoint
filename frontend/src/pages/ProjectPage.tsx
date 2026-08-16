@@ -51,11 +51,18 @@ export default function ProjectPage() {
   const activeTab = tab as Tab
 
   if (loading || !project || !board) {
-    return <div className="p-6 text-slate-500 dark:text-slate-400">Projekt wird geladen…</div>
+    return (
+      <div className="flex h-screen w-full items-center justify-center font-sans">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-brand-primary dark:border-slate-800 dark:border-t-brand-primary-light"></div>
+          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Projekt wird geladen…</p>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="flex min-h-screen bg-transparent">
       <Sidebar project={{ id: project.id, name: project.name }} activeTab={activeTab} />
 
       <div className="min-w-0 flex-1">

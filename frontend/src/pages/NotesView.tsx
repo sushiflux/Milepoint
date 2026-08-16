@@ -132,7 +132,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
           <button
             key={match.index}
             onClick={() => openNote(target)}
-            className="text-indigo-600 underline hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300"
+            className="text-brand-primary underline hover:text-brand-primary-light transition-colors font-medium"
           >
             {title}
           </button>,
@@ -179,16 +179,16 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex w-fit rounded border border-slate-300 text-xs dark:border-slate-700">
+      <div className="flex w-fit rounded-lg p-1 glass-panel">
         <button
           onClick={() => setViewMode('list')}
-          className={`px-3 py-1.5 ${viewMode === 'list' ? 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900'}`}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
         >
           Liste
         </button>
         <button
           onClick={() => setViewMode('graph')}
-          className={`border-l border-slate-300 px-3 py-1.5 dark:border-slate-700 ${viewMode === 'graph' ? 'bg-slate-200 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-900'}`}
+          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'graph' ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
         >
           Graph
         </button>
@@ -238,16 +238,16 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                         if (e.key === 'Escape') setShowCreateForm(false)
                       }}
                       placeholder="Titel der Notiz"
-                      className="w-full rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+                      className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-xs outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                     />
-                    <div className="flex gap-1">
-                      <button type="submit" className="rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500">
+                    <div className="flex gap-2 mt-2">
+                      <button type="submit" className="rounded-lg bg-brand-accent px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-all hover:bg-brand-accent-light">
                         Anlegen
                       </button>
                       <button
                         type="button"
                         onClick={() => setShowCreateForm(false)}
-                        className="rounded border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
                       >
                         Abbrechen
                       </button>
@@ -270,13 +270,13 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                       onClick={() => setActiveTabId(tab.noteId)}
                       role="button"
                       tabIndex={0}
-                      className={`group flex shrink-0 cursor-pointer items-center gap-1.5 border-b-2 px-3 py-1.5 text-xs ${
+                      className={`group flex shrink-0 cursor-pointer items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium transition-all ${
                         isActive
-                          ? 'border-indigo-500 text-slate-900 dark:text-slate-100'
-                          : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'
+                          ? 'border-brand-primary text-brand-primary dark:text-brand-primary-light'
+                          : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600'
                       }`}
                     >
-                      {tab.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />}
+                      {tab.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent animate-pulse" />}
                       <span className="max-w-[140px] truncate">{note?.title ?? tab.draftTitle}</span>
                       <button
                         onClick={(e) => {
@@ -301,18 +301,18 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                   <input
                     value={activeTab.draftTitle}
                     onChange={(e) => updateActiveDraft({ draftTitle: e.target.value })}
-                    className="flex-1 rounded border border-slate-300 bg-white px-3 py-2 text-base font-medium dark:border-slate-700 dark:bg-slate-900"
+                    className="flex-1 rounded-lg border border-slate-300 bg-transparent px-4 py-2.5 text-base font-semibold outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-700 dark:text-slate-100"
                   />
                   <button
                     onClick={handleSave}
                     disabled={!activeTab.dirty}
-                    className="rounded bg-indigo-600 px-3 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-40"
+                    className="rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-brand-accent-light disabled:opacity-40 disabled:shadow-none"
                   >
                     Speichern
                   </button>
                   <button
                     onClick={handleDelete}
-                    className="rounded border border-slate-300 px-3 py-2 text-sm text-red-500 hover:bg-slate-100 dark:border-slate-700 dark:text-red-400 dark:hover:bg-slate-800"
+                    className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-red-500 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-red-400 dark:hover:bg-slate-800"
                   >
                     Löschen
                   </button>
@@ -323,12 +323,12 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                   onChange={(e) => updateActiveDraft({ draftContent: e.target.value })}
                   placeholder="Text… [[Andere Notiz]] verlinkt automatisch."
                   rows={12}
-                  className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                  className="w-full rounded-xl border border-slate-300 bg-white/50 px-4 py-3 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100 backdrop-blur-sm"
                 />
 
-                <div className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-                  <h3 className="mb-2 text-xs font-medium text-slate-500">Vorschau</h3>
-                  <p className="whitespace-pre-wrap text-sm">{renderContent(activeTab.draftContent)}</p>
+                <div className="glass-panel rounded-xl p-5">
+                  <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-brand-primary-light">Vorschau</h3>
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed">{renderContent(activeTab.draftContent)}</p>
                 </div>
 
                 <div>

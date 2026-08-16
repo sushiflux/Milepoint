@@ -29,6 +29,9 @@ export interface Project {
   openTicketsByColumn: ColumnTicketCount[]
   /** Same breakdown, but only counting Tasks assigned to the current user. */
   myTicketsByColumn: ColumnTicketCount[]
+  /** Open Tasks with a DueDate in the past - project-wide, and just the current user's. */
+  overdueCount: number
+  myOverdueCount: number
   lastActivityAt: string
   nextMilestoneName: string | null
   nextMilestoneDate: string | null

@@ -340,6 +340,11 @@ public class ProjectsController : ControllerBase
 
         var lastActivityAt = items.Count == 0 ? project.CreatedAt : items.Max(w => w.UpdatedAt);
 
+        var now = DateTimeOffset.UtcNow;
+        bool IsOverdue(WorkItem w) => w.Type == WorkItemType.Task && w.Column.Type != BoardColumnType.Done && w.DueDate is not null && w.DueDate < now;
+        var overdueCount = items.Count(IsOverdue);
+        var myOverdueCount = myTasks.Count(IsOverdue);
+
         return new ProjectDto(
             project.Id,
             project.Name,
@@ -349,6 +354,8 @@ public class ProjectsController : ControllerBase
             Math.Round(completionPercent, 1),
             BuildColumnCounts(board, items),
             BuildColumnCounts(board, myTasks),
+            overdueCount,
+            myOverdueCount,
             lastActivityAt,
             nextMilestone?.Name,
             nextMilestone?.Date,

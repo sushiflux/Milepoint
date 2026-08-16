@@ -1,3 +1,59 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --color-brand-primary: #4940BF;
+  --color-brand-primary-light: #5A51D0;
+  --color-brand-primary-dark: #372E9D;
+  --color-brand-accent: #FE6B4C;
+  --color-brand-accent-light: #FF7F63;
+  --color-brand-accent-dark: #E45536;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 transition-colors duration-300 font-sans;
+  }
+  .dark body {
+    /* Premium solid dark mode background */
+    background: #0b0a1a;
+    @apply text-slate-100;
+    min-height: 100vh;
+  }
+
+  /* Custom scrollbar for modern feel */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 rounded-full;
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    @apply bg-slate-700;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-brand-primary/50;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-white/70 backdrop-blur-xl border border-white/50 shadow-xl;
+  }
+  .dark .glass {
+    @apply bg-slate-900/50 backdrop-blur-xl border border-slate-700/50 shadow-2xl;
+  }
+  .glass-panel {
+    @apply bg-white/90 backdrop-blur-md border border-slate-200/60 shadow-sm;
+  }
+  .dark .glass-panel {
+    @apply bg-slate-800/60 backdrop-blur-md border border-slate-700/50 shadow-md;
+  }
+}
