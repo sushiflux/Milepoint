@@ -40,8 +40,17 @@ const STAR_OUTLINE = (
 )
 
 function TicketBadgeRow({ items, overdueCount }: { items: ColumnTicketCount[]; overdueCount: number }) {
+  const total = items.reduce((sum, c) => sum + c.count, 0)
   return (
     <div className="flex flex-wrap gap-1.5">
+      {total > 0 && (
+        <span
+          title="Gesamtzahl offener Tickets über alle Spalten"
+          className="rounded-md bg-brand-primary px-2.5 py-1 text-[11px] font-bold text-white dark:bg-brand-primary-light"
+        >
+          Gesamt {total}
+        </span>
+      )}
       {overdueCount > 0 && (
         <span
           title="Fällig, aber noch nicht erledigt"
