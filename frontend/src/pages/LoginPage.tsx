@@ -114,7 +114,7 @@ export default function LoginPage() {
         
         <img src={logoDark} alt="" className="h-20 w-auto z-10 drop-shadow-lg" />
         <img src={wordmarkDark} alt="Milepoint" className="w-full max-w-md z-10 drop-shadow-md" />
-        <p className="max-w-sm text-center text-brand-primary-light text-opacity-90 z-10 text-lg">
+        <p className="max-w-sm text-center text-slate-200 font-medium z-10 text-lg leading-relaxed">
           Projekte, Aufgaben, Timeline, Notizen — an einem Ort, für Entwickler-Teams gebaut.
         </p>
       </div>

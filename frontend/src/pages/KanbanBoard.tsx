@@ -269,10 +269,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   }
 
   const PRIORITY_COLORS: Record<string, string> = {
-    Low: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
-    Medium: 'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400',
-    High: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
-    Urgent: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
+    Low: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-semibold',
+    Medium: 'bg-sky-50 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300 font-semibold',
+    High: 'bg-amber-50 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 font-semibold',
+    Urgent: 'bg-rose-50 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 font-semibold',
   }
 
   const CATEGORY_LABELS: Record<WorkItemCategory, string> = {
@@ -282,9 +282,9 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   }
 
   const CATEGORY_COLORS: Record<WorkItemCategory, string> = {
-    Feature: 'bg-violet-50 text-violet-600 dark:bg-violet-500/10 dark:text-violet-400',
-    Bug: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
-    Chore: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400',
+    Feature: 'bg-violet-50 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 font-semibold',
+    Bug: 'bg-rose-50 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 font-semibold',
+    Chore: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-semibold',
   }
 
   const COLUMN_BORDER_COLORS: Record<string, string> = {
@@ -323,16 +323,16 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
 
           {/* Column Header */}
           <div className="flex items-center justify-between border-b border-slate-200/50 bg-white/40 px-5 py-4 dark:border-slate-700/50 dark:bg-slate-800/40">
-            <h2 className="flex items-center gap-3 text-sm font-bold text-slate-800 dark:text-slate-100 mt-1">
+            <h2 className="flex items-center gap-3 text-sm font-bold text-slate-900 dark:text-white mt-1">
               {column.name}
-              <span className="flex h-5 items-center justify-center rounded-full bg-slate-200 px-2 text-[10px] font-bold text-slate-600 dark:bg-slate-700 dark:text-slate-300">
+              <span className="flex h-5 items-center justify-center rounded-full bg-slate-200 px-2 text-[10px] font-bold text-slate-700 dark:bg-slate-700 dark:text-slate-200">
                 {itemsByColumn.get(column.id)?.length ?? 0}
               </span>
             </h2>
             {!openAddColumns.has(column.id) && (
               <button
                 onClick={() => toggleAddColumn(column.id, true)}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 transition-all hover:bg-slate-200 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-white"
                 title="Neue Aufgabe in dieser Spalte"
               >
                 <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4"><path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" /></svg>
@@ -389,19 +389,19 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                   {!isBeingDragged && (
                     <>
                       <div className="flex items-start justify-between gap-3">
-                        <h3 className="font-medium text-slate-800 dark:text-slate-100 leading-snug select-none">{item.title}</h3>
+                        <h3 className="font-semibold text-slate-900 dark:text-slate-100 leading-snug select-none">{item.title}</h3>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-slate-400 opacity-60 group-hover:opacity-100 dark:text-slate-500 transition-opacity" title="Ziehen zum Verschieben">
+                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-slate-400 opacity-60 group-hover:opacity-100 dark:text-slate-400 transition-opacity" title="Ziehen zum Verschieben">
                             <path d="M7 4a1 1 0 11-2 0 1 1 0 012 0zM7 10a1 1 0 11-2 0 1 1 0 012 0zM7 16a1 1 0 11-2 0 1 1 0 012 0zM13 4a1 1 0 11-2 0 1 1 0 012 0zM13 10a1 1 0 11-2 0 1 1 0 012 0zM13 16a1 1 0 11-2 0 1 1 0 012 0z" />
                           </svg>
-                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-500 dark:bg-slate-700/50 dark:text-slate-400">
+                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-600 dark:bg-slate-700/80 dark:text-slate-300">
                             {item.referenceCode}
                           </span>
                         </div>
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${item.type === 'Phase' ? 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${item.type === 'Phase' ? 'bg-purple-50 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-700/80 dark:text-slate-300'}`}>
                           {item.type}
                         </span>
                         <div className="relative" title="Priorität ändern">
@@ -432,7 +432,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                           </select>
                           <span
                             className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
-                              item.category ? CATEGORY_COLORS[item.category] : 'bg-slate-50 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500'
+                              item.category ? CATEGORY_COLORS[item.category] : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-300'
                             }`}
                           >
                             {item.category ? CATEGORY_LABELS[item.category] : '+ Typ'}
@@ -453,7 +453,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                               <option key={u.id} value={u.id}>{u.displayName}</option>
                             ))}
                           </select>
-                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white transition-all group-hover:ring-brand-primary/30 dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-800 dark:group-hover:ring-brand-primary/30">
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white transition-all group-hover:ring-brand-primary/30 dark:bg-slate-700 dark:text-slate-200 dark:ring-slate-800 dark:group-hover:ring-brand-primary/30">
                             {item.assigneeId ? getInitials(users.find(u => u.id === item.assigneeId)?.displayName) : (
                               <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-50"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
                             )}
@@ -485,19 +485,19 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
           className="flex flex-col gap-3 rounded-xl border-2 border-brand-primary bg-white p-5 shadow-2xl dark:border-brand-primary-light dark:bg-slate-800 select-none"
         >
           <div className="flex items-start justify-between gap-3">
-            <h3 className="font-medium text-slate-800 dark:text-slate-100 leading-snug">{activeDrag.item.title}</h3>
+            <h3 className="font-semibold text-slate-900 dark:text-white leading-snug">{activeDrag.item.title}</h3>
             <div className="flex items-center gap-1.5 shrink-0">
               <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-brand-primary">
                 <path d="M7 4a1 1 0 11-2 0 1 1 0 012 0zM7 10a1 1 0 11-2 0 1 1 0 012 0zM7 16a1 1 0 11-2 0 1 1 0 012 0zM13 4a1 1 0 11-2 0 1 1 0 012 0zM13 10a1 1 0 11-2 0 1 1 0 012 0zM13 16a1 1 0 11-2 0 1 1 0 012 0z" />
               </svg>
-              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-500 dark:bg-slate-700/50 dark:text-slate-400">
+              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-600 dark:bg-slate-700/80 dark:text-slate-200">
                 {activeDrag.item.referenceCode}
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${activeDrag.item.type === 'Phase' ? 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
+            <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${activeDrag.item.type === 'Phase' ? 'bg-purple-50 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-700/80 dark:text-slate-200'}`}>
               {activeDrag.item.type}
             </span>
             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${PRIORITY_COLORS[activeDrag.item.priority] || PRIORITY_COLORS.Medium}`}>

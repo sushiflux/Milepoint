@@ -332,9 +332,9 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                 </div>
 
                 <div>
-                  <h3 className="mb-2 text-xs font-medium text-slate-500">Verlinkt von</h3>
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-400">Verlinkt von</h3>
                   {activeNote.incomingLinks.length === 0 ? (
-                    <p className="text-sm text-slate-500">Noch keine anderen Notizen verlinken hierher.</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Noch keine anderen Notizen verlinken hierher.</p>
                   ) : (
                     <ul className="flex flex-wrap gap-2">
                       {activeNote.incomingLinks.map((link) => {
@@ -343,7 +343,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                           <li key={link.id}>
                             <button
                               onClick={() => source && openNote(source)}
-                              className="rounded bg-slate-200 px-3 py-1 text-sm hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700"
+                              className="rounded-lg bg-slate-200/80 px-3 py-1 text-xs font-medium text-slate-800 hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                             >
                               {link.title}
                             </button>

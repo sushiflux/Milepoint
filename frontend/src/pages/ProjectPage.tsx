@@ -56,7 +56,7 @@ export default function ProjectPage() {
       <div className="flex h-screen w-full items-center justify-center font-sans">
         <div className="flex flex-col items-center gap-4">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-brand-primary dark:border-slate-800 dark:border-t-brand-primary-light"></div>
-          <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Projekt wird geladen…</p>
+          <p className="text-sm font-medium text-slate-600 dark:text-slate-200">Projekt wird geladen…</p>
         </div>
       </div>
     )

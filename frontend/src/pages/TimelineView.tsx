@@ -3,7 +3,6 @@ import { addMilestoneDependency, createMilestone, deleteMilestone, removeMilesto
 import { getTimeline } from '../api/timeline'
 import { addDependency, createWorkItem, deleteWorkItem, removeDependency, updateWorkItem } from '../api/workItems'
 import type { Board, BoardColumnType, Milestone, WorkItem, WorkItemPriority, WorkItemType } from '../api/types'
-import AddButton from '../components/AddButton'
 import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
 
 interface Props {
@@ -22,31 +21,19 @@ const MIN_VISIBLE_DAYS = 2
 // rest becomes horizontally scrollable instead of compressing further.
 const MAX_FIT_DAYS = 120
 const ZOOM_FACTOR = 1.25
-const ROW_HEIGHT = 36
-const MONTH_ROW_HEIGHT = 20
-const WEEK_ROW_HEIGHT = 16
-const DAY_ROW_HEIGHT = 22
+const ROW_HEIGHT = 44
+const MONTH_ROW_HEIGHT = 28
+const WEEK_ROW_HEIGHT = 24
+const DAY_ROW_HEIGHT = 28
 const HEADER_HEIGHT = MONTH_ROW_HEIGHT + WEEK_ROW_HEIGHT + DAY_ROW_HEIGHT
 // Height of the scrollbar-only strip placed above the month/year row so the one visible
 // horizontal scrollbar is anchored there instead of at the bottom of the day rows.
-const SCROLLBAR_ROW_HEIGHT = 14
-const COL_ID = 56
-const COL_TYPE = 68
-const COL_STATUS = 96
-const COL_PRIORITY = 72
-const LABEL_WIDTH = 460
-
-const RANGE_PRESETS: { key: string; label: string; days: number }[] = [
-  { key: 'd3', label: '3 Tage', days: 3 },
-  { key: 'w1', label: '1 Woche', days: 7 },
-  { key: 'w2', label: '2 Wochen', days: 14 },
-  { key: 'w3', label: '3 Wochen', days: 21 },
-  { key: 'w4', label: '4 Wochen', days: 28 },
-  { key: 'm1', label: '1 Monat', days: 30 },
-  { key: 'm3', label: '3 Monate', days: 90 },
-  { key: 'm6', label: '6 Monate', days: 180 },
-  { key: 'm12', label: '12 Monate', days: 365 },
-]
+const SCROLLBAR_ROW_HEIGHT = 12
+const COL_ID = 64
+const COL_TYPE = 76
+const COL_STATUS = 104
+const COL_PRIORITY = 80
+const LABEL_WIDTH = 500
 
 function startOfDay(d: Date) {
   const x = new Date(d)
@@ -373,9 +360,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
   }, [workItems])
 
-  const filtersActive = filterStatuses.size > 0 || filterPriorities.size > 0 || filterAssignees.size > 0
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filtersActive = filterStatuses.size > 0 || filterPriorities.size > 0 || filterAssignees.size > 0 || searchQuery.trim().length > 0
 
   function matchesFilters(item: WorkItem) {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim()
+      const titleMatch = item.title.toLowerCase().includes(q)
+      const codeMatch = item.referenceCode.toLowerCase().includes(q)
+      if (!titleMatch && !codeMatch) return false
+    }
     if (filterStatuses.size > 0 && !filterStatuses.has(item.columnType)) return false
     if (filterPriorities.size > 0 && !filterPriorities.has(item.priority)) return false
     if (filterAssignees.size > 0 && !filterAssignees.has(item.assigneeId ?? UNASSIGNED)) return false
@@ -429,8 +424,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         ? Math.max(containerWidth / Math.min(visibleDayCount, MAX_FIT_DAYS), MIN_DAY_WIDTH)
         : Math.max(containerWidth / dayCount, MIN_DAY_WIDTH)
       : MIN_DAY_WIDTH
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 60000)
+    return () => clearInterval(timer)
+  }, [])
+  
   const chartWidth = renderedDayCount * dayWidth
-  const todayOffset = diffDays(startOfDay(new Date()), rangeStart)
+  const todayOffset = diffDays(startOfDay(now), rangeStart)
+  const todayFraction = (now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds()) / 86400
+  const exactTodayOffset = todayOffset + todayFraction
 
   const prevDayWidthRef = useRef(dayWidth)
   useEffect(() => {
@@ -562,7 +565,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const rows: Row[] = useMemo(() => {
     return buildRows(null, 0).filter((r) => r.kind === 'milestone' || matchesFilters(r.item))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workItems, milestones, collapsed, filterStatuses, filterPriorities, filterAssignees])
+  }, [workItems, milestones, collapsed, filterStatuses, filterPriorities, filterAssignees, searchQuery])
 
   const rowIndexByTaskId = useMemo(() => {
     const map = new Map<string, number>()
@@ -1107,8 +1110,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     closeEdit()
   }
 
-  const weekendBackground = `repeating-linear-gradient(to right, rgba(148,163,184,0.05) 0, rgba(148,163,184,0.05) ${dayWidth}px, transparent ${dayWidth}px, transparent ${dayWidth * 2}px)`
-
   function LabelRow({
     children,
     style,
@@ -1201,271 +1202,326 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     <div className="space-y-6">
       {error && <p className="text-sm text-red-400">{error}</p>}
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {!showTaskForm && (
-            <AddButton
-              onClick={() => {
-                setNewParentId('')
-                setShowTaskForm(true)
-              }}
-              label="Neue Aufgabe"
-              icon={
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-                  <path d="M4 5.5h11M4 10h11M4 14.5h7" />
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Left Add Buttons */}
+          <div className="flex items-center gap-2.5">
+            {!showTaskForm && (
+              <button
+                onClick={() => {
+                  setNewParentId('')
+                  setShowTaskForm(true)
+                }}
+                className="flex items-center gap-2 rounded-lg bg-brand-accent px-3.5 py-2 text-xs font-semibold text-white shadow-md shadow-brand-accent/20 transition-all hover:bg-brand-accent-light hover:-translate-y-0.5"
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={2.2} className="h-3.5 w-3.5">
+                  <path d="M10 4v12M4 10h12" strokeLinecap="round" />
                 </svg>
-              }
-            />
-          )}
-          {!showMilestoneForm && (
-            <AddButton
-              onClick={() => setShowMilestoneForm(true)}
-              label="Neuer Meilenstein"
-              icon={
-                <svg viewBox="0 0 20 20" fill="currentColor" className="h-2.5 w-2.5">
-                  <path d="M10 3 17 10 10 17 3 10Z" />
+                <span>Aufgabe anlegen</span>
+              </button>
+            )}
+            {!showMilestoneForm && (
+              <button
+                onClick={() => setShowMilestoneForm(true)}
+                className="flex items-center gap-2 rounded-lg border border-purple-300/80 bg-purple-50/80 px-3.5 py-2 text-xs font-semibold text-purple-700 transition-all hover:bg-purple-100 dark:border-purple-800/60 dark:bg-purple-950/40 dark:text-purple-300 dark:hover:bg-purple-900/60"
+              >
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400">
+                  <path d="M10 2.5 L17.5 10 L10 17.5 L2.5 10 Z" />
                 </svg>
-              }
-            />
-          )}
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <div ref={filterMenuRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setFilterMenuOpen((o) => !o)}
-              title="Filter"
-              aria-label="Filter"
-              className={`flex h-8 w-8 items-center justify-center rounded-full border hover:bg-slate-100 dark:hover:bg-slate-800 ${
-                filtersActive
-                  ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                  : 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400'
-              }`}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                <path d="M4 5h16l-6.5 7.5V18l-3 1.5v-7z" />
-              </svg>
-            </button>
-
-            {filterMenuOpen && (
-              <div className="absolute right-0 top-full z-40 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-                <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Status</p>
-                <div className="mb-3 flex flex-wrap gap-1">
-                  {STATUS_OPTIONS.map((s) => (
-                    <button
-                      key={s}
-                      type="button"
-                      onClick={() => setFilterStatuses((prev) => toggleInSet(prev, s))}
-                      className={`rounded px-2 py-1 text-xs ${
-                        filterStatuses.has(s)
-                          ? 'bg-indigo-600 text-white'
-                          : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {STATUS_LABELS[s]}
-                    </button>
-                  ))}
-                </div>
-
-                <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Priorität</p>
-                <div className="mb-3 flex flex-wrap gap-1">
-                  {PRIORITY_OPTIONS.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setFilterPriorities((prev) => toggleInSet(prev, p))}
-                      className={`rounded px-2 py-1 text-xs ${
-                        filterPriorities.has(p)
-                          ? 'bg-indigo-600 text-white'
-                          : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      {PRIORITY_LABELS[p]}
-                    </button>
-                  ))}
-                </div>
-
-                {assigneeOptions.length > 0 && (
-                  <>
-                    <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Zuständige</p>
-                    <div className="mb-3 flex max-h-32 flex-wrap gap-1 overflow-y-auto">
-                      {assigneeOptions.map(([id, name]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => setFilterAssignees((prev) => toggleInSet(prev, id))}
-                          className={`rounded px-2 py-1 text-xs ${
-                            filterAssignees.has(id)
-                              ? 'bg-indigo-600 text-white'
-                              : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          {name}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                {filtersActive && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFilterStatuses(new Set())
-                      setFilterPriorities(new Set())
-                      setFilterAssignees(new Set())
-                    }}
-                    className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                  >
-                    Zurücksetzen
-                  </button>
-                )}
-              </div>
+                <span>Meilenstein anlegen</span>
+              </button>
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={toggleCollapseAll}
-            disabled={groupIds.size === 0}
-            title={allCollapsed ? 'Alle ausklappen' : 'Alle einklappen'}
-            aria-label={allCollapsed ? 'Alle ausklappen' : 'Alle einklappen'}
-            className={`flex h-8 w-8 items-center justify-center rounded-full border hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-slate-800 ${
-              allCollapsed
-                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                : 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400'
-            }`}
-          >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-              {allCollapsed ? (
-                <>
-                  <path d="M4 8l6-5 6 5" />
-                  <path d="M4 13l6 5 6-5" />
-                </>
-              ) : (
-                <>
-                  <path d="M4 7l6 5 6-5" />
-                  <path d="M4 12l6-5 6 5" />
-                </>
+          {/* Right Toolbar Controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Live Search Input Box */}
+            <div className="relative">
+              <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3.5 w-3.5">
+                  <circle cx="9" cy="9" r="6" />
+                  <path d="M17 17l-3.5-3.5" />
+                </svg>
+              </span>
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="In Timeline suchen..."
+                className="h-9 w-44 sm:w-52 rounded-lg border border-slate-200/80 bg-white/80 pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 outline-none transition-all focus:w-60 focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20 dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-100 dark:placeholder-slate-500"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                  ✕
+                </button>
               )}
-            </svg>
-          </button>
-
-          <button
-            type="button"
-            onClick={scrollToToday}
-            disabled={todayOffset < 0 || todayOffset >= renderedDayCount}
-            title="Zu heute springen"
-            aria-label="Zu heute springen"
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
-          >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3.5 w-3.5">
-              <circle cx="10" cy="10" r="6.5" />
-              <circle cx="10" cy="10" r="1.4" fill="currentColor" stroke="none" />
-            </svg>
-          </button>
-
-          <div ref={rangeMenuRef} className="relative">
-          <button
-            type="button"
-            onClick={() => setRangeMenuOpen((o) => !o)}
-            title="Zeitraum & Zoom"
-            aria-label="Zeitraum & Zoom"
-            className={`flex h-8 w-8 items-center justify-center rounded-full border hover:bg-slate-100 dark:hover:bg-slate-800 ${
-              activePreset || visibleDayCount !== null
-                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                : 'border-slate-300 text-slate-600 dark:border-slate-700 dark:text-slate-400'
-            }`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-              <rect x="3" y="4.5" width="18" height="16" rx="2" />
-              <path d="M3 9.5h18" />
-              <path d="M8 2.5v4M16 2.5v4" />
-            </svg>
-          </button>
-
-          {rangeMenuOpen && (
-            <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-3 shadow-lg dark:border-slate-800 dark:bg-slate-900">
-              <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Zeitraum</p>
-              <div className="mb-3 flex flex-wrap gap-1">
-                {RANGE_PRESETS.map((p) => (
-                  <button
-                    key={p.key}
-                    type="button"
-                    onClick={() => applyPreset(p.days, p.key)}
-                    className={`rounded px-2 py-1 text-xs ${
-                      activePreset === p.key
-                        ? 'bg-indigo-600 text-white'
-                        : 'border border-slate-300 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex items-center justify-between border-t border-slate-200 pt-2 dark:border-slate-800">
-                {visibleDayCount !== null ? (
-                  <button
-                    type="button"
-                    onClick={resetZoom}
-                    className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-                  >
-                    Automatisch
-                  </button>
-                ) : (
-                  <span />
-                )}
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={zoomOut}
-                    title="Rauszoomen"
-                    aria-label="Rauszoomen"
-                    className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-sm leading-none text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
-                  >
-                    −
-                  </button>
-                  <button
-                    type="button"
-                    onClick={zoomIn}
-                    title="Reinzoomen"
-                    aria-label="Reinzoomen"
-                    className="flex h-6 w-6 items-center justify-center rounded-full border border-slate-300 text-sm leading-none text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
             </div>
-          )}
+
+            {/* Filter Popover Button */}
+            <div ref={filterMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setFilterMenuOpen((o) => !o)}
+                className={`flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition-all ${
+                  filtersActive
+                    ? 'border-brand-primary bg-brand-primary/10 text-brand-primary dark:border-brand-primary-light dark:bg-brand-primary/20 dark:text-brand-primary-light ring-2 ring-brand-primary/20'
+                    : 'border-slate-200/80 bg-white/80 text-slate-700 hover:bg-slate-100 dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800'
+                }`}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
+                  <path d="M4 5h16l-6.5 7.5V18l-3 1.5v-7z" />
+                </svg>
+                <span>Filter</span>
+                {filtersActive && (
+                  <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-primary px-1 text-[10px] font-bold text-white dark:bg-brand-primary-light">
+                    {filterStatuses.size + filterPriorities.size + filterAssignees.size + (searchQuery ? 1 : 0)}
+                  </span>
+                )}
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-60"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+              </button>
+
+              {filterMenuOpen && (
+                <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-xl border border-slate-200/80 bg-white/95 p-4 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">Status</p>
+                  <div className="mb-4 flex flex-wrap gap-1.5">
+                    {STATUS_OPTIONS.map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setFilterStatuses((prev) => toggleInSet(prev, s))}
+                        className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                          filterStatuses.has(s)
+                            ? 'bg-brand-primary text-white font-semibold dark:bg-brand-primary-light'
+                            : 'border border-slate-200/80 bg-slate-100/50 text-slate-700 hover:bg-slate-200/60 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200'
+                        }`}
+                      >
+                        {STATUS_LABELS[s]}
+                      </button>
+                    ))}
+                  </div>
+
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">Priorität</p>
+                  <div className="mb-4 flex flex-wrap gap-1.5">
+                    {PRIORITY_OPTIONS.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        onClick={() => setFilterPriorities((prev) => toggleInSet(prev, p))}
+                        className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                          filterPriorities.has(p)
+                            ? 'bg-brand-primary text-white font-semibold dark:bg-brand-primary-light'
+                            : 'border border-slate-200/80 bg-slate-100/50 text-slate-700 hover:bg-slate-200/60 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200'
+                        }`}
+                      >
+                        {PRIORITY_LABELS[p]}
+                      </button>
+                    ))}
+                  </div>
+
+                  {assigneeOptions.length > 0 && (
+                    <>
+                      <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">Zuständige</p>
+                      <div className="mb-4 flex max-h-36 flex-wrap gap-1.5 overflow-y-auto pr-1">
+                        {assigneeOptions.map(([id, name]) => (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => setFilterAssignees((prev) => toggleInSet(prev, id))}
+                            className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                              filterAssignees.has(id)
+                                ? 'bg-brand-primary text-white font-semibold dark:bg-brand-primary-light'
+                                : 'border border-slate-200/80 bg-slate-100/50 text-slate-700 hover:bg-slate-200/60 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200'
+                            }`}
+                          >
+                            {name}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  {filtersActive && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterStatuses(new Set())
+                        setFilterPriorities(new Set())
+                        setFilterAssignees(new Set())
+                        setSearchQuery('')
+                      }}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-900/40"
+                    >
+                      Alle Filter zurücksetzen
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Inline Segmented Zeitraum Range Switcher (1-Click) */}
+            <div className="hidden sm:flex items-center rounded-lg border border-slate-200/80 bg-white/80 p-0.5 dark:border-slate-700/80 dark:bg-slate-800/80">
+              {[
+                { key: 'w1', label: '1W', days: 7 },
+                { key: 'w2', label: '2W', days: 14 },
+                { key: 'm1', label: '1M', days: 30 },
+                { key: 'm3', label: '3M', days: 90 },
+                { key: 'm6', label: '6M', days: 180 },
+                { key: 'm12', label: '1J', days: 365 },
+              ].map((preset) => (
+                <button
+                  key={preset.key}
+                  type="button"
+                  onClick={() => applyPreset(preset.days, preset.key)}
+                  className={`h-8 px-2.5 text-xs font-semibold rounded-md transition-colors ${
+                    activePreset === preset.key
+                      ? 'bg-brand-primary text-white shadow-xs dark:bg-brand-primary-light font-bold'
+                      : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700/80'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Root Level Zoom & Auto-Fit Control Group */}
+            <div className="flex h-9 items-center rounded-lg border border-slate-200/80 bg-white/80 p-0.5 shadow-2xs dark:border-slate-700/80 dark:bg-slate-800/80">
+              <button
+                type="button"
+                onClick={zoomOut}
+                title="Rauszoomen (-)"
+                aria-label="Rauszoomen"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-sm font-bold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700/80"
+              >
+                −
+              </button>
+
+              <button
+                type="button"
+                onClick={resetZoom}
+                title="Automatisch an Aufgaben-Umfang anpassen"
+                className={`h-8 px-2.5 text-xs font-semibold transition-colors rounded-md ${
+                  visibleDayCount === null
+                    ? 'bg-brand-primary/10 text-brand-primary dark:bg-brand-primary/20 dark:text-brand-primary-light font-bold'
+                    : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700/80'
+                }`}
+              >
+                Auto-Fit
+              </button>
+
+              <button
+                type="button"
+                onClick={zoomIn}
+                title="Reinzoomen (+)"
+                aria-label="Reinzoomen"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-sm font-bold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700/80"
+              >
+                +
+              </button>
+            </div>
+
+            {/* Zu Heute Button */}
+            <button
+              type="button"
+              onClick={scrollToToday}
+              disabled={todayOffset < 0 || todayOffset >= renderedDayCount}
+              title="Zu heute springen"
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 text-xs font-semibold text-slate-700 transition-all hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>Heute</span>
+            </button>
+
+            {/* Einklappen / Ausklappen Button */}
+            <button
+              type="button"
+              onClick={toggleCollapseAll}
+              disabled={groupIds.size === 0}
+              title={allCollapsed ? 'Alle Abschnitte ausklappen' : 'Alle Abschnitte einklappen'}
+              className="flex h-9 items-center gap-1.5 rounded-lg border border-slate-200/80 bg-white/80 px-3 text-xs font-semibold text-slate-700 transition-all hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                {allCollapsed ? <path d="M4 8l6-5 6 5M4 13l6 5 6-5" /> : <path d="M4 7l6 5 6-5M4 12l6-5 6 5" />}
+              </svg>
+              <span>{allCollapsed ? 'Ausklappen' : 'Einklappen'}</span>
+            </button>
           </div>
         </div>
+
+        {/* Removable Active Filter Chips Bar */}
+        {filtersActive && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Aktive Filter:</span>
+            {searchQuery && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-primary/10 px-2.5 py-0.5 text-xs font-semibold text-brand-primary dark:bg-brand-primary/20 dark:text-brand-primary-light">
+                Suche: "{searchQuery}"
+                <button type="button" onClick={() => setSearchQuery('')} className="hover:text-red-500">✕</button>
+              </span>
+            )}
+            {[...filterStatuses].map((s) => (
+              <span key={s} className="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                {STATUS_LABELS[s]}
+                <button type="button" onClick={() => setFilterStatuses((prev) => toggleInSet(prev, s))} className="hover:text-red-500">✕</button>
+              </span>
+            ))}
+            {[...filterPriorities].map((p) => (
+              <span key={p} className="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                {PRIORITY_LABELS[p]}
+                <button type="button" onClick={() => setFilterPriorities((prev) => toggleInSet(prev, p))} className="hover:text-red-500">✕</button>
+              </span>
+            ))}
+            {[...filterAssignees].map((id) => {
+              const name = assigneeOptions.find(([aId]) => aId === id)?.[1] ?? 'Unbekannt'
+              return (
+                <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  {name}
+                  <button type="button" onClick={() => setFilterAssignees((prev) => toggleInSet(prev, id))} className="hover:text-red-500">✕</button>
+                </span>
+              )
+            })}
+            <button
+              type="button"
+              onClick={() => {
+                setFilterStatuses(new Set())
+                setFilterPriorities(new Set())
+                setFilterAssignees(new Set())
+                setSearchQuery('')
+              }}
+              className="text-xs text-red-500 hover:underline font-semibold ml-1"
+            >
+              Alle löschen
+            </button>
+          </div>
+        )}
       </div>
 
-      <section className="flex overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="shrink-0" style={{ width: LABEL_WIDTH }}>
+      <section className="flex overflow-hidden rounded-xl border border-slate-200/90 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="shrink-0 border-r border-slate-200 dark:border-slate-800" style={{ width: LABEL_WIDTH }}>
           <div style={{ height: SCROLLBAR_ROW_HEIGHT }} />
-          <div className="flex items-center border-b border-slate-200 dark:border-slate-800" style={{ height: HEADER_HEIGHT }}>
-            <span style={{ width: COL_ID }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
+          <div className="flex items-center border-b border-slate-200 bg-slate-50/80 font-semibold dark:border-slate-700/60 dark:bg-slate-800/50" style={{ height: HEADER_HEIGHT }}>
+            <span style={{ width: COL_ID }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               ID
             </span>
-            <span className="flex-1 px-2 text-[10px] font-medium uppercase text-slate-500">Betreff</span>
-            <span style={{ width: COL_TYPE }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
+            <span className="flex-1 px-2 text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">Betreff</span>
+            <span style={{ width: COL_TYPE }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               Typ
             </span>
-            <span style={{ width: COL_STATUS }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
+            <span style={{ width: COL_STATUS }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               Status
             </span>
-            <span style={{ width: COL_PRIORITY }} className="px-2 text-[10px] font-medium uppercase text-slate-500">
+            <span style={{ width: COL_PRIORITY }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               Priorität
             </span>
           </div>
 
           {rows.length === 0 && (
             <LabelRow style={{ paddingLeft: 8 }}>
-              <span className="text-xs text-slate-500">Noch keine Aufgaben oder Meilensteine mit Termin.</span>
+              <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Noch keine Aufgaben oder Meilensteine mit Termin.</span>
             </LabelRow>
           )}
 
@@ -1480,18 +1536,19 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     setContextMenu({ kind: 'milestone', milestone: m, x: e.clientX, y: e.clientY })
                   }}
                 >
-                  <span style={{ width: COL_ID }} className="px-2 text-[10px] text-slate-500" />
-                  <span className="flex flex-1 items-center gap-1 truncate px-2 text-xs" style={{ paddingLeft: row.depth * 16 }}>
-                    {m.name}
+                  <span style={{ width: COL_ID }} className="px-2 text-xs text-slate-500" />
+                  <span className="flex flex-1 items-center gap-1.5 truncate px-2 text-sm font-bold text-purple-700 dark:text-purple-300" style={{ paddingLeft: row.depth * 16 }}>
+                    <span className="text-xs">◆</span>
+                    <span className="truncate">{m.name}</span>
                     <DependencyButton row={row} />
                     <button
                       onClick={() => handleDeleteMilestone(m)}
-                      className="text-slate-400 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
+                      className="text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400 ml-1"
                     >
                       ✕
                     </button>
                   </span>
-                  <span style={{ width: COL_TYPE }} className="px-2 text-[11px] text-emerald-600 dark:text-emerald-400">
+                  <span style={{ width: COL_TYPE }} className="px-2 text-xs font-bold text-purple-600 dark:text-purple-400">
                     Meilenstein
                   </span>
                   <span style={{ width: COL_STATUS }} className="px-2" />
@@ -1506,11 +1563,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 key={row.key}
                 onContextMenu={(e) => openRowContextMenu(e, row)}
               >
-                <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-[10px] text-slate-500">
+                <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-xs font-bold text-slate-500 dark:text-slate-400">
                   {item.referenceCode}
                 </span>
                 <span 
-                  className="flex flex-1 items-center gap-1 truncate px-2 text-xs" 
+                  className="flex flex-1 items-center gap-1.5 truncate px-2 text-sm font-bold text-slate-900 dark:text-slate-100" 
                   style={{ paddingLeft: depth * 16 }}
                   onMouseEnter={() => setHoveredTaskId(item.id)}
                   onMouseLeave={() => setHoveredTaskId(null)}
@@ -1518,7 +1575,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   {hasChildren && (
                     <button
                       onClick={() => toggleCollapse(item.id)}
-                      className="w-3 shrink-0 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
+                      className="w-3.5 shrink-0 text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200 font-bold"
                     >
                       {collapsed.has(item.id) ? '▸' : '▾'}
                     </button>
@@ -1529,21 +1586,21 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     onClick={() => openChildForm(item.id)}
                     title="Unteraufgabe hinzufügen"
                     aria-label="Unteraufgabe hinzufügen"
-                    className="shrink-0 px-0.5 text-slate-400 hover:text-indigo-500 dark:text-slate-600 dark:hover:text-indigo-400"
+                    className="shrink-0 px-1 text-slate-400 hover:text-indigo-600 dark:text-slate-500 dark:hover:text-indigo-400 font-bold"
                   >
                     +
                   </button>
                 </span>
-                <span style={{ width: COL_TYPE }} className={`truncate px-2 text-[11px] ${TYPE_TEXT_COLOR[item.type]}`}>
+                <span style={{ width: COL_TYPE }} className={`truncate px-2 text-xs font-bold ${TYPE_TEXT_COLOR[item.type]}`}>
                   {TYPE_LABELS[item.type]}
                 </span>
-                <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
-                  {item.columnName}
+                <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
+                  <span className="truncate">{item.columnName}</span>
                 </span>
-                <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate px-2 text-[11px] text-slate-500 dark:text-slate-400">
-                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
-                  {item.priority}
+                <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate px-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
+                  <span className="truncate">{item.priority}</span>
                 </span>
               </LabelRow>
             )
@@ -1551,10 +1608,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         </div>
 
         <div ref={chartWheelRef} className="flex min-w-0 flex-1 flex-col">
-          <div ref={scrollbarRef} className="overflow-x-auto" onScroll={handleScrollbarScroll} style={{ height: SCROLLBAR_ROW_HEIGHT }}>
+          {/* Custom Styled Scrollbar Bar */}
+          <div 
+            ref={scrollbarRef} 
+            className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:bg-slate-300/80 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-track]:bg-transparent hover:[&::-webkit-scrollbar-thumb]:bg-slate-400 dark:[&::-webkit-scrollbar-thumb]:bg-slate-600/80 dark:hover:[&::-webkit-scrollbar-thumb]:bg-slate-500 transition-all" 
+            onScroll={handleScrollbarScroll} 
+            style={{ height: SCROLLBAR_ROW_HEIGHT }}
+          >
             <div style={{ width: chartWidth, height: 1 }} />
           </div>
 
+          {/* Month / Year Header Row with Alternating Month Colors */}
           <div
             ref={monthScrollRef}
             className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
@@ -1562,28 +1626,36 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             onScroll={handleMonthScroll}
           >
             <div
-              className="relative border-b border-slate-100 dark:border-slate-800/60"
+              className="relative border-b border-slate-200 dark:border-slate-800"
               style={{ width: chartWidth, height: MONTH_ROW_HEIGHT }}
             >
-              {todayOffset >= 0 && todayOffset < renderedDayCount && (
-                <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }}>
-                  <div className="absolute -left-px h-2 w-2 -translate-x-1/2 rotate-45 bg-red-500" />
-                </div>
-              )}
               {monthGroups.map((g, i) => (
                 <div
                   key={g.key}
-                  className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-l border-slate-200 px-1.5 text-[10px] font-medium text-slate-600 dark:border-slate-800/60 dark:text-slate-300 ${
-                    i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
+                  className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-r text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                    i % 2 === 0
+                      ? 'bg-violet-100 text-violet-800 border-violet-300 dark:bg-violet-900/80 dark:text-violet-200 dark:border-violet-800'
+                      : 'bg-violet-200 text-violet-900 border-violet-400 dark:bg-violet-800/90 dark:text-violet-100 dark:border-violet-700'
                   }`}
                   style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
                 >
                   <span className="truncate">{g.label}</span>
                 </div>
               ))}
+              
+              {/* Elegant "Heute" Marker Line (Month Row) */}
+              {todayOffset >= 0 && todayOffset < renderedDayCount && (
+                <div
+                  className="pointer-events-none absolute inset-y-0 z-40 flex flex-col items-center"
+                  style={{ left: exactTodayOffset * dayWidth - 1 }}
+                >
+                  <div className="w-0.5 h-full bg-brand-primary/80 dark:bg-brand-primary-light/70 shadow-[0_0_8px_rgba(90,81,208,0.4)] dark:shadow-[0_0_8px_rgba(129,140,248,0.3)]" />
+                </div>
+              )}
             </div>
           </div>
 
+          {/* Week & Day Header Rows with Alternating Colors & Weekend Highlighting */}
           <div
             ref={containerRef}
             className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
@@ -1591,17 +1663,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             onScroll={handleHeaderScroll}
           >
             <div className="relative" style={{ width: chartWidth }}>
-              {todayOffset >= 0 && todayOffset < renderedDayCount && (
-                <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }} />
-              )}
-
               <div className="flex flex-col border-b border-slate-200 dark:border-slate-800" style={{ height: WEEK_ROW_HEIGHT + DAY_ROW_HEIGHT }}>
-                <div className="relative border-b border-slate-100 dark:border-slate-800/60" style={{ height: WEEK_ROW_HEIGHT }}>
+                {/* Kalenderwoche Row */}
+                <div className="relative border-b border-slate-200 dark:border-slate-800" style={{ height: WEEK_ROW_HEIGHT }}>
                   {weekGroups.map((g, i) => (
                     <div
                       key={g.key}
-                      className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-l border-slate-200/70 text-[9px] text-slate-400 dark:border-slate-800/40 dark:text-slate-500 ${
-                        i % 2 === 0 ? 'bg-slate-50 dark:bg-slate-800/40' : 'bg-white dark:bg-slate-900'
+                      className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-r text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                        i % 2 === 0
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/60 dark:text-emerald-300 dark:border-emerald-800'
+                          : 'bg-emerald-100 text-emerald-900 border-emerald-300 dark:bg-emerald-800/80 dark:text-emerald-100 dark:border-emerald-700'
                       }`}
                       style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
                     >
@@ -1609,31 +1680,76 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     </div>
                   ))}
                 </div>
-                <div className="relative" style={{ height: DAY_ROW_HEIGHT, backgroundImage: weekendBackground }}>
-                  {days.map((d, i) => (
-                    <div
-                      key={i}
-                      onContextMenu={(e) => openEmptyContextMenu(e, d)}
-                      className="absolute top-0 flex h-full items-center justify-center border-l border-slate-200 text-[10px] text-slate-500 dark:border-slate-800/60"
-                      style={{ left: i * dayWidth, width: dayWidth }}
-                    >
-                      {d.getDate()}
-                    </div>
-                  ))}
+
+                {/* Day Row (Sa & So Extra Farbig!) */}
+                <div className="relative" style={{ height: DAY_ROW_HEIGHT }}>
+                  {days.map((d, i) => {
+                    const isWeekend = d.getDay() === 0 || d.getDay() === 6
+                    return (
+                      <div
+                        key={i}
+                        onContextMenu={(e) => openEmptyContextMenu(e, d)}
+                        className={`absolute top-0 flex h-full items-center justify-center border-l text-[11px] font-bold transition-colors ${
+                          isWeekend
+                            ? 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/80 dark:text-orange-300 dark:border-orange-700'
+                            : i % 2 === 0
+                            ? 'bg-white text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-800'
+                            : 'bg-slate-100 text-slate-800 border-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700'
+                        }`}
+                        style={{ left: i * dayWidth, width: dayWidth }}
+                      >
+                        {d.getDate()}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
+
+              {/* Elegant "Heute" Marker Line & Badge (Week/Day Rows) */}
+              {todayOffset >= 0 && todayOffset < renderedDayCount && (
+                <div
+                  className="pointer-events-none absolute inset-y-0 z-40 flex flex-col items-center"
+                  style={{ left: exactTodayOffset * dayWidth - 1 }}
+                >
+                  <div className="absolute top-[18px] z-50 flex h-3 w-3 items-center justify-center">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-brand-primary dark:bg-brand-primary-light opacity-80"></span>
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-brand-primary dark:bg-brand-primary-light ring-2 ring-white dark:ring-slate-900"></span>
+                  </div>
+                  <div className="w-0.5 h-full bg-brand-primary/80 dark:bg-brand-primary-light/70 shadow-[0_0_8px_rgba(90,81,208,0.4)] dark:shadow-[0_0_8px_rgba(129,140,248,0.3)]" />
+                </div>
+              )}
             </div>
           </div>
 
+          {/* Timeline Grid Body */}
           <div
             ref={bodyScrollRef}
             onScroll={handleBodyScroll}
-            className="overflow-x-auto [&::-webkit-scrollbar]:hidden"
+            className="overflow-x-auto [&::-webkit-scrollbar]:hidden flex-1 flex flex-col"
             style={{ scrollbarWidth: 'none' }}
           >
-            <div className="relative" style={{ width: chartWidth }}>
+            <div className="relative flex-1 min-h-[200px]" style={{ width: chartWidth }}>
+              {/* Weekend Background Column Highlights in Chart Body */}
+              {days.map((d, i) => {
+                const isWeekend = d.getDay() === 0 || d.getDay() === 6
+                if (!isWeekend) return null
+                return (
+                  <div
+                    key={`weekend-col-${i}`}
+                    className="pointer-events-none absolute inset-y-0 bg-orange-50/60 dark:bg-orange-900/20 border-x border-orange-200/50 dark:border-orange-800/30"
+                    style={{ left: i * dayWidth, width: dayWidth }}
+                  />
+                )
+              })}
+
+              {/* Elegant "Heute" Marker Line (Grid Body) */}
               {todayOffset >= 0 && todayOffset < renderedDayCount && (
-                <div className="pointer-events-none absolute inset-y-0 z-30 w-px bg-red-500/70" style={{ left: todayOffset * dayWidth }} />
+                <div
+                  className="pointer-events-none absolute inset-y-0 z-40 flex flex-col items-center"
+                  style={{ left: exactTodayOffset * dayWidth - 1 }}
+                >
+                  <div className="w-0.5 h-full bg-brand-primary/80 dark:bg-brand-primary-light/70 shadow-[0_0_8px_rgba(90,81,208,0.4)] dark:shadow-[0_0_8px_rgba(129,140,248,0.3)]" />
+                </div>
               )}
 
               <svg
@@ -1691,7 +1807,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     >
                       <div
                         title={`${m.name} — ${formatDate(m.date)}`}
-                        className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-emerald-600 dark:text-emerald-400"
+                        className="absolute top-1/2 flex -translate-x-1/2 -translate-y-1/2 text-sm font-bold text-purple-600 dark:text-purple-300 drop-shadow-md"
                         style={{ left }}
                       >
                         ◆
@@ -1721,7 +1837,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                         onPointerMove={isPhase ? undefined : handlePointerMove}
                         onPointerUp={isPhase ? undefined : handlePointerUp(item)}
                         title={isPhase ? `${item.title} — ${formatDate(range.start.toISOString())} bis ${formatDate(range.finish.toISOString())}` : undefined}
-                        className={`absolute flex items-center rounded ${barColor} ${isPhase ? '' : 'cursor-grab'} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
+                        className={`absolute flex items-center rounded-md ${barColor} ${isPhase ? '' : 'cursor-grab'} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
                         style={{
                           left: diffDays(range.start, rangeStart) * dayWidth,
                           width: Math.max((diffDays(range.finish, range.start) + 1) * dayWidth - 4, dayWidth - 4),
@@ -1730,7 +1846,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                         }}
                       >
                         {!isPhase && <div data-handle="start" className="absolute left-0 h-full w-1.5 cursor-ew-resize" />}
-                        <span className="truncate px-2 text-[11px] text-white select-none">{item.title}</span>
+                        <span className="truncate px-2 text-xs font-bold text-white shadow-2xs select-none">{item.title}</span>
                         {!isPhase && <div data-handle="end" className="absolute right-0 h-full w-1.5 cursor-ew-resize" />}
                       </div>
                     )}
@@ -1846,7 +1962,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             </h3>
 
             <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Name</label>
+              <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Name</label>
               <input
                 autoFocus
                 value={editName}
@@ -1860,7 +1976,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
             {editTarget.kind === 'milestone' ? (
               <div>
-                <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Datum</label>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Datum</label>
                 <input required type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
               </div>
             ) : (
@@ -1868,17 +1984,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 {editTarget.item.type === 'Task' && (
                   <div className="flex gap-2">
                     <div className="flex-1">
-                      <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Anfang</label>
+                      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Anfang</label>
                       <input required type="date" value={editStart} onChange={(e) => setEditStart(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
                     </div>
                     <div className="flex-1">
-                      <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Ende</label>
+                      <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Ende</label>
                       <input type="date" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
                     </div>
                   </div>
                 )}
                 <div>
-                  <label className="mb-1 block text-[10px] font-medium uppercase text-slate-500">Priorität</label>
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Priorität</label>
                   <select
                     value={editPriority}
                     onChange={(e) => setEditPriority(e.target.value as WorkItemPriority)}

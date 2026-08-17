@@ -26,12 +26,12 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
         }}
       />
       <div
-        className="fixed z-50 min-w-[11rem] rounded border border-slate-300 bg-white py-1 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-900"
+        className="fixed z-50 min-w-[12rem] rounded-xl border border-slate-200/80 bg-white/95 p-1.5 text-xs shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95"
         style={{ left: x, top: y }}
       >
         {items.map((item, i) =>
           item === 'divider' ? (
-            <div key={i} className="my-1 border-t border-slate-200 dark:border-slate-800" />
+            <div key={i} className="my-1 border-t border-slate-100 dark:border-slate-800" />
           ) : (
             <button
               key={item.label}
@@ -41,8 +41,10 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
                 item.onClick()
                 onClose()
               }}
-              className={`block w-full px-3 py-1.5 text-left hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-slate-800 ${
-                item.danger ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300'
+              className={`block w-full rounded-lg px-3 py-1.5 text-left font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                item.danger
+                  ? 'text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10'
+                  : 'text-slate-800 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800/80'
               }`}
             >
               {item.label}

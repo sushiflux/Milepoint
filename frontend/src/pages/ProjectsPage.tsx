@@ -297,18 +297,18 @@ export default function ProjectsPage() {
       >
         <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-brand-primary to-brand-accent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
         <div className="mb-1">
-          <span className="font-mono text-[10px] font-bold tracking-wider text-slate-500 dark:text-slate-400">#{shortId(project.id)}</span>
+          <span className="font-mono text-[10px] font-bold tracking-wider text-slate-500 dark:text-slate-200">#{shortId(project.id)}</span>
         </div>
         <div>
-          <h2 className="text-xl font-bold text-slate-800 transition-colors group-hover:text-brand-accent dark:text-white dark:group-hover:text-brand-accent-light">{project.name}</h2>
-          {project.description && <p className="mt-2 line-clamp-2 text-sm text-slate-500 dark:text-slate-200 leading-relaxed">{project.description}</p>}
+          <h2 className="text-xl font-bold text-slate-900 transition-colors group-hover:text-brand-accent dark:text-white dark:group-hover:text-brand-accent-light">{project.name}</h2>
+          {project.description && <p className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-slate-200 leading-relaxed">{project.description}</p>}
         </div>
 
         <div className="mt-5 relative pt-5">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
           <div className="mb-2 flex items-center justify-between">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">{progressLabel}</p>
-            <p className="text-[11px] font-bold text-brand-primary dark:text-white">{project.completionPercent}%</p>
+            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-200">{progressLabel}</p>
+            <p className="text-[11px] font-bold text-brand-primary dark:text-brand-primary-light">{project.completionPercent}%</p>
           </div>
           <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden shadow-inner">
             <div className="h-full rounded-full bg-gradient-to-r from-brand-primary to-brand-accent transition-all duration-1000 ease-out" style={{ width: `${project.completionPercent}%` }} />
@@ -318,7 +318,7 @@ export default function ProjectsPage() {
         {showsFullBreakdown && project.openTicketsByColumn.some((c) => c.count > 0) && (
           <div className="mt-5 relative pt-5">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-300">Gesamtübersicht</p>
+            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-200">Gesamtübersicht</p>
             <TicketBadgeRow items={project.openTicketsByColumn} overdueCount={project.overdueCount} />
           </div>
         )}
@@ -334,8 +334,8 @@ export default function ProjectsPage() {
         {project.nextMilestoneName && (
           <div className="mt-5 relative pt-5">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
-            <p className="truncate text-xs text-slate-500 dark:text-slate-300">
-              Nächster Meilenstein: <span className="text-slate-700 dark:text-slate-100">{project.nextMilestoneName}</span>
+            <p className="truncate text-xs text-slate-600 dark:text-slate-200">
+              Nächster Meilenstein: <span className="font-semibold text-slate-800 dark:text-white">{project.nextMilestoneName}</span>
               {project.nextMilestoneDate && ` · ${new Date(project.nextMilestoneDate).toLocaleDateString('de-DE')}`}
             </p>
           </div>
@@ -354,14 +354,14 @@ export default function ProjectsPage() {
               </span>
             ))}
             {project.members.length > 5 && (
-              <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-xs font-bold text-slate-600 shadow-sm dark:border-[#15142b] dark:bg-slate-700 dark:text-slate-300">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-white bg-slate-200 text-xs font-bold text-slate-700 shadow-sm dark:border-[#15142b] dark:bg-slate-700 dark:text-slate-100">
                 +{project.members.length - 5}
               </span>
             )}
           </div>
           <span className="flex flex-col items-end">
-            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-300">Aktiv</span>
-            <span className="text-xs font-medium text-slate-600 dark:text-slate-200">{new Date(project.lastActivityAt).toLocaleDateString('de-DE')}</span>
+            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-200">Aktiv</span>
+            <span className="text-xs font-semibold text-slate-700 dark:text-slate-100">{new Date(project.lastActivityAt).toLocaleDateString('de-DE')}</span>
           </span>
         </div>
       </button>
