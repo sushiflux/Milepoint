@@ -46,7 +46,14 @@ export default function ProjectSwitcher() {
   }, [])
 
   useEffect(() => {
-    if (open) inputRef.current?.focus()
+    if (!open) return
+    inputRef.current?.focus()
+    // Header mounts once per page and this list is otherwise never refetched, so a favorite
+    // toggled elsewhere (e.g. the Dashboard tiles) wouldn't show up here until a full page
+    // reload. Refetching on every open keeps it current without needing shared state.
+    getProjects()
+      .then(setProjects)
+      .catch(() => {})
   }, [open])
 
   async function toggleFavorite(e: MouseEvent, project: Project) {

@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createProject, deleteProject, getProjects, renameProject } from '../api/projects'
+import { addFavoriteProject, createProject, deleteProject, getProjects, removeFavoriteProject, renameProject } from '../api/projects'
 import type { ColumnTicketCount, Project } from '../api/types'
 import { validateRequired } from '../lib/validation'
 import { shortId } from '../lib/ids'
@@ -24,6 +24,20 @@ function initials(name: string) {
   const parts = name.trim().split(/\s+/)
   return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase() || '?'
 }
+
+const STAR_PATH = 'M9.05 3.29a1.1 1.1 0 011.9 0l1.6 2.75 3.08.7a1.1 1.1 0 01.6 1.8l-2.1 2.38.28 3.15a1.1 1.1 0 01-1.55 1.1L10 13.75l-2.86 1.42a1.1 1.1 0 01-1.55-1.1l.28-3.15-2.1-2.38a1.1 1.1 0 01.6-1.8l3.08-.7 1.6-2.75z'
+
+const STAR_FILLED = (
+  <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+    <path d={STAR_PATH} />
+  </svg>
+)
+
+const STAR_OUTLINE = (
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+    <path d={STAR_PATH} />
+  </svg>
+)
 
 function TicketBadgeRow({ items, overdueCount }: { items: ColumnTicketCount[]; overdueCount: number }) {
   return (
@@ -107,6 +121,21 @@ export default function ProjectsPage() {
     }
   }
 
+  async function setFavorite(project: Project, next: boolean) {
+    setProjects((prev) => prev?.map((p) => (p.id === project.id ? { ...p, isFavorite: next } : p)) ?? prev)
+    try {
+      if (next) await addFavoriteProject(project.id)
+      else await removeFavoriteProject(project.id)
+    } catch {
+      setProjects((prev) => prev?.map((p) => (p.id === project.id ? { ...p, isFavorite: !next } : p)) ?? prev)
+    }
+  }
+
+  function toggleFavorite(event: MouseEvent, project: Project) {
+    event.stopPropagation()
+    setFavorite(project, !project.isFavorite)
+  }
+
   function handleTileContextMenu(event: React.MouseEvent, project: Project) {
     event.preventDefault()
     event.stopPropagation()
@@ -160,6 +189,10 @@ export default function ProjectsPage() {
       { label: 'Kanban', onClick: () => navigate(`/projects/${project.id}/kanban`) },
       { label: 'Notizen', onClick: () => navigate(`/projects/${project.id}/notes`) },
       'divider',
+      {
+        label: project.isFavorite ? 'Favorit entfernen' : 'Favorisieren',
+        onClick: () => setFavorite(project, !project.isFavorite),
+      },
       { label: 'Projekt umbenennen', onClick: () => startRename(project) },
       { label: 'Projekt löschen', onClick: () => handleDeleteProject(project), danger: true },
     ]
@@ -203,6 +236,22 @@ export default function ProjectsPage() {
       </div>
     </form>
   )
+
+  function renderFavoriteToggle(project: Project) {
+    return (
+      <button
+        onClick={(e) => toggleFavorite(e, project)}
+        title={project.isFavorite ? 'Favorit entfernen' : 'Als Favorit markieren'}
+        className={`absolute right-4 top-4 z-10 rounded-md p-1 transition-colors ${
+          project.isFavorite
+            ? 'text-amber-400 hover:text-amber-500'
+            : 'text-slate-300 hover:text-slate-400 dark:text-slate-600 dark:hover:text-slate-500'
+        }`}
+      >
+        {project.isFavorite ? STAR_FILLED : STAR_OUTLINE}
+      </button>
+    )
+  }
 
   function renderProject(project: Project) {
     const progressLabel = project.isOwner ? 'Projekt-Fortschritt' : 'Meine Aufgaben'
@@ -391,6 +440,7 @@ export default function ProjectsPage() {
                     key={project.id}
                     className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all duration-300 ease-out hover:-translate-y-1.5 hover:border-brand-primary/30 hover:shadow-xl hover:shadow-brand-primary/10 dark:border-slate-700 dark:bg-slate-800 dark:hover:border-brand-primary/50"
                   >
+                    {renderFavoriteToggle(project)}
                     {renderProject(project)}
                   </div>
                 ))}
@@ -400,8 +450,9 @@ export default function ProjectsPage() {
                 {projects.map((project) => (
                   <li
                     key={project.id}
-                    className="glass-panel rounded-xl p-5 transition-all hover:-translate-y-0.5 hover:shadow-md group"
+                    className="glass-panel relative rounded-xl p-5 transition-all hover:-translate-y-0.5 hover:shadow-md group"
                   >
+                    {renderFavoriteToggle(project)}
                     {renderProject(project)}
                   </li>
                 ))}
