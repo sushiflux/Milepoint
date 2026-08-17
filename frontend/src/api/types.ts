@@ -23,6 +23,7 @@ export interface Project {
   description: string | null
   createdAt: string
   isOwner: boolean
+  isFavorite: boolean
   /** Project-wide completion if isOwner, otherwise your own task completion. */
   completionPercent: number
   /** Open (non-Done) Task counts per board column, in column order - e.g. Neu / In Arbeit / Pausiert. */

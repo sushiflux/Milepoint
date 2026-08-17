@@ -18,6 +18,12 @@ export const renameProject = (projectId: string, name: string) =>
 export const deleteProject = (projectId: string) =>
   apiFetch<void>(`/projects/${projectId}`, { method: 'DELETE' })
 
+export const addFavoriteProject = (projectId: string) =>
+  apiFetch<void>(`/projects/${projectId}/favorite`, { method: 'POST' })
+
+export const removeFavoriteProject = (projectId: string) =>
+  apiFetch<void>(`/projects/${projectId}/favorite`, { method: 'DELETE' })
+
 export const getBoards = (projectId: string) => apiFetch<Board[]>(`/projects/${projectId}/boards`)
 
 export const createBoard = (projectId: string, name: string, columnNames?: string[]) =>

@@ -446,6 +446,22 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.ToTable("Projects");
                 });
 
+            modelBuilder.Entity("Milepoint.Api.Models.ProjectFavorite", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("ProjectId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("ProjectFavorites");
+                });
+
             modelBuilder.Entity("Milepoint.Api.Models.ProjectMember", b =>
                 {
                     b.Property<string>("ProjectId")
@@ -746,6 +762,25 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .IsRequired();
 
                     b.Navigation("CreatedByUser");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.ProjectFavorite", b =>
+                {
+                    b.HasOne("Milepoint.Api.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Milepoint.Api.Data.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("Milepoint.Api.Models.ProjectMember", b =>

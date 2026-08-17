@@ -69,6 +69,12 @@ public class ProjectsController : ControllerBase
             .ToListAsync();
         var membersByProject = memberRows.ToLookup(m => m.ProjectId);
 
+        var favoriteProjectIds = (await _db.ProjectFavorites
+            .Where(f => projectIds.Contains(f.ProjectId) && f.UserId == currentUserId)
+            .Select(f => f.ProjectId)
+            .ToListAsync())
+            .ToHashSet();
+
         var dtos = projects
             .Select(p => ToDto(
                 p,
@@ -76,7 +82,8 @@ public class ProjectsController : ControllerBase
                 currentUserId,
                 nextMilestoneByProject[p.Id].FirstOrDefault(),
                 BuildMembers(p, membersByProject[p.Id]),
-                boardByProject[p.Id].FirstOrDefault()))
+                boardByProject[p.Id].FirstOrDefault(),
+                favoriteProjectIds.Contains(p.Id)))
             .ToList();
         return Ok(dtos);
     }
@@ -124,7 +131,7 @@ public class ProjectsController : ControllerBase
 
         var currentUser = await _userManager.GetUserAsync(User);
         var owner = new ProjectMemberSummaryDto(currentUserId, currentUser?.DisplayName ?? string.Empty);
-        var dto = ToDto(project, [], currentUserId, null, [owner], board);
+        var dto = ToDto(project, [], currentUserId, null, [owner], board, isFavorite: false);
         return CreatedAtAction(nameof(GetAll), dto);
     }
 
@@ -159,7 +166,10 @@ public class ProjectsController : ControllerBase
 
         var board = await _db.Boards.Where(b => b.ProjectId == projectId).Include(b => b.Columns).OrderBy(b => b.CreatedAt).FirstOrDefaultAsync();
 
-        return Ok(ToDto(project, items, currentUserId, nextMilestone, BuildMembers(project, members), board));
+        var isFavorite = currentUserId is not null &&
+            await _db.ProjectFavorites.AnyAsync(f => f.ProjectId == projectId && f.UserId == currentUserId);
+
+        return Ok(ToDto(project, items, currentUserId, nextMilestone, BuildMembers(project, members), board, isFavorite));
     }
 
     [HttpDelete("{projectId}")]
@@ -268,6 +278,55 @@ public class ProjectsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{projectId}/favorite")]
+    public async Task<IActionResult> AddFavorite(string projectId)
+    {
+        var currentUserId = _userManager.GetUserId(User);
+        if (currentUserId is null)
+        {
+            return Unauthorized();
+        }
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId);
+        if (project is null)
+        {
+            return NotFound();
+        }
+
+        if (!await CanSeeProjectAsync(project, currentUserId))
+        {
+            return Forbid();
+        }
+
+        var alreadyFavorite = await _db.ProjectFavorites.AnyAsync(f => f.ProjectId == projectId && f.UserId == currentUserId);
+        if (!alreadyFavorite)
+        {
+            _db.ProjectFavorites.Add(new ProjectFavorite { ProjectId = projectId, UserId = currentUserId });
+            await _db.SaveChangesAsync();
+        }
+
+        return NoContent();
+    }
+
+    [HttpDelete("{projectId}/favorite")]
+    public async Task<IActionResult> RemoveFavorite(string projectId)
+    {
+        var currentUserId = _userManager.GetUserId(User);
+        if (currentUserId is null)
+        {
+            return Unauthorized();
+        }
+
+        var favorite = await _db.ProjectFavorites.FirstOrDefaultAsync(f => f.ProjectId == projectId && f.UserId == currentUserId);
+        if (favorite is not null)
+        {
+            _db.ProjectFavorites.Remove(favorite);
+            await _db.SaveChangesAsync();
+        }
+
+        return NoContent();
+    }
+
     private async Task<bool> CanManageProjectAsync(Project project)
     {
         if (User.IsInRole("Projektleiter"))
@@ -277,6 +336,28 @@ public class ProjectsController : ControllerBase
 
         var currentUserId = _userManager.GetUserId(User);
         return project.CreatedByUserId == currentUserId;
+    }
+
+    // Mirrors GetAll's visibility filter for a single project - used so favoriting can't be used
+    // to probe/associate yourself with a project you otherwise have no relation to.
+    private async Task<bool> CanSeeProjectAsync(Project project, string? currentUserId)
+    {
+        if (User.IsInRole("Projektleiter"))
+        {
+            return true;
+        }
+
+        if (project.CreatedByUserId == currentUserId)
+        {
+            return true;
+        }
+
+        if (await _db.ProjectMembers.AnyAsync(m => m.ProjectId == project.Id && m.UserId == currentUserId))
+        {
+            return true;
+        }
+
+        return await _db.WorkItems.AnyAsync(w => w.ProjectId == project.Id && w.AssigneeId == currentUserId);
     }
 
     private static List<ProjectMemberSummaryDto> BuildMembers(Project project, IEnumerable<ProjectMember> members)
@@ -313,7 +394,8 @@ public class ProjectsController : ControllerBase
         string? currentUserId,
         Milestone? nextMilestone,
         List<ProjectMemberSummaryDto> members,
-        Board? board)
+        Board? board,
+        bool isFavorite)
     {
         var isOwner = project.CreatedByUserId == currentUserId;
 
@@ -351,6 +433,7 @@ public class ProjectsController : ControllerBase
             project.Description,
             project.CreatedAt,
             isOwner,
+            isFavorite,
             Math.Round(completionPercent, 1),
             BuildColumnCounts(board, items),
             BuildColumnCounts(board, myTasks),

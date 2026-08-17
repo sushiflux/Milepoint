@@ -17,6 +17,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
     public DbSet<Label> Labels => Set<Label>();
     public DbSet<SequenceCounter> SequenceCounters => Set<SequenceCounter>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
+    public DbSet<ProjectFavorite> ProjectFavorites => Set<ProjectFavorite>();
     public DbSet<Milestone> Milestones => Set<Milestone>();
     public DbSet<WorkItemDependency> WorkItemDependencies => Set<WorkItemDependency>();
     public DbSet<MilestoneDependency> MilestoneDependencies => Set<MilestoneDependency>();
@@ -67,6 +68,22 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
             entity.HasOne(m => m.User)
                 .WithMany()
                 .HasForeignKey(m => m.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ProjectFavorite>(entity =>
+        {
+            entity.HasKey(f => new { f.ProjectId, f.UserId });
+            entity.Property(f => f.ProjectId).HasMaxLength(40);
+
+            entity.HasOne(f => f.Project)
+                .WithMany()
+                .HasForeignKey(f => f.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(f => f.User)
+                .WithMany()
+                .HasForeignKey(f => f.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

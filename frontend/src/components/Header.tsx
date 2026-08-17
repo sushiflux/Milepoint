@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import ThemeToggle from './ThemeToggle'
+import ProjectSwitcher from './ProjectSwitcher'
 import logoDark from '../assets/logo-dark.svg'
 import logoLight from '../assets/logo-light.svg'
 import wordmarkDark from '../assets/wordmark-dark.svg'
@@ -45,6 +46,10 @@ export default function Header() {
           <img src={logo} alt="" className="h-6 w-auto" />
           <img src={wordmark} alt="Milepoint" className="hidden sm:block h-4 w-auto" />
         </Link>
+
+        <div className="h-6 w-px bg-slate-200 dark:bg-slate-700" />
+
+        <ProjectSwitcher />
       </div>
 
       <div className="flex items-center gap-3">

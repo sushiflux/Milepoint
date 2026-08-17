@@ -16,6 +16,7 @@ public record ProjectDto(
     string? Description,
     DateTimeOffset CreatedAt,
     bool IsOwner,
+    bool IsFavorite,
     // Project-wide completion if you're the owner, otherwise your own task completion - see
     // ProjectsController for the exact rule.
     double CompletionPercent,

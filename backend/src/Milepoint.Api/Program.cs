@@ -118,7 +118,13 @@ builder.Services.AddCors(options =>
     });
 });
 
-builder.Services.AddSignalR();
+// SignalR has its own JSON serializer config, entirely separate from AddControllers' below - without
+// this, hub payloads (workItemCreated/Updated/Moved) serialize enums as their raw int (Type=0,
+// Priority=1) while REST responses correctly show "Task"/"Medium". Whichever one a WorkItem's data
+// happened to arrive through first would win in the frontend's dedupe-by-id state update.
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+        options.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
