@@ -1079,7 +1079,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
     return [
       {
-        label: 'Unteraufgabe erstellen (als Abhängigkeit)',
+        label: 'Unteraufgabe erstellen',
         onClick: () => {
           setNewType('Task')
           setNewParentId('')
@@ -1088,7 +1088,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         },
       },
       {
-        label: 'Meilenstein hinzufügen (als Abhängigkeit)',
+        label: 'Meilenstein hinzufügen',
         onClick: () => {
           setMilestoneParentId('')
           setPendingBlockerLink(item.id)

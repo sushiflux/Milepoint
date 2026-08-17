@@ -24,12 +24,86 @@ interface PointerDragState {
   offsetY: number
 }
 
+const UNASSIGNED = '__unassigned__'
+
+type SortKey = 'manual' | 'referenceCode' | 'priority' | 'category' | 'title' | 'assignee'
+
+const SORT_LABELS: Record<SortKey, string> = {
+  manual: 'Manuell (Ziehen)',
+  referenceCode: 'Aufgaben-Nr.',
+  priority: 'Priorität',
+  category: 'Typ',
+  title: 'Name',
+  assignee: 'Zuständige/r',
+}
+
+const PRIORITY_ORDER: Record<WorkItemPriority, number> = { Urgent: 0, High: 1, Medium: 2, Low: 3 }
+const CATEGORY_ORDER: Record<string, number> = { Feature: 0, Bug: 1, Chore: 2 }
+const PRIORITY_OPTIONS: WorkItemPriority[] = ['Urgent', 'High', 'Medium', 'Low']
+const CATEGORY_OPTIONS: WorkItemCategory[] = ['Feature', 'Bug', 'Chore']
+
+function toggleInSet<T>(set: Set<T>, value: T) {
+  const next = new Set(set)
+  if (next.has(value)) next.delete(value)
+  else next.add(value)
+  return next
+}
+
+function compareItems(a: WorkItem, b: WorkItem, sortBy: SortKey, users: UserSummary[]): number {
+  switch (sortBy) {
+    case 'referenceCode':
+      return a.referenceCode.localeCompare(b.referenceCode, undefined, { numeric: true })
+    case 'priority':
+      return PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]
+    case 'category':
+      return (CATEGORY_ORDER[a.category ?? ''] ?? 99) - (CATEGORY_ORDER[b.category ?? ''] ?? 99)
+    case 'title':
+      return a.title.localeCompare(b.title, 'de')
+    case 'assignee': {
+      const nameA = users.find((u) => u.id === a.assigneeId)?.displayName ?? '￿'
+      const nameB = users.find((u) => u.id === b.assigneeId)?.displayName ?? '￿'
+      return nameA.localeCompare(nameB, 'de')
+    }
+    default:
+      return a.position - b.position
+  }
+}
+
 export default function KanbanBoard({ board, items, users, onItemsChange }: Props) {
   const { token } = useAuth()
   const [newTitleByColumn, setNewTitleByColumn] = useState<Record<string, string>>({})
+  const [newDescriptionByColumn, setNewDescriptionByColumn] = useState<Record<string, string>>({})
   const [openAddColumns, setOpenAddColumns] = useState<Set<string>>(new Set())
   const [activeDrag, setActiveDrag] = useState<PointerDragState | null>(null)
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null)
+
+  const [searchQuery, setSearchQuery] = useState('')
+  const [sortBy, setSortBy] = useState<SortKey>('manual')
+  const [filterPriorities, setFilterPriorities] = useState<Set<WorkItemPriority>>(new Set())
+  const [filterCategories, setFilterCategories] = useState<Set<WorkItemCategory>>(new Set())
+  const [filterAssignees, setFilterAssignees] = useState<Set<string>>(new Set())
+  const [filterMenuOpen, setFilterMenuOpen] = useState(false)
+  const filterMenuRef = useRef<HTMLDivElement>(null)
+
+  const filtersActive = filterPriorities.size > 0 || filterCategories.size > 0 || filterAssignees.size > 0 || searchQuery.trim().length > 0
+
+  function clearAllFilters() {
+    setFilterPriorities(new Set())
+    setFilterCategories(new Set())
+    setFilterAssignees(new Set())
+    setSearchQuery('')
+  }
+
+  useEffect(() => {
+    if (!filterMenuOpen) return
+    function handleClickOutside(event: MouseEvent) {
+      if (filterMenuRef.current && !filterMenuRef.current.contains(event.target as Node)) {
+        setFilterMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [filterMenuOpen])
 
   const pendingDragRef = useRef<{
     item: WorkItem
@@ -161,26 +235,37 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   }, [board.columns])
 
   const itemsByColumn = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    const filtered = items.filter((item) => {
+      if (item.type === 'Phase') return false
+      if (q && !item.title.toLowerCase().includes(q) && !item.referenceCode.toLowerCase().includes(q)) return false
+      if (filterPriorities.size > 0 && !filterPriorities.has(item.priority)) return false
+      if (filterCategories.size > 0 && (!item.category || !filterCategories.has(item.category))) return false
+      if (filterAssignees.size > 0 && !filterAssignees.has(item.assigneeId ?? UNASSIGNED)) return false
+      return true
+    })
+
     const map = new Map<string, WorkItem[]>()
-    for (const item of items) {
-      if (item.type === 'Phase') continue
+    for (const item of filtered) {
       const list = map.get(item.columnId) ?? []
       list.push(item)
       map.set(item.columnId, list)
     }
     for (const list of map.values()) {
-      list.sort((a, b) => a.position - b.position)
+      list.sort((a, b) => compareItems(a, b, sortBy, users))
     }
     return map
-  }, [items])
+  }, [items, searchQuery, filterPriorities, filterCategories, filterAssignees, sortBy, users])
 
   async function handleCreate(column: BoardColumn) {
     const title = (newTitleByColumn[column.id] ?? '').trim()
     if (!title) return
 
-    const created = await createWorkItem(board.id, column.id, title, 'Task', 'Medium')
+    const description = (newDescriptionByColumn[column.id] ?? '').trim()
+    const created = await createWorkItem(board.id, column.id, title, 'Task', 'Medium', description || undefined)
     onItemsChange((prev) => (prev.some((i) => i.id === created.id) ? prev : [...prev, created]))
     setNewTitleByColumn((prev) => ({ ...prev, [column.id]: '' }))
+    setNewDescriptionByColumn((prev) => ({ ...prev, [column.id]: '' }))
   }
 
   function toggleAddColumn(columnId: string, open: boolean) {
@@ -309,12 +394,207 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   }
 
   return (
-    <div className="flex h-full gap-5 overflow-x-auto pb-8 pt-2 pl-2">
+    <div className="flex h-full flex-col gap-3">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-2">
+          {/* Left Side Header / Actions */}
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Kanban Board</h2>
+          </div>
+
+          {/* Right Toolbar Controls */}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Live Search Input Box */}
+            <div className="relative">
+          <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-3.5 w-3.5">
+              <circle cx="9" cy="9" r="6" />
+              <path d="M17 17l-3.5-3.5" />
+            </svg>
+          </span>
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Karten durchsuchen..."
+            className="h-9 w-44 sm:w-52 rounded-lg border border-slate-200/80 bg-white/80 pl-8 pr-7 text-xs text-slate-800 placeholder-slate-400 outline-none transition-all focus:w-60 focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20 dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-100 dark:placeholder-slate-500"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+
+        {/* Sort Dropdown */}
+        <select
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortKey)}
+          className="h-9 rounded-lg border border-slate-200/80 bg-white/80 px-2.5 text-xs font-semibold text-slate-700 outline-none transition-all focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20 dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-200"
+        >
+          {(Object.entries(SORT_LABELS) as [SortKey, string][]).map(([key, label]) => (
+            <option key={key} value={key}>
+              Sortierung: {label}
+            </option>
+          ))}
+        </select>
+
+        {/* Filter Popover Button */}
+        <div ref={filterMenuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setFilterMenuOpen((o) => !o)}
+            className={`flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition-all ${
+              filtersActive
+                ? 'border-brand-primary bg-brand-primary/10 text-brand-primary dark:border-brand-primary-light dark:bg-brand-primary/20 dark:text-brand-primary-light ring-2 ring-brand-primary/20'
+                : 'border-slate-200/80 bg-white/80 text-slate-700 hover:bg-slate-100 dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-800'
+            }`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
+              <path d="M4 5h16l-6.5 7.5V18l-3 1.5v-7z" />
+            </svg>
+            <span>Filter</span>
+            {filtersActive && (
+              <span className="flex h-4 min-w-[16px] items-center justify-center rounded-full bg-brand-primary px-1 text-[10px] font-bold text-white dark:bg-brand-primary-light">
+                {filterPriorities.size + filterCategories.size + filterAssignees.size + (searchQuery ? 1 : 0)}
+              </span>
+            )}
+            <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-60"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
+          </button>
+
+          {filterMenuOpen && (
+            <div className="absolute right-0 top-full z-40 mt-2 w-72 rounded-xl border border-slate-200/80 bg-white/95 p-4 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">Priorität</p>
+              <div className="mb-4 flex flex-wrap gap-1.5">
+                {PRIORITY_OPTIONS.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setFilterPriorities((prev) => toggleInSet(prev, p))}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                      filterPriorities.has(p)
+                        ? 'bg-brand-primary text-white font-semibold dark:bg-brand-primary-light'
+                        : 'border border-slate-200/80 bg-slate-100/50 text-slate-700 hover:bg-slate-200/60 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+
+              <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">Typ</p>
+              <div className="mb-4 flex flex-wrap gap-1.5">
+                {CATEGORY_OPTIONS.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setFilterCategories((prev) => toggleInSet(prev, c))}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                      filterCategories.has(c)
+                        ? 'bg-brand-primary text-white font-semibold dark:bg-brand-primary-light'
+                        : 'border border-slate-200/80 bg-slate-100/50 text-slate-700 hover:bg-slate-200/60 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200'
+                    }`}
+                  >
+                    {CATEGORY_LABELS[c]}
+                  </button>
+                ))}
+              </div>
+
+              {users.length > 0 && (
+                <>
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">Zuständige</p>
+                  <div className="mb-4 flex max-h-36 flex-wrap gap-1.5 overflow-y-auto pr-1">
+                    {users.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => setFilterAssignees((prev) => toggleInSet(prev, u.id))}
+                        className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                          filterAssignees.has(u.id)
+                            ? 'bg-brand-primary text-white font-semibold dark:bg-brand-primary-light'
+                            : 'border border-slate-200/80 bg-slate-100/50 text-slate-700 hover:bg-slate-200/60 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200'
+                        }`}
+                      >
+                        {u.displayName}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setFilterAssignees((prev) => toggleInSet(prev, UNASSIGNED))}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                        filterAssignees.has(UNASSIGNED)
+                          ? 'bg-brand-primary text-white font-semibold dark:bg-brand-primary-light'
+                          : 'border border-slate-200/80 bg-slate-100/50 text-slate-700 hover:bg-slate-200/60 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200'
+                      }`}
+                    >
+                      Nicht zugewiesen
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {filtersActive && (
+                <button
+                  type="button"
+                  onClick={clearAllFilters}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 py-1.5 text-xs font-semibold text-red-600 transition-colors hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-900/40"
+                >
+                  Alle Filter zurücksetzen
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+
+      {/* Removable Active Filter Chips Bar */}
+      {filtersActive && (
+        <div className="flex flex-wrap items-center gap-1.5 px-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Aktive Filter:</span>
+          {searchQuery && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-primary/10 px-2.5 py-0.5 text-xs font-semibold text-brand-primary dark:bg-brand-primary/20 dark:text-brand-primary-light">
+              Suche: "{searchQuery}"
+              <button type="button" onClick={() => setSearchQuery('')} className="hover:text-red-500">✕</button>
+            </span>
+          )}
+          {[...filterPriorities].map((p) => (
+            <span key={p} className="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {p}
+              <button type="button" onClick={() => setFilterPriorities((prev) => toggleInSet(prev, p))} className="hover:text-red-500">✕</button>
+            </span>
+          ))}
+          {[...filterCategories].map((c) => (
+            <span key={c} className="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {CATEGORY_LABELS[c]}
+              <button type="button" onClick={() => setFilterCategories((prev) => toggleInSet(prev, c))} className="hover:text-red-500">✕</button>
+            </span>
+          ))}
+          {[...filterAssignees].map((id) => {
+            const name = id === UNASSIGNED ? 'Nicht zugewiesen' : users.find((u) => u.id === id)?.displayName ?? 'Unbekannt'
+            return (
+              <span key={id} className="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                {name}
+                <button type="button" onClick={() => setFilterAssignees((prev) => toggleInSet(prev, id))} className="hover:text-red-500">✕</button>
+              </span>
+            )
+          })}
+          <button type="button" onClick={clearAllFilters} className="text-xs text-red-500 hover:underline font-semibold ml-1">
+            Alle löschen
+          </button>
+        </div>
+      )}
+      </div>
+
+    <div className="flex flex-1 min-h-0 gap-5 overflow-x-auto pb-8 pt-2 pl-2">
       {board.columns.map((column) => (
         <section
           key={column.id}
           data-column-id={column.id}
-          className={`glass-panel flex flex-col w-[340px] shrink-0 rounded-xl relative overflow-hidden transition-all duration-200 ${
+          className={`glass-panel flex flex-col flex-1 min-w-0 rounded-xl relative overflow-hidden transition-all duration-200 ${
             dragOverColumnId === column.id ? 'ring-2 ring-brand-primary bg-brand-primary/10 border-brand-primary/50 shadow-lg shadow-brand-primary/10 scale-[1.01]' : ''
           }`}
         >
@@ -359,6 +639,16 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                   placeholder="Titel eingeben..."
                   className="w-full rounded-lg border bg-transparent px-3 py-2 text-sm placeholder-slate-400 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                 />
+                <textarea
+                  value={newDescriptionByColumn[column.id] ?? ''}
+                  onChange={(e) => setNewDescriptionByColumn((prev) => ({ ...prev, [column.id]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') toggleAddColumn(column.id, false)
+                  }}
+                  placeholder="Notizen (optional)..."
+                  rows={2}
+                  className="mt-2 w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder-slate-400 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
+                />
                 <div className="mt-3 flex items-center justify-end gap-2">
                   <button
                     type="button"
@@ -399,6 +689,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                           </span>
                         </div>
                       </div>
+
+                      {item.description && (
+                        <p className="line-clamp-2 text-xs text-slate-500 dark:text-slate-400 select-none">{item.description}</p>
+                      )}
 
                       <div className="flex items-center gap-2">
                         <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${item.type === 'Phase' ? 'bg-purple-50 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300' : 'bg-slate-100 text-slate-700 dark:bg-slate-700/80 dark:text-slate-300'}`}>
@@ -522,6 +816,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
           </div>
         </div>
       )}
+    </div>
     </div>
   )
 }
