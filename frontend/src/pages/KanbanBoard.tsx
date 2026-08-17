@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { createWorkItem, moveWorkItem, updateWorkItem } from '../api/workItems'
-import type { Board, BoardColumn, BoardColumnType, WorkItem, WorkItemCategory } from '../api/types'
+import type { Board, BoardColumn, BoardColumnType, WorkItem, WorkItemCategory, WorkItemPriority } from '../api/types'
 import type { UserSummary } from '../api/users'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
@@ -245,6 +245,21 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     onItemsChange((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
   }
 
+  async function handlePriorityChange(item: WorkItem, priority: WorkItemPriority) {
+    const updated = await updateWorkItem(board.id, item.id, {
+      title: item.title,
+      description: item.description,
+      type: item.type,
+      priority,
+      category: item.category,
+      assigneeId: item.assigneeId,
+      parentWorkItemId: item.parentWorkItemId,
+      startDate: item.startDate,
+      dueDate: item.dueDate,
+    })
+    onItemsChange((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
+  }
+
   function getInitials(name?: string) {
     if (!name) return '?'
     const parts = name.split(' ').filter(Boolean)
@@ -257,7 +272,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     Low: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400',
     Medium: 'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400',
     High: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
-    Critical: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
+    Urgent: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
   }
 
   const CATEGORY_LABELS: Record<WorkItemCategory, string> = {
@@ -389,9 +404,21 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                         <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${item.type === 'Phase' ? 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
                           {item.type}
                         </span>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.Medium}`}>
-                          {item.priority}
-                        </span>
+                        <div className="relative" title="Priorität ändern">
+                          <select
+                            value={item.priority}
+                            onChange={(e) => handlePriorityChange(item, e.target.value as WorkItemPriority)}
+                            className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
+                          >
+                            <option value="Low">Low</option>
+                            <option value="Medium">Medium</option>
+                            <option value="High">High</option>
+                            <option value="Urgent">Urgent</option>
+                          </select>
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.Medium}`}>
+                            {item.priority}
+                          </span>
+                        </div>
                         <div className="relative" title="Typ ändern">
                           <select
                             value={item.category ?? ''}
