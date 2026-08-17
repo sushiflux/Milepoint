@@ -14,14 +14,14 @@ interface Props {
   onMilestonesChange: (milestones: Milestone[]) => void
 }
 
-const MIN_DAY_WIDTH = 28
+const MIN_DAY_WIDTH = 3
 const MIN_VISIBLE_DAYS = 2
 // Roughly 4 months - beyond this, squeezing every remaining day into the window makes the
 // day columns unreadably thin, so a wider range fits this many days to the window and the
 // rest becomes horizontally scrollable instead of compressing further.
-const MAX_FIT_DAYS = 120
+const MAX_FIT_DAYS = 1000
 const ZOOM_FACTOR = 1.25
-const ROW_HEIGHT = 44
+const ROW_HEIGHT = 32
 const MONTH_ROW_HEIGHT = 28
 const WEEK_ROW_HEIGHT = 24
 const DAY_ROW_HEIGHT = 28
@@ -270,7 +270,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [depMenuSelection, setDepMenuSelection] = useState('')
   const depMenuRef = useRef<HTMLDivElement>(null)
   const [contextMenu, setContextMenu] = useState<
-    | { kind: 'empty'; date: Date; x: number; y: number }
+    | { kind: 'empty'; date: Date | null; endDate?: Date; x: number; y: number }
     | { kind: 'phase' | 'task'; row: TaskRow; x: number; y: number }
     | { kind: 'milestone'; milestone: Milestone; x: number; y: number }
     | null
@@ -392,7 +392,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return { rangeStart: start, dayCount: Math.max(diffDays(end, start), 14) }
   }, [workItems, milestones])
 
-  const renderedDayCount = visibleDayCount ?? dayCount
+  const renderedDayCount = Math.max(dayCount, visibleDayCount ?? dayCount)
   const days = useMemo(
     () => Array.from({ length: renderedDayCount }, (_, i) => addDays(rangeStart, i)),
     [rangeStart, renderedDayCount],
@@ -786,6 +786,10 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
   function handlePointerDown(item: WorkItem) {
     return (event: React.PointerEvent<HTMLDivElement>) => {
+      // Only the primary (left) button starts a drag - otherwise a right-click on the bar
+      // captures the pointer, which suppresses the native contextmenu event that would
+      // normally follow and open the task's context menu.
+      if (event.button !== 0) return
       const target = event.target as HTMLElement
       const mode: DragMode = target.dataset.handle === 'start' ? 'resize-start' : target.dataset.handle === 'end' ? 'resize-end' : 'move'
       event.currentTarget.setPointerCapture(event.pointerId)
@@ -962,9 +966,50 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     await refreshTimelineData()
   }
 
-  function openEmptyContextMenu(event: React.MouseEvent, date: Date) {
+  function openEmptyContextMenu(event: React.MouseEvent, date: Date | null, endDate?: Date) {
     event.preventDefault()
-    setContextMenu({ kind: 'empty', date, x: event.clientX, y: event.clientY })
+    setContextMenu({ kind: 'empty', date, endDate, x: event.clientX, y: event.clientY })
+  }
+
+  // Used in the chart body (where the bars are) for a right-click that lands on empty space
+  // within a day's column rather than on an existing bar - resolves to that specific day.
+  function openEmptyContextMenuAtClick(event: React.MouseEvent) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    const dayIndex = Math.max(0, Math.floor((event.clientX - rect.left) / dayWidth))
+    openEmptyContextMenu(event, addDays(rangeStart, dayIndex))
+  }
+
+  // Week/month header cells span several days - "Aufgabe hinzufügen" from one of these should
+  // pre-fill the task's whole start-to-end range from that week/month, not just a single day.
+  function openEmptyContextMenuForGroup(event: React.MouseEvent, group: HeaderGroup) {
+    const start = addDays(rangeStart, group.startIndex)
+    const end = addDays(rangeStart, group.startIndex + group.span - 1)
+    openEmptyContextMenu(event, start, end)
+  }
+
+  // Capture phase runs before any of the more specific onContextMenu handlers below get a
+  // chance - if text is selected anywhere on the page, stopping propagation here means none of
+  // them fire, so the browser's native menu (with Copy) shows instead, no matter which element
+  // was right-clicked.
+  function handlePageContextMenuCapture(event: React.MouseEvent) {
+    const selection = window.getSelection()
+    if (selection && selection.toString().length > 0) {
+      event.stopPropagation()
+    }
+  }
+
+  // Bubble-phase fallback: fires only for right-clicks that no specific row/day/milestone
+  // handler already claimed (those call preventDefault, which this checks for), so "right-click
+  // anywhere" still offers the create menu instead of falling through to the native one.
+  function handlePageContextMenu(event: React.MouseEvent) {
+    if (event.defaultPrevented) return
+
+    const target = event.target as HTMLElement
+    if (target.closest('input, textarea, select, button, a')) return
+
+    // Below the chart there's no visible date axis to click "on", so unlike the day-header/
+    // chart-body cases (which pass the actual clicked day), no start date should be implied here.
+    openEmptyContextMenu(event, null)
   }
 
   function openRowContextMenu(event: React.MouseEvent, row: TaskRow) {
@@ -987,6 +1032,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
     if (contextMenu.kind === 'empty') {
       const date = contextMenu.date
+      const endDate = contextMenu.endDate
       return [
         {
           label: 'Phase hinzufügen',
@@ -1002,8 +1048,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           onClick: () => {
             setNewType('Task')
             setNewParentId('')
-            setNewStart(toDateInputValue(date))
-            setNewEnd('')
+            setNewStart(date ? toDateInputValue(date) : '')
+            setNewEnd(endDate ? toDateInputValue(endDate) : '')
             setPendingBlockerLink(null)
             setShowTaskForm(true)
           },
@@ -1012,7 +1058,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           label: 'Meilenstein hinzufügen',
           onClick: () => {
             setMilestoneParentId('')
-            setMilestoneDate(toDateInputValue(date))
+            setMilestoneDate(date ? toDateInputValue(date) : '')
             setPendingBlockerLink(null)
             setShowMilestoneForm(true)
           },
@@ -1199,7 +1245,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   }
 
   return (
-    <div className="space-y-6">
+    <div
+      className="min-h-[calc(100vh-7rem)] space-y-6"
+      onContextMenuCapture={handlePageContextMenuCapture}
+      onContextMenu={handlePageContextMenu}
+    >
       {error && <p className="text-sm text-red-400">{error}</p>}
 
       <div className="space-y-3">
@@ -1520,7 +1570,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           </div>
 
           {rows.length === 0 && (
-            <LabelRow style={{ paddingLeft: 8 }}>
+            <LabelRow style={{ paddingLeft: 8, height: 200 }} onContextMenu={(e) => openEmptyContextMenu(e, null)}>
               <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Noch keine Aufgaben oder Meilensteine mit Termin.</span>
             </LabelRow>
           )}
@@ -1595,12 +1645,20 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   {TYPE_LABELS[item.type]}
                 </span>
                 <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
-                  <span className="truncate">{item.columnName}</span>
+                  {item.type !== 'Phase' && (
+                    <>
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
+                      <span className="truncate">{item.columnName}</span>
+                    </>
+                  )}
                 </span>
                 <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate px-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
-                  <span className="truncate">{item.priority}</span>
+                  {item.type !== 'Phase' && (
+                    <>
+                      <span className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
+                      <span className="truncate">{item.priority}</span>
+                    </>
+                  )}
                 </span>
               </LabelRow>
             )
@@ -1632,6 +1690,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               {monthGroups.map((g, i) => (
                 <div
                   key={g.key}
+                  onContextMenu={(e) => openEmptyContextMenuForGroup(e, g)}
                   className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-r text-[11px] font-bold uppercase tracking-wider transition-colors ${
                     i % 2 === 0
                       ? 'bg-violet-100 text-violet-800 border-violet-300 dark:bg-violet-900/80 dark:text-violet-200 dark:border-violet-800'
@@ -1639,7 +1698,13 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   }`}
                   style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
                 >
-                  <span className="truncate">{g.label}</span>
+                  {g.span * dayWidth >= 30 && (
+                    <span className="truncate">
+                      {dayWidth < 10 && g.label.includes(' ')
+                        ? `${g.label.split(' ')[0].substring(0, 3)} '${g.label.split(' ')[1].substring(2)}`
+                        : g.label}
+                    </span>
+                  )}
                 </div>
               ))}
               
@@ -1669,6 +1734,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   {weekGroups.map((g, i) => (
                     <div
                       key={g.key}
+                      onContextMenu={(e) => openEmptyContextMenuForGroup(e, g)}
                       className={`absolute top-0 flex h-full items-center justify-center overflow-hidden border-r text-[10px] font-bold uppercase tracking-wider transition-colors ${
                         i % 2 === 0
                           ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-900/60 dark:text-emerald-300 dark:border-emerald-800'
@@ -1676,7 +1742,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                       }`}
                       style={{ left: g.startIndex * dayWidth, width: g.span * dayWidth }}
                     >
-                      <span className="truncate">{g.label}</span>
+                      {g.span * dayWidth >= 14 && (
+                        <span className="truncate">
+                          {dayWidth < 10 ? g.label.replace('KW ', '') : g.label}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1698,7 +1768,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                         }`}
                         style={{ left: i * dayWidth, width: dayWidth }}
                       >
-                        {d.getDate()}
+                        {dayWidth >= 12 ? d.getDate() : ''}
                       </div>
                     )
                   })}
@@ -1729,14 +1799,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             style={{ scrollbarWidth: 'none' }}
           >
             <div className="relative flex-1 min-h-[200px]" style={{ width: chartWidth }}>
-              {/* Weekend Background Column Highlights in Chart Body */}
+              {/* Day Grid Lines & Weekend Background Highlights in Chart Body */}
               {days.map((d, i) => {
                 const isWeekend = d.getDay() === 0 || d.getDay() === 6
-                if (!isWeekend) return null
                 return (
                   <div
-                    key={`weekend-col-${i}`}
-                    className="pointer-events-none absolute inset-y-0 bg-orange-50/60 dark:bg-orange-900/20 border-x border-orange-200/50 dark:border-orange-800/30"
+                    key={`grid-col-${i}`}
+                    className={`pointer-events-none absolute inset-y-0 border-l ${
+                      isWeekend 
+                        ? 'bg-orange-50/60 dark:bg-orange-900/20 border-orange-200 dark:border-orange-900/60' 
+                        : 'border-slate-200 dark:border-slate-800'
+                    }`}
                     style={{ left: i * dayWidth, width: dayWidth }}
                   />
                 )
@@ -1793,7 +1866,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 })}
               </svg>
 
-              {rows.length === 0 && <div style={{ height: ROW_HEIGHT }} />}
+              {rows.length === 0 && (
+                <div
+                  className="absolute inset-0"
+                  onContextMenu={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const dayIndex = Math.max(0, Math.floor((e.clientX - rect.left) / dayWidth))
+                    openEmptyContextMenu(e, addDays(rangeStart, dayIndex))
+                  }}
+                />
+              )}
 
               {rows.map((row) => {
                 if (row.kind === 'milestone') {
@@ -1825,29 +1907,59 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 return (
                   <div
                     key={row.key}
-                    onContextMenu={(e) => openRowContextMenu(e, row)}
+                    onContextMenu={(e) => {
+                      // Only a click that actually lands on the bar edits/deletes this task -
+                      // empty space in the row (there's no bar there, or it's a day the bar
+                      // doesn't cover) should offer to create something at that day instead.
+                      if ((e.target as HTMLElement).closest('[data-bar]')) {
+                        openRowContextMenu(e, row)
+                      } else {
+                        openEmptyContextMenuAtClick(e)
+                      }
+                    }}
                     className="relative overflow-hidden border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
                     style={{ height: ROW_HEIGHT }}
                   >
                     {range && (
                       <div
+                        data-bar="true"
                         // A Phase's bar is rolled up live from its subtasks (see phaseRange) - it
                         // isn't its own thing to drag/resize, so no pointer handlers or handles.
                         onPointerDown={isPhase ? undefined : handlePointerDown(item)}
                         onPointerMove={isPhase ? undefined : handlePointerMove}
                         onPointerUp={isPhase ? undefined : handlePointerUp(item)}
                         title={isPhase ? `${item.title} — ${formatDate(range.start.toISOString())} bis ${formatDate(range.finish.toISOString())}` : undefined}
-                        className={`absolute flex items-center rounded-md ${barColor} ${isPhase ? '' : 'cursor-grab'} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
+                        className={`group absolute flex items-center rounded-sm ${barColor} ${isPhase ? 'opacity-90' : 'cursor-grab'} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
                         style={{
-                          left: diffDays(range.start, rangeStart) * dayWidth,
-                          width: Math.max((diffDays(range.finish, range.start) + 1) * dayWidth - 4, dayWidth - 4),
-                          top: 6,
-                          height: ROW_HEIGHT - 12,
+                          left: diffDays(range.start, rangeStart) * dayWidth + 1,
+                          width: Math.max((diffDays(range.finish, range.start) + 1) * dayWidth - 2, dayWidth - 2),
+                          top: (ROW_HEIGHT - 20) / 2,
+                          height: 20,
                         }}
                       >
-                        {!isPhase && <div data-handle="start" className="absolute left-0 h-full w-1.5 cursor-ew-resize" />}
-                        <span className="truncate px-2 text-xs font-bold text-white shadow-2xs select-none">{item.title}</span>
-                        {!isPhase && <div data-handle="end" className="absolute right-0 h-full w-1.5 cursor-ew-resize" />}
+                        {!isPhase && (
+                          <div data-handle="start" className="absolute left-0 flex h-full w-2.5 cursor-ew-resize items-center justify-center rounded-l-sm bg-black/10 opacity-0 transition-opacity hover:bg-black/20 group-hover:opacity-100 dark:bg-white/10 dark:hover:bg-white/20">
+                            <div className="h-2.5 w-[1.5px] rounded-full bg-white/70" />
+                          </div>
+                        )}
+                        <div className="flex w-full items-center overflow-hidden px-3">
+                          {!isPhase && (
+                            <svg className="mr-1 h-3 w-3 shrink-0 text-white/60 opacity-0 transition-opacity group-hover:opacity-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="9" cy="12" r="1"></circle>
+                              <circle cx="9" cy="5" r="1"></circle>
+                              <circle cx="9" cy="19" r="1"></circle>
+                              <circle cx="15" cy="12" r="1"></circle>
+                              <circle cx="15" cy="5" r="1"></circle>
+                              <circle cx="15" cy="19" r="1"></circle>
+                            </svg>
+                          )}
+                          <span className="truncate text-[11px] font-semibold text-white shadow-sm select-none">{item.title}</span>
+                        </div>
+                        {!isPhase && (
+                          <div data-handle="end" className="absolute right-0 flex h-full w-2.5 cursor-ew-resize items-center justify-center rounded-r-sm bg-black/10 opacity-0 transition-opacity hover:bg-black/20 group-hover:opacity-100 dark:bg-white/10 dark:hover:bg-white/20">
+                            <div className="h-2.5 w-[1.5px] rounded-full bg-white/70" />
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1859,93 +1971,104 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       </section>
 
       {(showTaskForm || showMilestoneForm) && (
-        <section className="flex flex-wrap gap-6">
+        <div 
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
+          onClick={() => {
+            setShowTaskForm(false)
+            setShowMilestoneForm(false)
+          }}
+        >
           {showTaskForm && (
-            <form onSubmit={handleCreateTask} className="flex flex-wrap items-center gap-2">
-              <input
-                autoFocus
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') setShowTaskForm(false)
-                }}
-                placeholder="Titel der Aufgabe"
-                className="w-48 rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-              />
-              <select value={newType} onChange={(e) => setNewType(e.target.value as WorkItemType)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
-                <option value="Task">{TYPE_LABELS.Task}</option>
-                <option value="Phase">{TYPE_LABELS.Phase}</option>
-              </select>
-              <select value={newPriority} onChange={(e) => setNewPriority(e.target.value as WorkItemPriority)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
-                {PRIORITY_OPTIONS.map((p) => (
-                  <option key={p} value={p}>
-                    {PRIORITY_LABELS[p]}
-                  </option>
-                ))}
-              </select>
-              <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
-                <option value="">Keine übergeordnete Aufgabe</option>
-                {workItems.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.referenceCode} · {w.title}
-                  </option>
-                ))}
-              </select>
+            <form
+              onSubmit={handleCreateTask}
+              onClick={(e) => e.stopPropagation()}
+              className="glass w-full max-w-sm space-y-4 rounded-xl p-5"
+            >
+              <div className="flex justify-between items-center mb-1">
+                <h3 className="text-sm font-semibold">Neue Aufgabe / Phase</h3>
+                <button type="button" onClick={() => setShowTaskForm(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">✕</button>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Titel</label>
+                <input autoFocus required value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setShowTaskForm(false)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Typ</label>
+                  <select value={newType} onChange={(e) => setNewType(e.target.value as WorkItemType)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
+                    <option value="Task">{TYPE_LABELS.Task}</option>
+                    <option value="Phase">{TYPE_LABELS.Phase}</option>
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Priorität</label>
+                  <select value={newPriority} onChange={(e) => setNewPriority(e.target.value as WorkItemPriority)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
+                    {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Übergeordnet</label>
+                <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
+                  <option value="">Keine übergeordnete Aufgabe</option>
+                  {workItems.map((w) => <option key={w.id} value={w.id}>{w.referenceCode} · {w.title}</option>)}
+                </select>
+              </div>
               {newType === 'Task' ? (
-                <>
-                  <input required type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} title="Anfangsdatum" className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
-                  <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} title="Enddatum (optional)" className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
-                </>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Anfang</label>
+                    <input required type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Ende (optional)</label>
+                    <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
+                  </div>
+                </div>
               ) : (
-                <span className="text-xs text-slate-500 dark:text-slate-400">Zeitraum ergibt sich automatisch aus den Unteraufgaben</span>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Der Zeitraum einer Phase ergibt sich automatisch aus ihren Unteraufgaben.</p>
               )}
-              <button type="submit" className="rounded-lg bg-brand-accent px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-accent-light transition-all">
-                Anlegen
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowTaskForm(false)}
-                className="rounded-lg border border-slate-300 px-4 py-1.5 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
-              >
-                Abbrechen
-              </button>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowTaskForm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800">Abbrechen</button>
+                <button type="submit" className="rounded-lg bg-brand-accent px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-accent-light transition-all">Anlegen</button>
+              </div>
             </form>
           )}
 
           {showMilestoneForm && (
-            <form onSubmit={handleCreateMilestone} className="flex items-center gap-2">
-              <input
-                autoFocus
-                value={milestoneName}
-                onChange={(e) => setMilestoneName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') setShowMilestoneForm(false)
-                }}
-                placeholder="Name des Meilensteins"
-                className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-              />
-              <input type="date" value={milestoneDate} onChange={(e) => setMilestoneDate(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" />
-              <select value={milestoneParentId} onChange={(e) => setMilestoneParentId(e.target.value)} className="rounded border border-slate-300 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900">
-                <option value="">Kein übergeordnetes Element</option>
-                {workItems.map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.referenceCode} · {w.title}
-                  </option>
-                ))}
-              </select>
-              <button type="submit" className="rounded-lg bg-brand-accent px-4 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-brand-accent-light transition-all">
-                Anlegen
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowMilestoneForm(false)}
-                className="rounded-lg border border-slate-300 px-4 py-1.5 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
-              >
-                Abbrechen
-              </button>
+            <form
+              onSubmit={handleCreateMilestone}
+              onClick={(e) => e.stopPropagation()}
+              className="glass w-full max-w-sm space-y-4 rounded-xl p-5"
+            >
+              <div className="flex justify-between items-center mb-1">
+                <h3 className="text-sm font-semibold">Neuer Meilenstein</h3>
+                <button type="button" onClick={() => setShowMilestoneForm(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">✕</button>
+              </div>
+              
+              <div>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Name</label>
+                <input autoFocus required value={milestoneName} onChange={(e) => setMilestoneName(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setShowMilestoneForm(false)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Datum</label>
+                <input required type="date" value={milestoneDate} onChange={(e) => setMilestoneDate(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
+              </div>
+              <div>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Übergeordnet</label>
+                <select value={milestoneParentId} onChange={(e) => setMilestoneParentId(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
+                  <option value="">Kein übergeordnetes Element</option>
+                  {workItems.map((w) => <option key={w.id} value={w.id}>{w.referenceCode} · {w.title}</option>)}
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button type="button" onClick={() => setShowMilestoneForm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800">Abbrechen</button>
+                <button type="submit" className="rounded-lg bg-brand-accent px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-accent-light transition-all">Anlegen</button>
+              </div>
             </form>
           )}
-        </section>
+        </div>
       )}
 
       {contextMenu && <ContextMenu x={contextMenu.x} y={contextMenu.y} items={contextMenuItems()} onClose={() => setContextMenu(null)} />}
