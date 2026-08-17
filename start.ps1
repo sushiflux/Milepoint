@@ -136,23 +136,19 @@ function Initialize-EnvFile {
 }
 
 function Test-TcpPortFree([int]$Port) {
-    $listener = $null
-    try {
-        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Any, $Port)
-        $listener.Start()
-        return $true
-    }
-    catch {
-        return $false
-    }
-    finally {
-        if ($listener) { $listener.Stop() }
-    }
+    # Ein TcpListener-Bind auf IPAddress.Any reicht nicht: Windows lässt einen Any-Bind
+    # teils zu, obwohl ein anderer Prozess (z.B. ein fremder Docker-Container über
+    # com.docker.backend.exe) den Port bereits konkret auf 127.0.0.1 belegt - der
+    # eigentliche "docker compose up" schlägt dann trotzdem mit "port is already
+    # allocated" fehl. Get-NetTCPConnection spiegelt die tatsächliche
+    # Listening-Socket-Tabelle des Systems wider (wie netstat) und erkennt jede
+    # Belegung, unabhängig davon, welcher Prozess oder Container sie hält.
+    return -not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
-function Find-FreePort([int]$StartPort) {
+function Find-FreePort([int]$StartPort, [System.Collections.Generic.HashSet[int]]$ReservedPorts) {
     $port = $StartPort
-    while (-not (Test-TcpPortFree $port)) {
+    while ((-not (Test-TcpPortFree $port)) -or $ReservedPorts.Contains($port)) {
         $port++
     }
     return $port
@@ -163,13 +159,20 @@ function Resolve-Ports {
         'CADDY_PORT', 'CADDY_HTTPS_PORT', 'FRONTEND_PORT', 'BACKEND_PORT', 'POSTGRES_PORT',
         'MSSQL_PORT', 'REDIS_PORT', 'MAILPIT_SMTP_PORT', 'MAILPIT_UI_PORT', 'ADMINER_PORT'
     )
+    # Belegte Ports auch untereinander erkennen: ein Port, der bei OS-Check gerade frei
+    # aussieht (weil der eigene Container mit diesem Port noch nicht läuft), darf trotzdem
+    # nicht zweimal an verschiedene Milepoint-Dienste im selben Lauf vergeben werden.
+    $reservedPorts = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($key in $portKeys) {
         $current = [int](Get-EnvValue -Path $EnvFile -Key $key)
-        if (-not (Test-TcpPortFree $current)) {
-            $free = Find-FreePort ($current + 1)
-            Write-Host "Port $current ($key) ist von einem fremden Prozess belegt - weiche auf $free aus." -ForegroundColor Yellow
-            Set-EnvValue -Path $EnvFile -Key $key -Value $free
+        if ((Test-TcpPortFree $current) -and -not $reservedPorts.Contains($current)) {
+            [void]$reservedPorts.Add($current)
+            continue
         }
+        $free = Find-FreePort ($current + 1) $reservedPorts
+        Write-Host "Port $current ($key) ist belegt (fremder Prozess oder anderer Milepoint-Dienst) - weiche auf $free aus." -ForegroundColor Yellow
+        Set-EnvValue -Path $EnvFile -Key $key -Value $free
+        [void]$reservedPorts.Add($free)
     }
 }
 

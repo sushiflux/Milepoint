@@ -19,6 +19,7 @@ public static class WorkItemMapper
         item.Description,
         item.Type,
         item.Priority,
+        item.Category,
         item.Position,
         item.AssigneeId,
         item.Assignee?.DisplayName,

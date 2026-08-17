@@ -490,6 +490,9 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<int?>("Category")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("ColumnId")
                         .HasColumnType("uniqueidentifier");
 

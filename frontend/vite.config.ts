@@ -26,6 +26,13 @@ export default defineConfig({
     watch: {
       usePolling: true,
       interval: 300,
+      // *.tsbuildinfo (tsc --incremental's cache) share the "tsconfig*" name prefix, and Vite
+      // treats writes to them like a tsconfig change - a full forced page reload, not HMR. The
+      // editor's TS server rewrites these on every background type-check (i.e. on every save,
+      // independent of what actually changed), so without this exclusion an unrelated save can
+      // fire a reload command while the intended one is still in flight; the browser can end up
+      // mid-navigation between the two and render nothing until a clean full reload.
+      ignored: ['**/*.tsbuildinfo'],
     },
   },
 })

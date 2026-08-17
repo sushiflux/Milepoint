@@ -1,5 +1,5 @@
 import { apiFetch } from './client'
-import type { WorkItem, WorkItemPriority, WorkItemType } from './types'
+import type { WorkItem, WorkItemCategory, WorkItemPriority, WorkItemType } from './types'
 
 export const getWorkItems = (boardId: string) => apiFetch<WorkItem[]>(`/boards/${boardId}/workitems`)
 
@@ -7,6 +7,7 @@ export interface CreateWorkItemOptions {
   parentWorkItemId?: string | null
   startDate?: string | null
   dueDate?: string | null
+  category?: WorkItemCategory | null
 }
 
 export const createWorkItem = (
@@ -29,6 +30,7 @@ export const createWorkItem = (
       parentWorkItemId: options?.parentWorkItemId ?? null,
       startDate: options?.startDate ?? null,
       dueDate: options?.dueDate ?? null,
+      category: options?.category ?? null,
     }),
   })
 
@@ -41,7 +43,7 @@ export const moveWorkItem = (boardId: string, workItemId: string, targetColumnId
 export const updateWorkItem = (
   boardId: string,
   workItemId: string,
-  item: Pick<WorkItem, 'title' | 'description' | 'type' | 'priority' | 'assigneeId' | 'parentWorkItemId' | 'startDate' | 'dueDate'>,
+  item: Pick<WorkItem, 'title' | 'description' | 'type' | 'priority' | 'category' | 'assigneeId' | 'parentWorkItemId' | 'startDate' | 'dueDate'>,
 ) =>
   apiFetch<WorkItem>(`/boards/${boardId}/workitems/${workItemId}`, {
     method: 'PUT',

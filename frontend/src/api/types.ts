@@ -57,6 +57,7 @@ export interface Board {
 
 export type WorkItemType = 'Task' | 'Phase'
 export type WorkItemPriority = 'Low' | 'Medium' | 'High' | 'Urgent'
+export type WorkItemCategory = 'Feature' | 'Bug' | 'Chore'
 
 export interface WorkItem {
   id: string
@@ -70,6 +71,7 @@ export interface WorkItem {
   description: string | null
   type: WorkItemType
   priority: WorkItemPriority
+  category: WorkItemCategory | null
   position: number
   assigneeId: string | null
   assigneeDisplayName: string | null

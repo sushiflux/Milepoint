@@ -325,7 +325,20 @@ export default function ProjectsPage() {
 
       <div className="min-w-0 flex-1" onContextMenu={handleAreaContextMenu}>
         <main className="space-y-6 p-6">
-        {projects === null ? (
+        {projects === null && error ? (
+          <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-red-300 py-16 text-center dark:border-red-900">
+            <p className="text-sm text-red-400">{error}</p>
+            <button
+              onClick={() => {
+                setError(null)
+                loadProjects().catch(() => setError('Projekte konnten nicht geladen werden.'))
+              }}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800"
+            >
+              Erneut versuchen
+            </button>
+          </div>
+        ) : projects === null ? (
           <p className="text-sm text-slate-500">Lade Projekte…</p>
         ) : projects.length === 0 && !showCreateForm ? (
           <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-brand-primary/30 py-16 text-center glass-panel">

@@ -24,6 +24,19 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
 
+  if (response.status === 401) {
+    // Abgelaufenes/ungültiges Token (z.B. nach Ablauf von JWT_EXPIRY_MINUTES) - ohne diesen
+    // Reset würde jede weitere Anfrage wieder 401 liefern und der Nutzer bliebe auf einer Seite
+    // hängen, die dauerhaft "lädt", statt zum Login geschickt zu werden.
+    localStorage.removeItem(TOKEN_STORAGE_KEY)
+    localStorage.removeItem('pm.username')
+    localStorage.removeItem('pm.displayName')
+    localStorage.removeItem('pm.roles')
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+  }
+
   if (!response.ok) {
     const text = await response.text().catch(() => '')
     throw new ApiError(response.status, text || response.statusText)

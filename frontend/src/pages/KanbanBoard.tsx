@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { createWorkItem, moveWorkItem, updateWorkItem } from '../api/workItems'
-import type { Board, BoardColumn, BoardColumnType, WorkItem } from '../api/types'
+import type { Board, BoardColumn, BoardColumnType, WorkItem, WorkItemCategory } from '../api/types'
 import type { UserSummary } from '../api/users'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
@@ -13,14 +13,33 @@ interface Props {
   onItemsChange: Dispatch<SetStateAction<WorkItem[]>>
 }
 
+interface PointerDragState {
+  item: WorkItem
+  startColumnId: string
+  currentX: number
+  currentY: number
+  cardWidth: number
+  cardHeight: number
+  offsetX: number
+  offsetY: number
+}
+
 export default function KanbanBoard({ board, items, users, onItemsChange }: Props) {
   const { token } = useAuth()
   const [newTitleByColumn, setNewTitleByColumn] = useState<Record<string, string>>({})
   const [openAddColumns, setOpenAddColumns] = useState<Set<string>>(new Set())
+  const [activeDrag, setActiveDrag] = useState<PointerDragState | null>(null)
+  const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null)
+
+  const pendingDragRef = useRef<{
+    item: WorkItem
+    columnId: string
+    startX: number
+    startY: number
+    rect: DOMRect
+  } | null>(null)
 
   // One project = one board, so joining/leaving the realtime group only needs to track board.id.
-  // Functional updates throughout (not the closed-over `items`), since this effect doesn't
-  // re-subscribe every time items changes - a stale closure would silently drop concurrent events.
   useEffect(() => {
     if (!token) return
 
@@ -56,10 +75,93 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [board.id, token])
 
+  const activeDragRef = useRef<PointerDragState | null>(null)
+  const dragOverColumnIdRef = useRef<string | null>(null)
+
+  // Keep refs in sync with state for stale-closure-free window event handlers
+  useEffect(() => {
+    activeDragRef.current = activeDrag
+  }, [activeDrag])
+
+  useEffect(() => {
+    dragOverColumnIdRef.current = dragOverColumnId
+  }, [dragOverColumnId])
+
+  // Global pointer listeners for smooth custom card dragging
+  useEffect(() => {
+    function handlePointerMove(e: PointerEvent) {
+      if (pendingDragRef.current && !activeDragRef.current) {
+        const p = pendingDragRef.current
+        const dist = Math.hypot(e.clientX - p.startX, e.clientY - p.startY)
+        if (dist > 3) {
+          const newDrag: PointerDragState = {
+            item: p.item,
+            startColumnId: p.columnId,
+            currentX: e.clientX,
+            currentY: e.clientY,
+            cardWidth: p.rect.width,
+            cardHeight: p.rect.height,
+            offsetX: p.startX - p.rect.left,
+            offsetY: p.startY - p.rect.top,
+          }
+          activeDragRef.current = newDrag
+          setActiveDrag(newDrag)
+        }
+      } else if (activeDragRef.current) {
+        const updated: PointerDragState = {
+          ...activeDragRef.current,
+          currentX: e.clientX,
+          currentY: e.clientY,
+        }
+        activeDragRef.current = updated
+        setActiveDrag(updated)
+
+        const elementBelow = document.elementFromPoint(e.clientX, e.clientY)
+        const columnEl = elementBelow?.closest('[data-column-id]')
+        if (columnEl) {
+          const colId = columnEl.getAttribute('data-column-id')
+          dragOverColumnIdRef.current = colId
+          setDragOverColumnId(colId)
+        } else {
+          dragOverColumnIdRef.current = null
+          setDragOverColumnId(null)
+        }
+      }
+    }
+
+    function handlePointerUp() {
+      const currentDrag = activeDragRef.current
+      const targetColumnId = dragOverColumnIdRef.current
+
+      if (currentDrag && targetColumnId && targetColumnId !== currentDrag.item.columnId) {
+        const targetColumn = board.columns.find((c) => c.id === targetColumnId)
+        if (targetColumn) {
+          handleMove(currentDrag.item, targetColumn)
+        }
+      }
+
+      pendingDragRef.current = null
+      activeDragRef.current = null
+      dragOverColumnIdRef.current = null
+      setActiveDrag(null)
+      setDragOverColumnId(null)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
+    }
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [board.columns])
+
   const itemsByColumn = useMemo(() => {
     const map = new Map<string, WorkItem[]>()
-    // A Phase is a Timeline grouping construct, not a piece of work someone moves through
-    // Todo/In Arbeit/Fertig - it never shows up as a Kanban card.
     for (const item of items) {
       if (item.type === 'Phase') continue
       const list = map.get(item.columnId) ?? []
@@ -77,7 +179,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     if (!title) return
 
     const created = await createWorkItem(board.id, column.id, title, 'Task', 'Medium')
-    onItemsChange((prev) => [...prev, created])
+    onItemsChange((prev) => (prev.some((i) => i.id === created.id) ? prev : [...prev, created]))
     setNewTitleByColumn((prev) => ({ ...prev, [column.id]: '' }))
   }
 
@@ -96,12 +198,30 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     onItemsChange((prev) => prev.map((i) => (i.id === item.id ? { ...i, columnId: targetColumn.id, position } : i)))
   }
 
+  function handleCardPointerDown(e: React.PointerEvent<HTMLLIElement>, item: WorkItem, columnId: string) {
+    if (e.button !== 0) return
+    const target = e.target as HTMLElement
+    if (target.closest('select') || target.closest('button') || target.closest('input')) {
+      return
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect()
+    pendingDragRef.current = {
+      item,
+      columnId,
+      startX: e.clientX,
+      startY: e.clientY,
+      rect,
+    }
+  }
+
   async function handleAssign(item: WorkItem, assigneeId: string) {
     const updated = await updateWorkItem(board.id, item.id, {
       title: item.title,
       description: item.description,
       type: item.type,
       priority: item.priority,
+      category: item.category,
       assigneeId: assigneeId || null,
       parentWorkItemId: item.parentWorkItemId,
       startDate: item.startDate,
@@ -109,6 +229,22 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     })
     onItemsChange((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
   }
+
+  async function handleCategoryChange(item: WorkItem, category: WorkItemCategory | '') {
+    const updated = await updateWorkItem(board.id, item.id, {
+      title: item.title,
+      description: item.description,
+      type: item.type,
+      priority: item.priority,
+      category: category || null,
+      assigneeId: item.assigneeId,
+      parentWorkItemId: item.parentWorkItemId,
+      startDate: item.startDate,
+      dueDate: item.dueDate,
+    })
+    onItemsChange((prev) => prev.map((i) => (i.id === item.id ? updated : i)))
+  }
+
   function getInitials(name?: string) {
     if (!name) return '?'
     const parts = name.split(' ').filter(Boolean)
@@ -122,6 +258,18 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     Medium: 'bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400',
     High: 'bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400',
     Critical: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
+  }
+
+  const CATEGORY_LABELS: Record<WorkItemCategory, string> = {
+    Feature: 'Feature',
+    Bug: 'Bug',
+    Chore: 'Chore',
+  }
+
+  const CATEGORY_COLORS: Record<WorkItemCategory, string> = {
+    Feature: 'bg-violet-50 text-violet-600 dark:bg-violet-500/10 dark:text-violet-400',
+    Bug: 'bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400',
+    Chore: 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400',
   }
 
   const COLUMN_BORDER_COLORS: Record<string, string> = {
@@ -138,11 +286,11 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   }
 
   function getColumnBorderColor(columnName: string, columnType: BoardColumnType) {
-    const lowerName = columnName.toLowerCase();
+    const lowerName = columnName.toLowerCase()
     for (const [key, color] of Object.entries(KNOWN_BORDER_COLORS)) {
-      if (lowerName.includes(key)) return color;
+      if (lowerName.includes(key)) return color
     }
-    return COLUMN_BORDER_COLORS[columnType] || 'bg-slate-400';
+    return COLUMN_BORDER_COLORS[columnType] || 'bg-slate-400'
   }
 
   return (
@@ -150,7 +298,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
       {board.columns.map((column) => (
         <section
           key={column.id}
-          className="glass-panel flex flex-col w-[340px] shrink-0 rounded-xl relative overflow-hidden"
+          data-column-id={column.id}
+          className={`glass-panel flex flex-col w-[340px] shrink-0 rounded-xl relative overflow-hidden transition-all duration-200 ${
+            dragOverColumnId === column.id ? 'ring-2 ring-brand-primary bg-brand-primary/10 border-brand-primary/50 shadow-lg shadow-brand-primary/10 scale-[1.01]' : ''
+          }`}
         >
           {/* Status Color Line */}
           <div className={`absolute top-0 left-0 w-full h-1.5 ${getColumnBorderColor(column.name, column.type)}`} />
@@ -208,72 +359,142 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
               </form>
             )}
 
-            {(itemsByColumn.get(column.id) ?? []).map((item) => (
-              <li
-                key={item.id}
-                className="group relative flex flex-col gap-3 rounded-xl border border-slate-200/50 bg-white/70 p-5 shadow-sm backdrop-blur-md transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-lg hover:shadow-brand-primary/10 dark:border-slate-700/50 dark:bg-slate-800/70"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-medium text-slate-800 dark:text-slate-100 leading-snug">{item.title}</h3>
-                  <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-500 dark:bg-slate-700/50 dark:text-slate-400">
-                    {item.referenceCode}
-                  </span>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${item.type === 'Phase' ? 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
-                    {item.type}
-                  </span>
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.Medium}`}>
-                    {item.priority}
-                  </span>
-                </div>
-                
-                <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-700/50">
-                  {/* Assignee Avatar Dropdown */}
-                  <div className="relative" title="Zuständigen ändern">
-                    <select
-                      value={item.assigneeId ?? ''}
-                      onChange={(e) => handleAssign(item, e.target.value)}
-                      className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
-                    >
-                      <option value="">Nicht zugewiesen</option>
-                      {users.map((u) => (
-                        <option key={u.id} value={u.id}>{u.displayName}</option>
-                      ))}
-                    </select>
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white transition-all group-hover:ring-brand-primary/30 dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-800 dark:group-hover:ring-brand-primary/30">
-                      {item.assigneeId ? getInitials(users.find(u => u.id === item.assigneeId)?.displayName) : (
-                        <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-50"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {/* Column Move Pill */}
-                  <div className="relative flex items-center" title="Spalte wechseln">
-                    <select
-                      value={column.id}
-                      onChange={(e) => {
-                        const target = board.columns.find((c) => c.id === e.target.value)
-                        if (target) handleMove(item, target)
-                      }}
-                      className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
-                    >
-                      {board.columns.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
-                    <div className="flex items-center gap-1 rounded-full bg-slate-50 px-3 py-1.5 text-[11px] font-semibold text-slate-500 transition-colors group-hover:bg-brand-primary/10 group-hover:text-brand-primary dark:bg-slate-800/50 dark:text-slate-400 dark:group-hover:bg-brand-primary/20 dark:group-hover:text-brand-primary-light">
-                      {column.name}
-                      <svg viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3"><path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" /></svg>
-                    </div>
-                  </div>
-                </div>
-              </li>
-            ))}
+            {(itemsByColumn.get(column.id) ?? []).map((item) => {
+              const isBeingDragged = activeDrag?.item.id === item.id
+              return (
+                <li
+                  key={item.id}
+                  onPointerDown={(e) => handleCardPointerDown(e, item, column.id)}
+                  className={`group relative flex flex-col gap-3 rounded-xl border select-none touch-none transition-all duration-200 ${
+                    isBeingDragged
+                      ? 'border-2 border-dashed border-brand-primary/50 bg-brand-primary/5 dark:border-brand-primary/50 dark:bg-brand-primary/10 opacity-60 shadow-inner scale-[0.98] min-h-[120px]'
+                      : 'border-slate-200/50 bg-white/70 p-5 shadow-sm backdrop-blur-md cursor-grab active:cursor-grabbing hover:-translate-y-1 hover:shadow-lg hover:shadow-brand-primary/10 dark:border-slate-700/50 dark:bg-slate-800/70'
+                  }`}
+                >
+                  {!isBeingDragged && (
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="font-medium text-slate-800 dark:text-slate-100 leading-snug select-none">{item.title}</h3>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-slate-400 opacity-60 group-hover:opacity-100 dark:text-slate-500 transition-opacity" title="Ziehen zum Verschieben">
+                            <path d="M7 4a1 1 0 11-2 0 1 1 0 012 0zM7 10a1 1 0 11-2 0 1 1 0 012 0zM7 16a1 1 0 11-2 0 1 1 0 012 0zM13 4a1 1 0 11-2 0 1 1 0 012 0zM13 10a1 1 0 11-2 0 1 1 0 012 0zM13 16a1 1 0 11-2 0 1 1 0 012 0z" />
+                          </svg>
+                          <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-500 dark:bg-slate-700/50 dark:text-slate-400">
+                            {item.referenceCode}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${item.type === 'Phase' ? 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
+                          {item.type}
+                        </span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.Medium}`}>
+                          {item.priority}
+                        </span>
+                        <div className="relative" title="Typ ändern">
+                          <select
+                            value={item.category ?? ''}
+                            onChange={(e) => handleCategoryChange(item, e.target.value as WorkItemCategory | '')}
+                            className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
+                          >
+                            <option value="">Kein Typ</option>
+                            <option value="Feature">Feature</option>
+                            <option value="Bug">Bug</option>
+                            <option value="Chore">Chore</option>
+                          </select>
+                          <span
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
+                              item.category ? CATEGORY_COLORS[item.category] : 'bg-slate-50 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500'
+                            }`}
+                          >
+                            {item.category ? CATEGORY_LABELS[item.category] : '+ Typ'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-700/50">
+                        {/* Assignee Avatar Dropdown */}
+                        <div className="relative" title="Zuständigen ändern">
+                          <select
+                            value={item.assigneeId ?? ''}
+                            onChange={(e) => handleAssign(item, e.target.value)}
+                            className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
+                          >
+                            <option value="">Nicht zugewiesen</option>
+                            {users.map((u) => (
+                              <option key={u.id} value={u.id}>{u.displayName}</option>
+                            ))}
+                          </select>
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white transition-all group-hover:ring-brand-primary/30 dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-800 dark:group-hover:ring-brand-primary/30">
+                            {item.assigneeId ? getInitials(users.find(u => u.id === item.assigneeId)?.displayName) : (
+                              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-50"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </li>
+              )
+            })}
           </div>
         </section>
       ))}
+
+      {/* Floating Pointer Drag Overlay */}
+      {activeDrag && (
+        <div
+          style={{
+            position: 'fixed',
+            left: activeDrag.currentX - activeDrag.offsetX,
+            top: activeDrag.currentY - activeDrag.offsetY,
+            width: activeDrag.cardWidth,
+            pointerEvents: 'none',
+            zIndex: 99999,
+            transform: 'rotate(2.5deg) scale(1.02)',
+            transformOrigin: 'top left',
+          }}
+          className="flex flex-col gap-3 rounded-xl border-2 border-brand-primary bg-white p-5 shadow-2xl dark:border-brand-primary-light dark:bg-slate-800 select-none"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="font-medium text-slate-800 dark:text-slate-100 leading-snug">{activeDrag.item.title}</h3>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-brand-primary">
+                <path d="M7 4a1 1 0 11-2 0 1 1 0 012 0zM7 10a1 1 0 11-2 0 1 1 0 012 0zM7 16a1 1 0 11-2 0 1 1 0 012 0zM13 4a1 1 0 11-2 0 1 1 0 012 0zM13 10a1 1 0 11-2 0 1 1 0 012 0zM13 16a1 1 0 11-2 0 1 1 0 012 0z" />
+              </svg>
+              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-semibold text-slate-500 dark:bg-slate-700/50 dark:text-slate-400">
+                {activeDrag.item.referenceCode}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md ${activeDrag.item.type === 'Phase' ? 'bg-purple-50 text-purple-600 dark:bg-purple-500/10 dark:text-purple-400' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
+              {activeDrag.item.type}
+            </span>
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${PRIORITY_COLORS[activeDrag.item.priority] || PRIORITY_COLORS.Medium}`}>
+              {activeDrag.item.priority}
+            </span>
+            {activeDrag.item.category && (
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${CATEGORY_COLORS[activeDrag.item.category]}`}>
+                {CATEGORY_LABELS[activeDrag.item.category]}
+              </span>
+            )}
+          </div>
+
+          <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-700/50">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white dark:bg-slate-700 dark:text-slate-300 dark:ring-slate-800">
+              {activeDrag.item.assigneeId ? getInitials(users.find(u => u.id === activeDrag.item.assigneeId)?.displayName) : (
+                <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 opacity-50"><path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" /></svg>
+              )}
+            </div>
+            <div className="flex items-center gap-1 rounded-full bg-brand-primary/10 px-3 py-1.5 text-[11px] font-semibold text-brand-primary dark:bg-brand-primary/20 dark:text-brand-primary-light">
+              {board.columns.find(c => c.id === (dragOverColumnId || activeDrag.item.columnId))?.name}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

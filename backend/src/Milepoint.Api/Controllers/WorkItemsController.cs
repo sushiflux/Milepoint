@@ -78,6 +78,7 @@ public class WorkItemsController : ControllerBase
             Description = request.Description,
             Type = request.Type,
             Priority = request.Priority,
+            Category = request.Category,
             Position = position,
             ReferencePrefix = prefix,
             ReferenceNumber = number,
@@ -119,6 +120,7 @@ public class WorkItemsController : ControllerBase
         item.Description = request.Description;
         item.Type = request.Type;
         item.Priority = request.Priority;
+        item.Category = request.Category;
         item.AssigneeId = request.AssigneeId;
         item.ParentWorkItemId = request.ParentWorkItemId;
         item.StartDate = request.StartDate;

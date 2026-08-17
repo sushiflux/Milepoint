@@ -488,6 +488,9 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<int?>("Category")
+                        .HasColumnType("integer");
+
                     b.Property<Guid>("ColumnId")
                         .HasColumnType("uuid");
 

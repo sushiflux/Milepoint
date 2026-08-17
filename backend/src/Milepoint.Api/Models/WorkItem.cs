@@ -21,6 +21,7 @@ public class WorkItem
     public string? Description { get; set; }
     public WorkItemType Type { get; set; } = WorkItemType.Task;
     public WorkItemPriority Priority { get; set; } = WorkItemPriority.Medium;
+    public WorkItemCategory? Category { get; set; }
     public int Position { get; set; }
 
     // Assigned once at creation (see WorkItemReferenceCode) and never recomputed, so a ticket's
