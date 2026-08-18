@@ -252,9 +252,15 @@ type Row = TaskRow | MilestoneRow
 
 export default function TimelineView({ projectId, boards, workItems, milestones, onWorkItemsChange, onMilestonesChange }: Props) {
   const [newTitle, setNewTitle] = useState('')
+  const [newDescription, setNewDescription] = useState('')
   const [newType, setNewType] = useState<WorkItemType>('Task')
   const [newPriority, setNewPriority] = useState<WorkItemPriority>('Medium')
   const [newParentId, setNewParentId] = useState('')
+  // True when the parent was already implied by how the dialog was opened (e.g. the "+" on a
+  // specific phase) - the dropdown is redundant/confusing there, so it's hidden in favor of a
+  // plain confirmation line. Only the generic "Aufgabe anlegen" toolbar button (no such context)
+  // leaves it false and shows the picker.
+  const [parentLocked, setParentLocked] = useState(false)
   const [newStart, setNewStart] = useState('')
   const [newEnd, setNewEnd] = useState('')
   const [milestoneName, setMilestoneName] = useState('')
@@ -265,7 +271,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const [showMilestoneForm, setShowMilestoneForm] = useState(false)
   const [drag, setDrag] = useState<DragState | null>(null)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null)
   const [depMenuRow, setDepMenuRow] = useState<string | null>(null)
   const [depMenuSelection, setDepMenuSelection] = useState('')
   const depMenuRef = useRef<HTMLDivElement>(null)
@@ -465,8 +470,19 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     setVisibleDayCount(null)
   }
 
+  // A subtask may never start before its parent is done - the parent's due date (falling back
+  // to its start date if it has no due date, and to nothing if it has neither) is the earliest
+  // allowed start for anything nested under it.
+  function minStartForParent(parentId: string): string {
+    const parent = workItems.find((w) => w.id === parentId)
+    const bound = parent?.dueDate ?? parent?.startDate
+    return bound ? toDateInputValue(new Date(bound)) : ''
+  }
+
   function openChildForm(parentId: string) {
     setNewParentId(parentId)
+    setParentLocked(true)
+    setNewStart(minStartForParent(parentId))
     setShowTaskForm(true)
   }
 
@@ -567,22 +583,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workItems, milestones, collapsed, filterStatuses, filterPriorities, filterAssignees, searchQuery])
 
-  const rowIndexByTaskId = useMemo(() => {
-    const map = new Map<string, number>()
-    rows.forEach((r, i) => {
-      if (r.kind === 'task') map.set(r.item.id, i)
-    })
-    return map
-  }, [rows])
-
-  const rowIndexByMilestoneId = useMemo(() => {
-    const map = new Map<string, number>()
-    rows.forEach((r, i) => {
-      if (r.kind === 'milestone') map.set(r.milestone.id, i)
-    })
-    return map
-  }, [rows])
-
   function effectiveRange(item: WorkItem) {
     const base = item.startDate ? startOfDay(new Date(item.startDate)) : item.dueDate ? startOfDay(new Date(item.dueDate)) : null
     const end = item.dueDate ? startOfDay(new Date(item.dueDate)) : item.startDate ? startOfDay(new Date(item.startDate)) : null
@@ -622,131 +622,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   function rangeOf(item: WorkItem) {
     return item.type === 'Phase' ? phaseRange(item) : effectiveRange(item)
   }
-
-  const connectors = useMemo(() => {
-    const paths: { key: string; d: string; blockingId: string; dependentId: string; isParentChild?: boolean }[] = []
-
-    function orthogonal(x1: number, y1: number, x2: number, y2: number) {
-      const offset = 12
-      if (x2 >= x1 + offset) {
-        const midX = x1 + offset
-        return `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
-      } else {
-        const midY = (y1 + y2) / 2
-        const dropX = x1 + offset
-        const backX = x2 - offset
-        return `M ${x1} ${y1} L ${dropX} ${y1} L ${dropX} ${midY} L ${backX} ${midY} L ${backX} ${y2} L ${x2} ${y2}`
-      }
-    }
-
-    for (const row of rows) {
-      if (row.kind !== 'task') continue
-      const myIndex = rowIndexByTaskId.get(row.item.id)
-      if (myIndex === undefined) continue
-      const myRange = rangeOf(row.item)
-      if (!myRange) continue
-
-      const x1Blocker = (diffDays(myRange.finish, rangeStart) + 1) * dayWidth
-      const y1Blocker = myIndex * ROW_HEIGHT + ROW_HEIGHT / 2
-
-      for (const dependentId of row.item.blockingWorkItemIds) {
-        const dependentIndex = rowIndexByTaskId.get(dependentId)
-        if (dependentIndex === undefined) continue
-        const dependentItem = workItemById.get(dependentId)
-        if (!dependentItem) continue
-        const depRange = rangeOf(dependentItem)
-        if (!depRange) continue
-
-        const x2Dep = diffDays(depRange.start, rangeStart) * dayWidth
-        const y2Dep = dependentIndex * ROW_HEIGHT + ROW_HEIGHT / 2
-        paths.push({ key: `${row.item.id}-${dependentId}`, d: orthogonal(x1Blocker, y1Blocker, x2Dep, y2Dep), blockingId: row.item.id, dependentId })
-      }
-
-      if (row.item.parentWorkItemId) {
-        const taskSiblings = itemsByParent.get(row.item.parentWorkItemId) || []
-        const milestoneSiblings = milestonesByParent.get(row.item.parentWorkItemId) || []
-        const siblings = [...taskSiblings, ...milestoneSiblings]
-        
-        const sortedSiblings = siblings.filter(s => !('type' in s) || s.type !== 'Phase').sort((a, b) => {
-          const startA = ('date' in a) ? new Date(a.date).getTime() : (rangeOf(a)?.start?.getTime() || 0);
-          const startB = ('date' in b) ? new Date(b.date).getTime() : (rangeOf(b)?.start?.getTime() || 0);
-          return startA - startB;
-        });
-        
-        const myIndexInSiblings = sortedSiblings.findIndex(s => s.id === row.item.id);
-        if (myIndexInSiblings > 0) {
-          const prevSibling = sortedSiblings[myIndexInSiblings - 1];
-          const prevIndex = rowIndexByTaskId.get(prevSibling.id) ?? rowIndexByMilestoneId.get(prevSibling.id);
-          const prevRange = ('date' in prevSibling) ? { start: startOfDay(new Date(prevSibling.date)), finish: startOfDay(new Date(prevSibling.date)) } : rangeOf(prevSibling);
-          if (prevIndex !== undefined && prevRange) {
-             const x1 = ('date' in prevSibling) ? diffDays(prevRange.finish, rangeStart) * dayWidth + dayWidth / 2 : (diffDays(prevRange.finish, rangeStart) + 1) * dayWidth;
-             const y1 = prevIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
-             const x2Dep = diffDays(myRange.start, rangeStart) * dayWidth;
-             const y2Dep = myIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
-             paths.push({ key: `sibling-${prevSibling.id}-${row.item.id}`, d: orthogonal(x1, y1, x2Dep, y2Dep), blockingId: prevSibling.id, dependentId: row.item.id, isParentChild: true })
-          }
-        }
-      }
-
-      for (const milestoneId of row.item.blockedByMilestoneIds) {
-        const milestoneIndex = rowIndexByMilestoneId.get(milestoneId)
-        const milestone = milestoneById.get(milestoneId)
-        if (milestoneIndex === undefined || !milestone) continue
-
-        const x1 = diffDays(startOfDay(new Date(milestone.date)), rangeStart) * dayWidth + dayWidth / 2
-        const y1 = milestoneIndex * ROW_HEIGHT + ROW_HEIGHT / 2
-        const dependentId = `milestone-${milestoneId}`
-        const x2Dep = diffDays(myRange.start, rangeStart) * dayWidth
-        const y2Dep = myIndex * ROW_HEIGHT + ROW_HEIGHT / 2
-        paths.push({ key: `${dependentId}-${row.item.id}`, d: orthogonal(x1, y1, x2Dep, y2Dep), blockingId: dependentId, dependentId: row.item.id })
-      }
-    }
-
-    for (const m of milestones) {
-      const milestoneIndex = rowIndexByMilestoneId.get(m.id)
-      if (milestoneIndex === undefined) continue
-      const x2Dep = diffDays(startOfDay(new Date(m.date)), rangeStart) * dayWidth + dayWidth / 2
-      const y2Dep = milestoneIndex * ROW_HEIGHT + ROW_HEIGHT / 2
-      const dependentId = `milestone-${m.id}`
-
-      if (m.parentWorkItemId) {
-        const taskSiblings = itemsByParent.get(m.parentWorkItemId) || []
-        const milestoneSiblings = milestonesByParent.get(m.parentWorkItemId) || []
-        const siblings = [...taskSiblings, ...milestoneSiblings]
-        
-        const sortedSiblings = siblings.filter(s => !('type' in s) || s.type !== 'Phase').sort((a, b) => {
-          const startA = ('date' in a) ? new Date(a.date).getTime() : (rangeOf(a)?.start?.getTime() || 0);
-          const startB = ('date' in b) ? new Date(b.date).getTime() : (rangeOf(b)?.start?.getTime() || 0);
-          return startA - startB;
-        });
-        
-        const myIndexInSiblings = sortedSiblings.findIndex(s => s.id === m.id);
-        if (myIndexInSiblings > 0) {
-          const prevSibling = sortedSiblings[myIndexInSiblings - 1];
-          const prevIndex = rowIndexByTaskId.get(prevSibling.id) ?? rowIndexByMilestoneId.get(prevSibling.id);
-          const prevRange = ('date' in prevSibling) ? { start: startOfDay(new Date(prevSibling.date)), finish: startOfDay(new Date(prevSibling.date)) } : rangeOf(prevSibling);
-          if (prevIndex !== undefined && prevRange) {
-             const x1 = ('date' in prevSibling) ? diffDays(prevRange.finish, rangeStart) * dayWidth + dayWidth / 2 : (diffDays(prevRange.finish, rangeStart) + 1) * dayWidth;
-             const y1 = prevIndex * ROW_HEIGHT + ROW_HEIGHT / 2;
-             paths.push({ key: `sibling-${prevSibling.id}-${dependentId}`, d: orthogonal(x1, y1, x2Dep, y2Dep), blockingId: prevSibling.id, dependentId, isParentChild: true })
-          }
-        }
-      }
-
-      for (const blockingId of m.blockedByWorkItemIds) {
-        const blockingIndex = rowIndexByTaskId.get(blockingId)
-        const blockingItem = workItemById.get(blockingId)
-        if (blockingIndex === undefined || !blockingItem) continue
-        const blockRange = rangeOf(blockingItem)
-        if (!blockRange) continue
-
-        const x1 = (diffDays(blockRange.finish, rangeStart) + 1) * dayWidth
-        const y1 = blockingIndex * ROW_HEIGHT + ROW_HEIGHT / 2
-        paths.push({ key: `${blockingId}-${dependentId}`, d: orthogonal(x1, y1, x2Dep, y2Dep), blockingId, dependentId })
-      }
-    }
-    return paths
-  }, [rows, rowIndexByTaskId, rowIndexByMilestoneId, workItemById, milestoneById, milestones, itemsByParent, milestonesByParent, rangeStart, dayWidth])
 
   async function commitDateChange(item: WorkItem, start: Date, finish: Date) {
     const shifts = computeCascadeShifts(item.id, finish, workItems)
@@ -828,8 +703,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       return
     }
 
+    if (newType === 'Task' && newParentId) {
+      const min = minStartForParent(newParentId)
+      if (min && newStart < min) {
+        setError('Das Startdatum einer Unteraufgabe darf nicht vor dem Fälligkeitsdatum der übergeordneten Aufgabe liegen.')
+        return
+      }
+    }
+
     // A Phase has no dates of its own - its bar is rolled up live from its subtasks (see phaseRange).
-    const created = await createWorkItem(target.board.id, target.column.id, title, newType, newPriority, undefined, {
+    const created = await createWorkItem(target.board.id, target.column.id, title, newType, newPriority, newDescription.trim() || undefined, {
       parentWorkItemId: newParentId || undefined,
       startDate: newType === 'Phase' ? undefined : new Date(newStart).toISOString(),
       dueDate: newType === 'Phase' ? undefined : newEnd ? new Date(newEnd).toISOString() : undefined,
@@ -846,9 +729,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     }
 
     setNewTitle('')
+    setNewDescription('')
     setNewType('Task')
     setNewPriority('Medium')
     setNewParentId('')
+    setParentLocked(false)
     setNewStart('')
     setNewEnd('')
     setShowTaskForm(false)
@@ -1039,6 +924,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           onClick: () => {
             setNewType('Phase')
             setNewParentId('')
+            setParentLocked(false)
             setPendingBlockerLink(null)
             setShowTaskForm(true)
           },
@@ -1048,6 +934,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           onClick: () => {
             setNewType('Task')
             setNewParentId('')
+            setParentLocked(false)
             setNewStart(date ? toDateInputValue(date) : '')
             setNewEnd(endDate ? toDateInputValue(endDate) : '')
             setPendingBlockerLink(null)
@@ -1083,6 +970,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         onClick: () => {
           setNewType('Task')
           setNewParentId('')
+          setParentLocked(false)
           setPendingBlockerLink(item.id)
           setShowTaskForm(true)
         },
@@ -1259,7 +1147,27 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             {!showTaskForm && (
               <button
                 onClick={() => {
+                  setNewType('Phase')
                   setNewParentId('')
+                  setParentLocked(false)
+                  setShowTaskForm(true)
+                }}
+                className="flex items-center gap-2 rounded-lg border border-orange-300/80 bg-orange-50/80 px-3.5 py-2 text-xs font-semibold text-orange-700 transition-all hover:bg-orange-100 dark:border-orange-800/60 dark:bg-orange-950/40 dark:text-orange-300 dark:hover:bg-orange-900/60"
+              >
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400">
+                  <path d="M3 5.5h8M3 10h13M3 14.5h6" />
+                </svg>
+                <span>Phase anlegen</span>
+              </button>
+            )}
+            {/* Eine Aufgabe gehört immer zu einer Phase - ohne mindestens eine Phase gibt es
+                noch nichts, dem sie zugeordnet werden könnte. */}
+            {!showTaskForm && workItems.some((w) => w.type === 'Phase') && (
+              <button
+                onClick={() => {
+                  setNewType('Task')
+                  setNewParentId('')
+                  setParentLocked(false)
                   setShowTaskForm(true)
                 }}
                 className="flex items-center gap-2 rounded-lg bg-brand-accent px-3.5 py-2 text-xs font-semibold text-white shadow-md shadow-brand-accent/20 transition-all hover:bg-brand-accent-light hover:-translate-y-0.5"
@@ -1616,11 +1524,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-xs font-bold text-slate-500 dark:text-slate-400">
                   {item.referenceCode}
                 </span>
-                <span 
-                  className="flex flex-1 items-center gap-1.5 truncate px-2 text-sm font-bold text-slate-900 dark:text-slate-100" 
+                <span
+                  className="flex flex-1 items-center gap-1.5 truncate px-2 text-sm font-bold text-slate-900 dark:text-slate-100"
                   style={{ paddingLeft: depth * 16 }}
-                  onMouseEnter={() => setHoveredTaskId(item.id)}
-                  onMouseLeave={() => setHoveredTaskId(null)}
                 >
                   {hasChildren && (
                     <button
@@ -1825,46 +1731,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 </div>
               )}
 
-              <svg
-                className="pointer-events-none absolute z-20 overflow-visible"
-                style={{ left: 0, top: 0, width: chartWidth, height: rows.length * ROW_HEIGHT }}
-              >
-                <defs>
-                  <marker id="arrow-normal" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" className="text-slate-500 dark:text-slate-400" />
-                  </marker>
-                  <marker id="arrow-hovered" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                    <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" className="text-indigo-500" />
-                  </marker>
-                </defs>
-                {connectors.map((c) => {
-                  const isHovered = hoveredTaskId === c.blockingId || hoveredTaskId === c.dependentId;
-                  if (c.isParentChild) {
-                    return (
-                      <path 
-                        key={c.key} 
-                        d={c.d} 
-                        stroke="currentColor"
-                        strokeWidth={1.5} 
-                        strokeDasharray="5 5"
-                        className={`transition-all duration-300 ${isHovered ? 'text-indigo-400 drop-shadow-md' : 'text-slate-400 dark:text-slate-500 opacity-80'}`}
-                        fill="none" 
-                      />
-                    )
-                  }
-                  return (
-                    <path 
-                      key={c.key} 
-                      d={c.d} 
-                      stroke="currentColor"
-                      strokeWidth={isHovered ? 2.5 : 1.5} 
-                      className={`transition-all duration-300 ${isHovered ? 'text-indigo-500 drop-shadow-md' : 'text-slate-500 dark:text-slate-400'}`}
-                      fill="none" 
-                      markerEnd={isHovered ? "url(#arrow-hovered)" : "url(#arrow-normal)"}
-                    />
-                  )
-                })}
-              </svg>
+
 
               {rows.length === 0 && (
                 <div
@@ -1975,6 +1842,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm"
           onClick={() => {
             setShowTaskForm(false)
+            setParentLocked(false)
             setShowMilestoneForm(false)
           }}
         >
@@ -1986,12 +1854,26 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             >
               <div className="flex justify-between items-center mb-1">
                 <h3 className="text-sm font-semibold">Neue Aufgabe / Phase</h3>
-                <button type="button" onClick={() => setShowTaskForm(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">✕</button>
+                <button type="button" onClick={() => { setShowTaskForm(false); setParentLocked(false) }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">✕</button>
               </div>
 
               <div>
                 <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Titel</label>
                 <input autoFocus required value={newTitle} onChange={(e) => setNewTitle(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setShowTaskForm(false)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Notizen</label>
+                <textarea
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setShowTaskForm(false)
+                  }}
+                  placeholder="Notizen (optional)..."
+                  rows={2}
+                  className="w-full resize-none rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
+                />
               </div>
               <div className="flex gap-2">
                 <div className="flex-1">
@@ -2001,25 +1883,51 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     <option value="Phase">{TYPE_LABELS.Phase}</option>
                   </select>
                 </div>
-                <div className="flex-1">
-                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Priorität</label>
-                  <select value={newPriority} onChange={(e) => setNewPriority(e.target.value as WorkItemPriority)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
-                    {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
+                {newType === 'Task' && (
+                  <div className="flex-1">
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Priorität</label>
+                    <select value={newPriority} onChange={(e) => setNewPriority(e.target.value as WorkItemPriority)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
+                      {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+              {parentLocked && newParentId ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Wird zu <span className="font-semibold text-slate-700 dark:text-slate-200">{workItems.find((w) => w.id === newParentId)?.title}</span> hinzugefügt.
+                </p>
+              ) : (
+                <div>
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Übergeordnet</label>
+                  <select
+                    value={newParentId}
+                    onChange={(e) => {
+                      const parentId = e.target.value
+                      setNewParentId(parentId)
+                      if (parentId) {
+                        const min = minStartForParent(parentId)
+                        if (min && (!newStart || newStart < min)) setNewStart(min)
+                      }
+                    }}
+                    className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
+                  >
+                    <option value="">Keine übergeordnete Aufgabe</option>
+                    {workItems.map((w) => <option key={w.id} value={w.id}>{w.referenceCode} · {w.title}</option>)}
                   </select>
                 </div>
-              </div>
-              <div>
-                <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Übergeordnet</label>
-                <select value={newParentId} onChange={(e) => setNewParentId(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
-                  <option value="">Keine übergeordnete Aufgabe</option>
-                  {workItems.map((w) => <option key={w.id} value={w.id}>{w.referenceCode} · {w.title}</option>)}
-                </select>
-              </div>
+              )}
               {newType === 'Task' ? (
                 <div className="flex gap-2">
                   <div className="flex-1">
                     <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Anfang</label>
-                    <input required type="date" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
+                    <input
+                      required
+                      type="date"
+                      min={(newParentId && minStartForParent(newParentId)) || undefined}
+                      value={newStart}
+                      onChange={(e) => setNewStart(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
+                    />
                   </div>
                   <div className="flex-1">
                     <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Ende (optional)</label>
@@ -2030,7 +1938,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <p className="text-xs text-slate-500 dark:text-slate-400">Der Zeitraum einer Phase ergibt sich automatisch aus ihren Unteraufgaben.</p>
               )}
               <div className="flex justify-end gap-2 pt-2">
-                <button type="button" onClick={() => setShowTaskForm(false)} className="rounded-lg border border-slate-300 px-4 py-2 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800">Abbrechen</button>
+                <button type="button" onClick={() => { setShowTaskForm(false); setParentLocked(false) }} className="rounded-lg border border-slate-300 px-4 py-2 text-xs transition-colors hover:bg-slate-100 dark:border-slate-600 dark:hover:bg-slate-800">Abbrechen</button>
                 <button type="submit" className="rounded-lg bg-brand-accent px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-accent-light transition-all">Anlegen</button>
               </div>
             </form>

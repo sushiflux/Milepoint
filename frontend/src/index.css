@@ -33,6 +33,13 @@
     color-scheme: dark;
   }
 
+  option {
+    @apply bg-white text-slate-900;
+  }
+  .dark option {
+    @apply bg-slate-800 text-slate-100;
+  }
+
   /* Custom scrollbar for modern feel */
   ::-webkit-scrollbar {
     width: 6px;
