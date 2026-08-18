@@ -36,6 +36,9 @@ const COL_STATUS = 104
 const COL_PRIORITY = 80
 const LABEL_WIDTH = 556
 const CONNECTOR_DOT_RADIUS = 4
+// Small blank gap left between a subtask's bar and the line continuing on to the next subtask,
+// so the connector doesn't look glued directly to the bar it just passed through.
+const CONNECTOR_ROW_GAP = 4
 // One color per Phase, cycled through when there are more phases than colors.
 const CONNECTOR_COLOR_CLASSES = [
   'text-amber-500 dark:text-amber-400',
@@ -634,6 +637,25 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return map
   }, [rows])
 
+  // How many days the currently-dragged item's own finish date has moved so far, live - 0 while
+  // idle, while a resize-start is in progress (it doesn't touch the finish date), or for anything
+  // outside the drag's own subtree. Recurses up the parent chain so a grandchild inherits the
+  // same live delta its parent would get from the drag.
+  function liveFinishDelta(item: WorkItem): number {
+    if (!drag) return 0
+    if (item.id === drag.itemId) {
+      if (drag.mode === 'resize-start' || !item.startDate || !item.dueDate) return 0
+      const base = startOfDay(new Date(item.startDate))
+      const end = startOfDay(new Date(item.dueDate))
+      let finish = addDays(end, drag.deltaDays)
+      if (finish < base) finish = base
+      return diffDays(finish, end)
+    }
+    if (!item.parentWorkItemId) return 0
+    const parent = workItemById.get(item.parentWorkItemId)
+    return parent ? liveFinishDelta(parent) : 0
+  }
+
   function effectiveRange(item: WorkItem) {
     const base = item.startDate ? startOfDay(new Date(item.startDate)) : item.dueDate ? startOfDay(new Date(item.dueDate)) : null
     const end = item.dueDate ? startOfDay(new Date(item.dueDate)) : item.startDate ? startOfDay(new Date(item.startDate)) : null
@@ -652,6 +674,15 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       } else {
         finish = addDays(end, drag.deltaDays)
         if (finish < start) finish = start
+      }
+    } else if (drag && item.parentWorkItemId) {
+      // Live preview for subtasks while a parent is being dragged - keeps the same day-gap they
+      // already have, moving with the parent's bar in real time instead of only jumping into
+      // place after the drop (see commitDateChange for the equivalent post-drop persistence).
+      const delta = liveFinishDelta(item)
+      if (delta !== 0) {
+        start = addDays(base, delta)
+        finish = addDays(end, delta)
       }
     }
 
@@ -708,7 +739,12 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const parentChildConnectors = useMemo(() => {
     const barTopOffset = (ROW_HEIGHT - 20) / 2
     const dotOffset = 14
-    const result: { key: string; d: string; colorClass: string; dots: { key: string; cx: number; cy: number }[] }[] = []
+    const result: {
+      key: string
+      colorClass: string
+      segments: { key: string; d: string; dashed: boolean }[]
+      dots: { key: string; cx: number; cy: number }[]
+    }[] = []
 
     for (const row of rows) {
       if (row.kind !== 'task' || row.item.type !== 'Task') continue
@@ -743,22 +779,36 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         })
         .filter((p): p is { key: string; dotX: number; dotY: number } => p !== null)
 
-      let d = `M ${parentRight} ${parentTopY}`
+      const segments: { key: string; d: string; dashed: boolean }[] = []
       const dots: { key: string; cx: number; cy: number }[] = []
+      let cursorX = parentRight
       let cursorY = parentTopY
+      let segIdx = 0
 
-      points.forEach((p) => {
+      points.forEach((p, idx) => {
         // Right-angled instead of a direct diagonal, with the kink kept late: run horizontal
         // first, at whatever height the line is already at, all the way over to the child's own
         // column, and only then drop straight down into the dot - so the bend sits right next to
         // the subtask, not right after leaving the parent.
-        d += ` L ${p.dotX} ${cursorY} L ${p.dotX} ${p.dotY}`
-        cursorY = p.dotY
+        segments.push({ key: `s${segIdx++}`, d: `M ${cursorX} ${cursorY} L ${p.dotX} ${cursorY} L ${p.dotX} ${p.dotY}`, dashed: false })
         dots.push({ key: p.key, cx: p.dotX, cy: p.dotY })
+        cursorX = p.dotX
+        cursorY = p.dotY
+
+        if (idx < points.length - 1) {
+          // Before heading to the next subtask, the line always runs on through the rest of THIS
+          // subtask's own bar first - dashed, since it's crossing a bar rather than connecting to
+          // it at that point (the connection is the dot up at the top edge, already placed above).
+          const barBottom = p.dotY + 20
+          segments.push({ key: `s${segIdx++}`, d: `M ${p.dotX} ${p.dotY} L ${p.dotX} ${barBottom}`, dashed: true })
+          // Leave a small blank gap here rather than continuing the path all the way to
+          // barBottom, so the line clearly detaches from this bar before moving to the next one.
+          cursorY = barBottom + CONNECTOR_ROW_GAP
+        }
       })
 
       if (dots.length > 0) {
-        result.push({ key: `pc-${row.item.id}`, d, colorClass, dots })
+        result.push({ key: `pc-${row.item.id}`, colorClass, segments, dots })
       }
     }
 
@@ -1918,7 +1968,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 >
                   {parentChildConnectors.map((connector) => (
                     <g key={connector.key} className={connector.colorClass}>
-                      <path d={connector.d} fill="none" stroke="currentColor" strokeWidth={1.5} />
+                      {connector.segments.map((segment) => (
+                        <path
+                          key={segment.key}
+                          d={segment.d}
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth={1.5}
+                          strokeDasharray={segment.dashed ? '4 3' : undefined}
+                        />
+                      ))}
                       {connector.dots.map((dot) => (
                         <circle key={dot.key} cx={dot.cx} cy={dot.cy} r={CONNECTOR_DOT_RADIUS} fill="currentColor" />
                       ))}
