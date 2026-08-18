@@ -336,6 +336,20 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return map
   }, [workItems])
 
+  // Candidates for "übergeordnete Aufgabe"/"übergeordnetes Element" pickers: items that are
+  // actually shown in the Timeline (a Kanban-only card with no dates never gets a row here, so
+  // picking it as a parent would be picking something invisible) and, for Tasks, not already
+  // Done - a long-finished task isn't a meaningful thing to nest new work under. Phases are
+  // exempt from the Done check since their own column status isn't a meaningful completion
+  // signal (their bar/progress is rolled up from children, not moved between columns directly).
+  const eligibleParentItems = useMemo(
+    () =>
+      workItems.filter(
+        (w) => (w.type === 'Phase' || w.startDate || w.dueDate) && (w.type === 'Phase' || w.columnType !== 'Done'),
+      ),
+    [workItems],
+  )
+
   const milestonesByParent = useMemo(() => {
     const map = new Map<string | null, Milestone[]>()
     for (const m of milestones) {
@@ -480,6 +494,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   }
 
   function openChildForm(parentId: string) {
+    setNewType('Task')
     setNewParentId(parentId)
     setParentLocked(true)
     setNewStart(minStartForParent(parentId))
@@ -1853,7 +1868,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               className="glass w-full max-w-sm space-y-4 rounded-xl p-5"
             >
               <div className="flex justify-between items-center mb-1">
-                <h3 className="text-sm font-semibold">Neue Aufgabe / Phase</h3>
+                <h3 className="text-sm font-semibold">{newType === 'Phase' ? 'Neue Phase' : 'Neue Aufgabe'}</h3>
                 <button type="button" onClick={() => { setShowTaskForm(false); setParentLocked(false) }} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">✕</button>
               </div>
 
@@ -1875,23 +1890,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   className="w-full resize-none rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                 />
               </div>
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Typ</label>
-                  <select value={newType} onChange={(e) => setNewType(e.target.value as WorkItemType)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
-                    <option value="Task">{TYPE_LABELS.Task}</option>
-                    <option value="Phase">{TYPE_LABELS.Phase}</option>
+              {/* Der Typ steht schon durch den geklickten Button fest (Phase/Aufgabe anlegen,
+                  oder "+" an einem bestehenden Element) - kein Umschalter mehr nötig. */}
+              {newType === 'Task' && (
+                <div>
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Priorität</label>
+                  <select value={newPriority} onChange={(e) => setNewPriority(e.target.value as WorkItemPriority)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
+                    {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
                   </select>
                 </div>
-                {newType === 'Task' && (
-                  <div className="flex-1">
-                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Priorität</label>
-                    <select value={newPriority} onChange={(e) => setNewPriority(e.target.value as WorkItemPriority)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
-                      {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
-                    </select>
-                  </div>
-                )}
-              </div>
+              )}
               {parentLocked && newParentId ? (
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Wird zu <span className="font-semibold text-slate-700 dark:text-slate-200">{workItems.find((w) => w.id === newParentId)?.title}</span> hinzugefügt.
@@ -1912,7 +1920,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                   >
                     <option value="">Keine übergeordnete Aufgabe</option>
-                    {workItems.map((w) => <option key={w.id} value={w.id}>{w.referenceCode} · {w.title}</option>)}
+                    {eligibleParentItems.map((w) => <option key={w.id} value={w.id}>{w.referenceCode} · {w.title}</option>)}
                   </select>
                 </div>
               )}
@@ -1967,7 +1975,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Übergeordnet</label>
                 <select value={milestoneParentId} onChange={(e) => setMilestoneParentId(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100">
                   <option value="">Kein übergeordnetes Element</option>
-                  {workItems.map((w) => <option key={w.id} value={w.id}>{w.referenceCode} · {w.title}</option>)}
+                  {eligibleParentItems.map((w) => <option key={w.id} value={w.id}>{w.referenceCode} · {w.title}</option>)}
                 </select>
               </div>
               <div className="flex justify-end gap-2 pt-2">
