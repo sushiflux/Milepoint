@@ -4,6 +4,7 @@ import { getTimeline } from '../api/timeline'
 import { addDependency, createWorkItem, deleteWorkItem, removeDependency, updateWorkItem } from '../api/workItems'
 import type { Board, BoardColumnType, Milestone, WorkItem, WorkItemPriority, WorkItemType } from '../api/types'
 import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
+import { usePreferences } from '../context/PreferencesContext'
 
 interface Props {
   projectId: string
@@ -21,7 +22,17 @@ const MIN_VISIBLE_DAYS = 2
 // rest becomes horizontally scrollable instead of compressing further.
 const MAX_FIT_DAYS = 1000
 const ZOOM_FACTOR = 1.25
-const ROW_HEIGHT = 32
+type Density = 'small' | 'medium' | 'large'
+const DENSITY_OPTIONS: { value: Density; label: string }[] = [
+  { value: 'small', label: 'Klein' },
+  { value: 'medium', label: 'Mittel' },
+  { value: 'large', label: 'Groß' },
+]
+// "Klein" is the original, previously-fixed size (32/20) - "Mittel" and "Groß" only add extra
+// breathing room on top of that, they don't shrink below what the Timeline always looked like.
+const ROW_HEIGHT_BY_DENSITY: Record<Density, number> = { small: 32, medium: 42, large: 54 }
+const BAR_HEIGHT_BY_DENSITY: Record<Density, number> = { small: 20, medium: 26, large: 34 }
+const DEFAULT_DENSITY: Density = 'small'
 const MONTH_ROW_HEIGHT = 28
 const WEEK_ROW_HEIGHT = 24
 const DAY_ROW_HEIGHT = 28
@@ -30,15 +41,20 @@ const HEADER_HEIGHT = MONTH_ROW_HEIGHT + WEEK_ROW_HEIGHT + DAY_ROW_HEIGHT
 // horizontal scrollbar is anchored there instead of at the bottom of the day rows.
 const SCROLLBAR_ROW_HEIGHT = 12
 const COL_NUMBER = 56
-const COL_ID = 64
+// Wide enough for the full "TSK#00042" reference code without truncating.
+const COL_ID = 88
 const COL_TYPE = 76
 const COL_STATUS = 104
-const COL_PRIORITY = 80
-const LABEL_WIDTH = 556
-const CONNECTOR_DOT_RADIUS = 4
+const COL_PRIORITY = 92
+const LABEL_WIDTH = 592
+const CONNECTOR_DOT_RADIUS = 6
 // Small blank gap left between a subtask's bar and the line continuing on to the next subtask,
 // so the connector doesn't look glued directly to the bar it just passed through.
-const CONNECTOR_ROW_GAP = 4
+const CONNECTOR_ROW_GAP = 3
+// A short solid vertical lead-in after that gap, so the turn into "heading over to the next
+// subtask" reads as an actual right-angle corner instead of the horizontal run just starting out
+// of nowhere with no vertical stroke to bend away from.
+const CONNECTOR_ELBOW_STUB = 6
 // One color per Phase, cycled through when there are more phases than colors.
 const CONNECTOR_COLOR_CLASSES = [
   'text-amber-500 dark:text-amber-400',
@@ -271,6 +287,12 @@ interface MilestoneRow {
 type Row = TaskRow | MilestoneRow
 
 export default function TimelineView({ projectId, boards, workItems, milestones, onWorkItemsChange, onMilestonesChange }: Props) {
+  const { getPreference, setPreference } = usePreferences()
+  const storedDensity = getPreference('timelineDensity', DEFAULT_DENSITY)
+  const density: Density = storedDensity === 'medium' || storedDensity === 'large' ? storedDensity : DEFAULT_DENSITY
+  const rowHeight = ROW_HEIGHT_BY_DENSITY[density]
+  const barHeight = BAR_HEIGHT_BY_DENSITY[density]
+
   const [newTitle, setNewTitle] = useState('')
   const [newDescription, setNewDescription] = useState('')
   const [newType, setNewType] = useState<WorkItemType>('Task')
@@ -675,6 +697,25 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         finish = addDays(end, drag.deltaDays)
         if (finish < start) finish = start
       }
+
+      // Invisible wall: a subtask can't be dragged (moved or start-resized) to begin before its
+      // parent has finished - the same +1-day rule minStartForParent enforces at creation time,
+      // just applied live while dragging instead of only checked afterward.
+      if (item.parentWorkItemId && drag.mode !== 'resize-end') {
+        const parent = workItemById.get(item.parentWorkItemId)
+        const parentRange = parent ? effectiveRange(parent) : null
+        const minStart = parentRange ? addDays(parentRange.finish, 1) : null
+        if (minStart && start < minStart) {
+          if (drag.mode === 'move') {
+            const shiftDays = diffDays(minStart, start)
+            start = addDays(start, shiftDays)
+            finish = addDays(finish, shiftDays)
+          } else {
+            start = minStart
+            if (start > finish) finish = start
+          }
+        }
+      }
     } else if (drag && item.parentWorkItemId) {
       // Live preview for subtasks while a parent is being dragged - keeps the same day-gap they
       // already have, moving with the parent's bar in real time instead of only jumping into
@@ -737,7 +778,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   // rolled-up range isn't a real bar to connect from, hence Task-only parents). All connectors
   // whose parent task lives under the same Phase share that Phase's color.
   const parentChildConnectors = useMemo(() => {
-    const barTopOffset = (ROW_HEIGHT - 20) / 2
+    const barTopOffset = (rowHeight - barHeight) / 2
     const dotOffset = 14
     const result: {
       key: string
@@ -766,15 +807,15 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       if (children.length === 0) continue
 
       const parentRight = (diffDays(parentRange.finish, rangeStart) + 1) * dayWidth - 1
-      // Vertically centered on the bar (bar spans barTopOffset..barTopOffset+20), not the top edge.
-      const parentTopY = parentIndex * ROW_HEIGHT + barTopOffset + 10
+      // Vertically centered on the bar (bar spans barTopOffset..barTopOffset+barHeight), not the top edge.
+      const parentTopY = parentIndex * rowHeight + barTopOffset + barHeight / 2
 
       const points = children
         .map(({ item: child, rowIndex }) => {
           const childRange = effectiveRange(child)
           if (!childRange) return null
           const dotX = diffDays(childRange.start, rangeStart) * dayWidth + 1 + dotOffset
-          const dotY = rowIndex * ROW_HEIGHT + barTopOffset
+          const dotY = rowIndex * rowHeight + barTopOffset
           return { key: child.id, dotX, dotY }
         })
         .filter((p): p is { key: string; dotX: number; dotY: number } => p !== null)
@@ -789,8 +830,16 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         // Right-angled instead of a direct diagonal, with the kink kept late: run horizontal
         // first, at whatever height the line is already at, all the way over to the child's own
         // column, and only then drop straight down into the dot - so the bend sits right next to
-        // the subtask, not right after leaving the parent.
-        segments.push({ key: `s${segIdx++}`, d: `M ${cursorX} ${cursorY} L ${p.dotX} ${cursorY} L ${p.dotX} ${p.dotY}`, dashed: false })
+        // the subtask, not right after leaving the parent. From the second subtask onward, this
+        // leg starts right after the gap below the previous one's bar - add a short vertical
+        // lead-in first so that turn reads as an actual right-angle corner, not a horizontal run
+        // that just starts out of nowhere.
+        const elbowY = idx > 0 ? cursorY + CONNECTOR_ELBOW_STUB : cursorY
+        const d =
+          idx > 0
+            ? `M ${cursorX} ${cursorY} L ${cursorX} ${elbowY} L ${p.dotX} ${elbowY} L ${p.dotX} ${p.dotY}`
+            : `M ${cursorX} ${cursorY} L ${p.dotX} ${cursorY} L ${p.dotX} ${p.dotY}`
+        segments.push({ key: `s${segIdx++}`, d, dashed: false })
         dots.push({ key: p.key, cx: p.dotX, cy: p.dotY })
         cursorX = p.dotX
         cursorY = p.dotY
@@ -799,7 +848,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           // Before heading to the next subtask, the line always runs on through the rest of THIS
           // subtask's own bar first - dashed, since it's crossing a bar rather than connecting to
           // it at that point (the connection is the dot up at the top edge, already placed above).
-          const barBottom = p.dotY + 20
+          const barBottom = p.dotY + barHeight
           segments.push({ key: `s${segIdx++}`, d: `M ${p.dotX} ${p.dotY} L ${p.dotX} ${barBottom}`, dashed: true })
           // Leave a small blank gap here rather than continuing the path all the way to
           // barBottom, so the line clearly detaches from this bar before moving to the next one.
@@ -814,7 +863,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
 
     return result
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, rowIndexByTaskId, itemsByParent, workItemById, phaseColorClassById, rangeStart, dayWidth, drag])
+  }, [rows, rowIndexByTaskId, itemsByParent, workItemById, phaseColorClassById, rangeStart, dayWidth, drag, rowHeight, barHeight])
 
   async function commitDateChange(item: WorkItem, start: Date, finish: Date) {
     const shifts = computeCascadeShifts(item.id, finish, workItems)
@@ -1276,7 +1325,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       <div
         onContextMenu={onContextMenu}
         className="flex items-center border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
-        style={{ height: ROW_HEIGHT, ...style }}
+        style={{ height: rowHeight, ...style }}
       >
         {children}
       </div>
@@ -1614,6 +1663,25 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               <span>Heute</span>
             </button>
 
+            {/* Zeilendichte Control Group */}
+            <div className="flex h-9 items-center rounded-lg border border-slate-200/80 bg-white/80 p-0.5 shadow-2xs dark:border-slate-700/80 dark:bg-slate-800/80">
+              {DENSITY_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setPreference('timelineDensity', option.value)}
+                  title={`Dichte: ${option.label}`}
+                  className={`h-8 px-2.5 text-xs font-semibold transition-colors rounded-md ${
+                    density === option.value
+                      ? 'bg-brand-primary/10 text-brand-primary dark:bg-brand-primary/20 dark:text-brand-primary-light font-bold'
+                      : 'text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700/80'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
             {/* Einklappen / Ausklappen Button */}
             <button
               type="button"
@@ -1694,7 +1762,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             <span style={{ width: COL_STATUS }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               Status
             </span>
-            <span style={{ width: COL_PRIORITY }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+            <span style={{ width: COL_PRIORITY }} className="pl-2 pr-4 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               Priorität
             </span>
           </div>
@@ -1733,7 +1801,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     Meilenstein
                   </span>
                   <span style={{ width: COL_STATUS }} className="px-2" />
-                  <span style={{ width: COL_PRIORITY }} className="px-2" />
+                  <span style={{ width: COL_PRIORITY }} className="pl-2 pr-4" />
                 </LabelRow>
               )
             }
@@ -1784,7 +1852,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     </>
                   )}
                 </span>
-                <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate px-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate pl-2 pr-4 text-xs font-semibold text-slate-700 dark:text-slate-200">
                   {item.type !== 'Phase' && (
                     <>
                       <span className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
@@ -1964,7 +2032,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <svg
                   className="pointer-events-none absolute left-0 top-0 z-30"
                   width={chartWidth}
-                  height={rows.length * ROW_HEIGHT}
+                  height={rows.length * rowHeight}
                 >
                   {parentChildConnectors.map((connector) => (
                     <g key={connector.key} className={connector.colorClass}>
@@ -1979,7 +2047,17 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                         />
                       ))}
                       {connector.dots.map((dot) => (
-                        <circle key={dot.key} cx={dot.cx} cy={dot.cy} r={CONNECTOR_DOT_RADIUS} fill="currentColor" />
+                        // A true half-circle, not a full dot: flat edge sits exactly on the bar's
+                        // top border, round side dipping down into the bar (sweep-flag 0 traces
+                        // the arc through the bottom point instead of the top one). A contrasting
+                        // stroke keeps it visible even against a similarly-colored bar underneath.
+                        <path
+                          key={dot.key}
+                          d={`M ${dot.cx - CONNECTOR_DOT_RADIUS} ${dot.cy} A ${CONNECTOR_DOT_RADIUS} ${CONNECTOR_DOT_RADIUS} 0 0 0 ${dot.cx + CONNECTOR_DOT_RADIUS} ${dot.cy} Z`}
+                          fill="currentColor"
+                          className="stroke-white dark:stroke-slate-900"
+                          strokeWidth={1.5}
+                        />
                       ))}
                     </g>
                   ))}
@@ -2005,7 +2083,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     <div
                       key={row.key}
                       className="relative overflow-hidden border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
-                      style={{ height: ROW_HEIGHT }}
+                      style={{ height: rowHeight }}
                     >
                       <div
                         title={`${m.name} — ${formatDate(m.date)}`}
@@ -2038,7 +2116,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                       }
                     }}
                     className="relative overflow-hidden border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
-                    style={{ height: ROW_HEIGHT }}
+                    style={{ height: rowHeight }}
                   >
                     {range && (
                       <div
@@ -2053,8 +2131,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                         style={{
                           left: diffDays(range.start, rangeStart) * dayWidth + 1,
                           width: Math.max((diffDays(range.finish, range.start) + 1) * dayWidth - 2, dayWidth - 2),
-                          top: (ROW_HEIGHT - 20) / 2,
-                          height: 20,
+                          top: (rowHeight - barHeight) / 2,
+                          height: barHeight,
                         }}
                       >
                         {!isPhase && (
