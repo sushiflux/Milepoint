@@ -5,6 +5,7 @@ import type { Board, BoardColumn, BoardColumnType, WorkItem, WorkItemCategory, W
 import type { UserSummary } from '../api/users'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
+import { usePreferences } from '../context/PreferencesContext'
 import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 
@@ -27,6 +28,7 @@ interface PointerDragState {
 }
 
 const UNASSIGNED = '__unassigned__'
+const SORT_PREFERENCE_KEY = 'kanban.sortBy'
 
 type SortKey = 'manual' | 'referenceCode' | 'priority' | 'category' | 'title' | 'assignee'
 
@@ -51,6 +53,7 @@ function toggleInSet<T>(set: Set<T>, value: T) {
   return next
 }
 
+
 function compareItems(a: WorkItem, b: WorkItem, sortBy: SortKey, users: UserSummary[]): number {
   switch (sortBy) {
     case 'referenceCode':
@@ -73,6 +76,7 @@ function compareItems(a: WorkItem, b: WorkItem, sortBy: SortKey, users: UserSumm
 
 export default function KanbanBoard({ board, items, users, onItemsChange }: Props) {
   const { token } = useAuth()
+  const { getPreference, setPreference } = usePreferences()
   const [newTitleByColumn, setNewTitleByColumn] = useState<Record<string, string>>({})
   const [newDescriptionByColumn, setNewDescriptionByColumn] = useState<Record<string, string>>({})
   const [openAddColumns, setOpenAddColumns] = useState<Set<string>>(new Set())
@@ -80,7 +84,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortBy, setSortBy] = useState<SortKey>('manual')
+  const sortBy = getPreference(SORT_PREFERENCE_KEY, 'manual') as SortKey
   const [filterPriorities, setFilterPriorities] = useState<Set<WorkItemPriority>>(new Set())
   const [filterCategories, setFilterCategories] = useState<Set<WorkItemCategory>>(new Set())
   const [filterAssignees, setFilterAssignees] = useState<Set<string>>(new Set())
@@ -528,7 +532,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
         {/* Sort Dropdown */}
         <select
           value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as SortKey)}
+          onChange={(e) => setPreference(SORT_PREFERENCE_KEY, e.target.value)}
           className="h-9 rounded-lg border border-slate-200/80 bg-white/80 px-2.5 text-xs font-semibold text-slate-700 outline-none transition-all focus:border-brand-primary focus:ring-2 focus:ring-brand-primary/20 dark:border-slate-700/80 dark:bg-slate-800/80 dark:text-slate-200"
         >
           {(Object.entries(SORT_LABELS) as [SortKey, string][]).map(([key, label]) => (

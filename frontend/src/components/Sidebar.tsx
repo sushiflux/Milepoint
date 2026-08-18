@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { usePreferences } from '../context/PreferencesContext'
 
 type ProjectTab = 'timeline' | 'kanban' | 'notes'
 
@@ -35,11 +36,7 @@ const TAB_ICONS: Record<ProjectTab, ReactNode> = {
   ),
 }
 
-const STORAGE_KEY = 'pm.sidebarCollapsed'
-
-function readInitialCollapsed() {
-  return localStorage.getItem(STORAGE_KEY) === '1'
-}
+const PREFERENCE_KEY = 'sidebarCollapsed'
 
 function navLinkClass(active: boolean, collapsed: boolean) {
   return `flex items-center gap-3 truncate rounded-lg py-2 text-sm font-medium transition-colors ${collapsed ? 'justify-center px-2' : 'px-3'} ${
@@ -50,14 +47,11 @@ function navLinkClass(active: boolean, collapsed: boolean) {
 }
 
 export default function Sidebar({ project, activeTab }: Props) {
-  const [collapsed, setCollapsed] = useState(readInitialCollapsed)
+  const { getPreference, setPreference } = usePreferences()
+  const collapsed = getPreference(PREFERENCE_KEY, '0') === '1'
 
   function toggleCollapsed() {
-    setCollapsed((prev) => {
-      const next = !prev
-      localStorage.setItem(STORAGE_KEY, next ? '1' : '0')
-      return next
-    })
+    setPreference(PREFERENCE_KEY, collapsed ? '0' : '1')
   }
 
   // If there is no project context, the sidebar doesn't have much to show in this layout.

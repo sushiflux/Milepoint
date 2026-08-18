@@ -490,6 +490,25 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.ToTable("SequenceCounters");
                 });
 
+            modelBuilder.Entity("Milepoint.Api.Models.UserPreference", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("UserId", "Key");
+
+                    b.ToTable("UserPreferences");
+                });
+
             modelBuilder.Entity("Milepoint.Api.Models.WorkItem", b =>
                 {
                     b.Property<string>("Id")
@@ -796,6 +815,17 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .IsRequired();
 
                     b.Navigation("Project");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("Milepoint.Api.Models.UserPreference", b =>
+                {
+                    b.HasOne("Milepoint.Api.Data.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("User");
                 });

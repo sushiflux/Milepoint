@@ -8,9 +8,10 @@ import Header from '../components/Header'
 import AddButton from '../components/AddButton'
 import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
 import { useAuth } from '../context/AuthContext'
+import { usePreferences } from '../context/PreferencesContext'
 
 type ViewMode = 'tiles' | 'list'
-const VIEW_MODE_STORAGE_KEY = 'pm.dashboard.viewMode'
+const VIEW_MODE_PREFERENCE_KEY = 'dashboard.viewMode'
 
 const AVATAR_COLORS = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-sky-500', 'bg-rose-500', 'bg-violet-500']
 
@@ -78,15 +79,14 @@ export default function ProjectsPage() {
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<string | null>(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
-  const [viewMode, setViewMode] = useState<ViewMode>(
-    () => (localStorage.getItem(VIEW_MODE_STORAGE_KEY) as ViewMode | null) ?? 'tiles',
-  )
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; project: Project | null } | null>(null)
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
   const navigate = useNavigate()
   const { isProjectLeader } = useAuth()
+  const { getPreference, setPreference } = usePreferences()
+  const viewMode = getPreference(VIEW_MODE_PREFERENCE_KEY, 'tiles') as ViewMode
 
   const nameError = validateRequired(name, 'Projektname')
 
@@ -99,8 +99,7 @@ export default function ProjectsPage() {
   }
 
   function changeViewMode(mode: ViewMode) {
-    setViewMode(mode)
-    localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode)
+    setPreference(VIEW_MODE_PREFERENCE_KEY, mode)
   }
 
   async function loadProjects() {
