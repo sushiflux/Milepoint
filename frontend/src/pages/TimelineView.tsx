@@ -5,6 +5,7 @@ import { addDependency, createWorkItem, deleteWorkItem, removeDependency, update
 import type { Board, BoardColumnType, Milestone, WorkItem, WorkItemPriority, WorkItemType } from '../api/types'
 import ContextMenu, { type ContextMenuEntry } from '../components/ContextMenu'
 import { usePreferences } from '../context/PreferencesContext'
+import { BAR_COLOR_MODE_PREFERENCE_KEY, resolveBarColorMode } from '../lib/timelinePreferences'
 
 interface Props {
   projectId: string
@@ -245,6 +246,15 @@ function getBarColor(columnName: string, columnType: BoardColumnType) {
   return STATUS_BAR_COLOR[columnType] || STATUS_BAR_COLOR.Todo;
 }
 
+// Same gradient bar style as STATUS_BAR_COLOR, keyed by priority instead - used when the "Nach
+// Priorität" bar color mode is active. Colors match PRIORITY_DOT so the bar and its dot agree.
+const PRIORITY_BAR_COLOR: Record<WorkItemPriority, string> = {
+  Low: 'bg-gradient-to-b from-slate-400 to-slate-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-slate-700/50',
+  Medium: 'bg-gradient-to-b from-violet-400 to-violet-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-violet-700/50',
+  High: 'bg-gradient-to-b from-orange-400 to-orange-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-orange-700/50',
+  Urgent: 'bg-gradient-to-b from-rose-500 to-rose-600 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-rose-700/50',
+}
+
 const TYPE_BAR_COLOR: Record<WorkItemType, string> = {
   Task: 'bg-gradient-to-b from-sky-400 to-sky-600 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-sky-700/50',
   Phase: 'bg-gradient-to-b from-orange-400 to-orange-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-orange-700/50',
@@ -296,6 +306,8 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   const density: Density = storedDensity === 'medium' || storedDensity === 'large' ? storedDensity : DEFAULT_DENSITY
   const rowHeight = ROW_HEIGHT_BY_DENSITY[density]
   const barHeight = BAR_HEIGHT_BY_DENSITY[density]
+  // Configured in Settings ("Einstellungen" in the user menu), not here - Timeline only reads it.
+  const barColorMode = resolveBarColorMode(getPreference(BAR_COLOR_MODE_PREFERENCE_KEY, ''))
 
   const [newTitle, setNewTitle] = useState('')
   const [newDescription, setNewDescription] = useState('')
@@ -932,8 +944,13 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       // captures the pointer, which suppresses the native contextmenu event that would
       // normally follow and open the task's context menu.
       if (event.button !== 0) return
+      // Clicking the visible white grab-indicator line (a child of the actual handle div) landed
+      // on an element with no data-handle of its own, so it silently fell back to "move" even
+      // when the user was clearly grabbing the start/end handle - closest() finds the handle
+      // regardless of which nested element the click actually hit.
       const target = event.target as HTMLElement
-      const mode: DragMode = target.dataset.handle === 'start' ? 'resize-start' : target.dataset.handle === 'end' ? 'resize-end' : 'move'
+      const handleEl = target.closest<HTMLElement>('[data-handle]')
+      const mode: DragMode = handleEl?.dataset.handle === 'start' ? 'resize-start' : handleEl?.dataset.handle === 'end' ? 'resize-end' : 'move'
       event.currentTarget.setPointerCapture(event.pointerId)
       setDrag({ itemId: item.id, mode, startX: event.clientX, deltaDays: 0 })
     }
@@ -2093,7 +2110,15 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 const { item, hasChildren } = row
                 const isPhase = item.type === 'Phase'
                 const range = rangeOf(item)
-                const barColor = isPhase ? TYPE_BAR_COLOR.Phase : hasChildren ? 'bg-slate-600' : getBarColor(item.columnName, item.columnType)
+                const barColor = isPhase
+                  ? TYPE_BAR_COLOR.Phase
+                  : barColorMode === 'priority'
+                  ? PRIORITY_BAR_COLOR[item.priority]
+                  : barColorMode === 'status'
+                  ? getBarColor(item.columnName, item.columnType)
+                  : hasChildren
+                  ? 'bg-slate-600'
+                  : getBarColor(item.columnName, item.columnType)
                 const blocked = item.blockingWorkItemIds.length > 0 || item.blockedByMilestoneIds.length > 0
 
                 return (

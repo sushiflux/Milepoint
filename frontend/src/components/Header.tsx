@@ -30,6 +30,13 @@ const USER_ICON = (
   </svg>
 )
 
+const SETTINGS_ICON = (
+  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
+    <path d="M8.3 2.5h3.4l.5 2.2a5.9 5.9 0 011.6.93l2.2-.7 1.7 2.94-1.75 1.5a5.9 5.9 0 010 1.86l1.75 1.5-1.7 2.94-2.2-.7a5.9 5.9 0 01-1.6.93l-.5 2.2H8.3l-.5-2.2a5.9 5.9 0 01-1.6-.93l-2.2.7-1.7-2.94 1.75-1.5a5.9 5.9 0 010-1.86L2.3 8.87 4 5.93l2.2.7a5.9 5.9 0 011.6-.93l.5-2.2z" />
+    <circle cx="10" cy="10" r="2.5" />
+  </svg>
+)
+
 export default function Header() {
   const { displayName, signOut } = useAuth()
   const { theme } = useTheme()
@@ -131,6 +138,15 @@ export default function Header() {
                       ● Online
                     </span>
                   </div>
+
+                  <Link
+                    to="/settings"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800/70"
+                  >
+                    {SETTINGS_ICON}
+                    Einstellungen
+                  </Link>
 
                   <button
                     onClick={() => {
