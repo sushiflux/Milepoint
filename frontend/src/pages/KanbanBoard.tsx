@@ -144,8 +144,19 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     })
 
     connection.on('workItemMoved', (payload: { workItemId: string; targetColumnId: string; position: number }) => {
+      const targetColumn = board.columns.find((c) => c.id === payload.targetColumnId)
       onItemsChange((prev) =>
-        prev.map((i) => (i.id === payload.workItemId ? { ...i, columnId: payload.targetColumnId, position: payload.position } : i)),
+        prev.map((i) =>
+          i.id === payload.workItemId
+            ? {
+                ...i,
+                columnId: payload.targetColumnId,
+                columnName: targetColumn?.name ?? i.columnName,
+                columnType: targetColumn?.type ?? i.columnType,
+                position: payload.position,
+              }
+            : i,
+        ),
       )
     })
 
@@ -423,11 +434,15 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     }
 
     const updatedItems = [...targetList]
-    updatedItems.splice(newPosition, 0, { ...item, columnId: targetColumn.id, position: newPosition })
+    updatedItems.splice(newPosition, 0, { ...item, columnId: targetColumn.id, columnName: targetColumn.name, columnType: targetColumn.type, position: newPosition })
     const reorderedIds = new Map(updatedItems.map((ui, idx) => [ui.id, idx]))
 
     onItemsChange((prev) => prev.map((i) => {
-      if (i.id === item.id) return { ...i, columnId: targetColumn.id, position: newPosition }
+      // columnName/columnType are denormalized copies of the target column's own name/type -
+      // Kanban itself never reads them back (it looks up board.columns by columnId instead), but
+      // the Timeline view displays them directly, so leaving them stale here left a moved card
+      // showing its old status/column there until a full reload re-fetched everything.
+      if (i.id === item.id) return { ...i, columnId: targetColumn.id, columnName: targetColumn.name, columnType: targetColumn.type, position: newPosition }
       if (i.columnId === targetColumn.id && reorderedIds.has(i.id)) {
         return { ...i, position: reorderedIds.get(i.id)! }
       }
