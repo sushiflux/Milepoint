@@ -587,10 +587,12 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
   }
 
+  // Kept clear of the status colors below (yellow/blue/green/red) so a priority badge is never
+  // mistaken for a status one when both show up next to each other.
   const PRIORITY_COLORS: Record<string, string> = {
     Low: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-semibold',
-    Medium: 'bg-sky-50 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300 font-semibold',
-    High: 'bg-amber-50 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300 font-semibold',
+    Medium: 'bg-violet-50 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 font-semibold',
+    High: 'bg-orange-50 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300 font-semibold',
     Urgent: 'bg-rose-50 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 font-semibold',
   }
 
@@ -607,16 +609,16 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   }
 
   const COLUMN_BORDER_COLORS: Record<string, string> = {
-    Todo: 'bg-slate-400 dark:bg-slate-500',
-    InProgress: 'bg-sky-400 dark:bg-sky-500',
-    Done: 'bg-emerald-400 dark:bg-emerald-500',
+    Todo: 'bg-yellow-400 dark:bg-yellow-500',
+    InProgress: 'bg-blue-400 dark:bg-blue-500',
+    Done: 'bg-green-400 dark:bg-green-500',
   }
 
   const KNOWN_BORDER_COLORS: Record<string, string> = {
-    'pausiert': 'bg-amber-400 dark:bg-amber-500',
+    'pausiert': 'bg-red-400 dark:bg-red-500',
     'blockiert': 'bg-red-400 dark:bg-red-500',
     'review': 'bg-purple-400 dark:bg-purple-500',
-    'neu': 'bg-slate-400 dark:bg-slate-500',
+    'neu': 'bg-yellow-400 dark:bg-yellow-500',
   }
 
   function getColumnBorderColor(columnName: string, columnType: BoardColumnType) {

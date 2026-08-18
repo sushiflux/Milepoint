@@ -44,9 +44,11 @@ const COL_NUMBER = 56
 // Wide enough for the full "TSK#00042" reference code without truncating.
 const COL_ID = 88
 const COL_TYPE = 76
-const COL_STATUS = 104
-const COL_PRIORITY = 92
-const LABEL_WIDTH = 592
+// Compact - just wide enough for a centered dot (the name/label lives in the header + tooltip,
+// not the cell) rather than the old, wider dot+text columns.
+const COL_STATUS = 44
+const COL_PRIORITY = 44
+const LABEL_WIDTH = 488
 const CONNECTOR_DOT_RADIUS = 6
 // Small blank gap left between a subtask's bar and the line continuing on to the next subtask,
 // so the connector doesn't look glued directly to the bar it just passed through.
@@ -55,16 +57,16 @@ const CONNECTOR_ROW_GAP = 3
 // subtask" reads as an actual right-angle corner instead of the horizontal run just starting out
 // of nowhere with no vertical stroke to bend away from.
 const CONNECTOR_ELBOW_STUB = 6
-// One color per Phase, cycled through when there are more phases than colors.
+// One color per Phase, cycled through when there are more phases than colors. Deliberately
+// avoids yellow/blue/green/red (status) and slate/violet/orange/rose (priority) so a connector
+// line is never mistaken for a status or priority indicator.
 const CONNECTOR_COLOR_CLASSES = [
-  'text-amber-500 dark:text-amber-400',
-  'text-emerald-500 dark:text-emerald-400',
-  'text-sky-500 dark:text-sky-400',
   'text-fuchsia-500 dark:text-fuchsia-400',
-  'text-orange-500 dark:text-orange-400',
   'text-cyan-500 dark:text-cyan-400',
-  'text-rose-500 dark:text-rose-400',
-  'text-lime-500 dark:text-lime-400',
+  'text-teal-500 dark:text-teal-400',
+  'text-indigo-500 dark:text-indigo-400',
+  'text-pink-500 dark:text-pink-400',
+  'text-stone-500 dark:text-stone-400',
 ]
 const DEFAULT_CONNECTOR_COLOR_CLASS = 'text-slate-400 dark:text-slate-500'
 
@@ -185,16 +187,18 @@ function formatDate(iso: string | null) {
 }
 
 const STATUS_DOT: Record<string, string> = {
-  Todo: 'bg-slate-500',
-  InProgress: 'bg-amber-400',
-  Done: 'bg-emerald-500',
+  Todo: 'bg-yellow-500',
+  InProgress: 'bg-blue-500',
+  Done: 'bg-green-500',
 }
 
+// Kept clear of the status colors above (yellow/blue/green/red) so a priority dot is never
+// mistaken for a status one when both show up next to each other.
 const PRIORITY_DOT: Record<WorkItemPriority, string> = {
   Low: 'bg-slate-500',
-  Medium: 'bg-sky-500',
-  High: 'bg-amber-500',
-  Urgent: 'bg-red-500',
+  Medium: 'bg-violet-500',
+  High: 'bg-orange-500',
+  Urgent: 'bg-rose-600',
 }
 
 const STATUS_LABELS: Record<BoardColumnType, string> = {
@@ -221,16 +225,16 @@ const TYPE_TEXT_COLOR: Record<WorkItemType, string> = {
 }
 
 const STATUS_BAR_COLOR: Record<BoardColumnType, string> = {
-  Todo: 'bg-gradient-to-b from-slate-400 to-slate-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-slate-700/50',
-  InProgress: 'bg-gradient-to-b from-sky-400 to-sky-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-sky-700/50',
-  Done: 'bg-gradient-to-b from-emerald-400 to-emerald-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-emerald-700/50',
+  Todo: 'bg-gradient-to-b from-yellow-400 to-yellow-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-yellow-700/50',
+  InProgress: 'bg-gradient-to-b from-blue-400 to-blue-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-blue-700/50',
+  Done: 'bg-gradient-to-b from-green-400 to-green-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-green-700/50',
 }
 
 const KNOWN_BAR_COLORS: Record<string, string> = {
-  'pausiert': 'bg-gradient-to-b from-amber-400 to-amber-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-amber-700/50',
+  'pausiert': 'bg-gradient-to-b from-red-400 to-red-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-red-700/50',
   'blockiert': 'bg-gradient-to-b from-red-400 to-red-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-red-700/50',
   'review': 'bg-gradient-to-b from-purple-400 to-purple-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-purple-700/50',
-  'neu': 'bg-gradient-to-b from-slate-400 to-slate-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-slate-700/50',
+  'neu': 'bg-gradient-to-b from-yellow-400 to-yellow-500 shadow-[inset_0_1px_rgba(255,255,255,0.3)] ring-1 ring-yellow-700/50',
 }
 
 function getBarColor(columnName: string, columnType: BoardColumnType) {
@@ -1759,11 +1763,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             <span style={{ width: COL_TYPE }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               Typ
             </span>
-            <span style={{ width: COL_STATUS }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-              Status
+            <span style={{ width: COL_STATUS }} className="px-2 text-center text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300" title="Status">
+              St.
             </span>
-            <span style={{ width: COL_PRIORITY }} className="pl-2 pr-4 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
-              Priorität
+            <span style={{ width: COL_PRIORITY }} className="px-2 text-center text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300" title="Priorität">
+              Prio
             </span>
           </div>
 
@@ -1801,7 +1805,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     Meilenstein
                   </span>
                   <span style={{ width: COL_STATUS }} className="px-2" />
-                  <span style={{ width: COL_PRIORITY }} className="pl-2 pr-4" />
+                  <span style={{ width: COL_PRIORITY }} className="px-2" />
                 </LabelRow>
               )
             }
@@ -1844,21 +1848,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 <span style={{ width: COL_TYPE }} className={`truncate px-2 text-xs font-bold ${TYPE_TEXT_COLOR[item.type]}`}>
                   {TYPE_LABELS[item.type]}
                 </span>
-                <span style={{ width: COL_STATUS }} className="flex items-center gap-1.5 truncate px-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  {item.type !== 'Phase' && (
-                    <>
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_DOT[item.columnType]}`} />
-                      <span className="truncate">{item.columnName}</span>
-                    </>
-                  )}
+                <span style={{ width: COL_STATUS }} className="flex items-center justify-center px-2">
+                  {item.type !== 'Phase' && <span className={`h-2.5 w-2.5 rounded-full ${STATUS_DOT[item.columnType]}`} title={item.columnName} />}
                 </span>
-                <span style={{ width: COL_PRIORITY }} className="flex items-center gap-1.5 truncate pl-2 pr-4 text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  {item.type !== 'Phase' && (
-                    <>
-                      <span className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOT[item.priority]}`} />
-                      <span className="truncate">{item.priority}</span>
-                    </>
-                  )}
+                <span style={{ width: COL_PRIORITY }} className="flex items-center justify-center px-2">
+                  {item.type !== 'Phase' && <span className={`h-2.5 w-2.5 rounded-full ${PRIORITY_DOT[item.priority]}`} title={`Priorität: ${PRIORITY_LABELS[item.priority]}`} />}
                 </span>
               </LabelRow>
             )
