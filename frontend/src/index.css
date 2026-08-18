@@ -25,6 +25,14 @@
     min-height: 100vh;
   }
 
+  /* Ohne das rendern native Browser-UI-Elemente (Select-Dropdown-Popups, Scrollbars in
+     manchen Browsern, Datepicker-Icons...) weiterhin im Betriebssystem-Standard (meist hell) -
+     unser CSS erreicht diese OS-gerenderten Teile sonst nicht, daher blieb z.B. das
+     aufgeklappte <select>-Options-Menü weiß, obwohl der Rest im Dark Mode war. */
+  .dark {
+    color-scheme: dark;
+  }
+
   /* Custom scrollbar for modern feel */
   ::-webkit-scrollbar {
     width: 6px;

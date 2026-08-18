@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import React, { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { createWorkItem, deleteWorkItem, moveWorkItem, updateWorkItem } from '../api/workItems'
 import type { Board, BoardColumn, BoardColumnType, WorkItem, WorkItemCategory, WorkItemPriority } from '../api/types'
@@ -79,9 +79,12 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   const { getPreference, setPreference } = usePreferences()
   const [newTitleByColumn, setNewTitleByColumn] = useState<Record<string, string>>({})
   const [newDescriptionByColumn, setNewDescriptionByColumn] = useState<Record<string, string>>({})
+  const [newPriorityByColumn, setNewPriorityByColumn] = useState<Record<string, WorkItemPriority>>({})
+  const [newCategoryByColumn, setNewCategoryByColumn] = useState<Record<string, WorkItemCategory | ''>>({})
   const [openAddColumns, setOpenAddColumns] = useState<Set<string>>(new Set())
   const [activeDrag, setActiveDrag] = useState<PointerDragState | null>(null)
   const [dragOverColumnId, setDragOverColumnId] = useState<string | null>(null)
+  const [dragOverItem, setDragOverItem] = useState<{ id: string; placement: 'before' | 'after' } | null>(null)
 
   const [searchQuery, setSearchQuery] = useState('')
   const sortBy = getPreference(SORT_PREFERENCE_KEY, 'manual') as SortKey
@@ -166,6 +169,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   const dragOverColumnIdRef = useRef<string | null>(null)
   const [dragOverTrash, setDragOverTrash] = useState(false)
   const dragOverTrashRef = useRef(false)
+  const dragOverItemRef = useRef<{ id: string; placement: 'before' | 'after' } | null>(null)
 
   // Keep refs in sync with state for stale-closure-free window event handlers
   useEffect(() => {
@@ -179,6 +183,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   useEffect(() => {
     dragOverTrashRef.current = dragOverTrash
   }, [dragOverTrash])
+
+  useEffect(() => {
+    dragOverItemRef.current = dragOverItem
+  }, [dragOverItem])
 
   // Global pointer listeners for smooth custom card dragging
   useEffect(() => {
@@ -216,6 +224,8 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
           setDragOverTrash(true)
           dragOverColumnIdRef.current = null
           setDragOverColumnId(null)
+          dragOverItemRef.current = null
+          setDragOverItem(null)
         } else {
           dragOverTrashRef.current = false
           setDragOverTrash(false)
@@ -225,9 +235,86 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
             const colId = columnEl.getAttribute('data-column-id')
             dragOverColumnIdRef.current = colId
             setDragOverColumnId(colId)
+
+            if (sortBy === 'manual') {
+              const cards = Array.from(columnEl.querySelectorAll('[data-work-item-id]'))
+              const placeholder = columnEl.querySelector('[data-drag-placeholder]')
+              const placeholderHeight = placeholder ? placeholder.getBoundingClientRect().height : 0
+
+              let foundItem: { id: string, placement: 'before' | 'after' } | null = null
+              let shouldClear = false
+
+              if (cards.length > 0) {
+                const virtualCards = cards.map(card => {
+                  const rect = card.getBoundingClientRect()
+                  let top = rect.top
+                  let bottom = rect.bottom
+                  if (placeholder && (placeholder.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING)) {
+                    top -= placeholderHeight
+                    bottom -= placeholderHeight
+                  }
+                  return { card, top, bottom, height: rect.height, midpoint: top + rect.height / 2 }
+                })
+
+                const lastVirtual = virtualCards[virtualCards.length - 1]
+                
+                if (e.clientY > lastVirtual.bottom) {
+                  const lastId = lastVirtual.card.getAttribute('data-work-item-id')!
+                  if (lastId !== activeDragRef.current.item.id) {
+                    foundItem = { id: lastId, placement: 'after' }
+                  } else {
+                    shouldClear = true
+                  }
+                } else {
+                  let closest = virtualCards[0]
+                  let minDiff = Math.abs(e.clientY - closest.midpoint)
+                  
+                  for (let i = 1; i < virtualCards.length; i++) {
+                    const vc = virtualCards[i]
+                    const diff = Math.abs(e.clientY - vc.midpoint)
+                    if (diff < minDiff) {
+                      minDiff = diff
+                      closest = vc
+                    }
+                  }
+
+                  const itemId = closest.card.getAttribute('data-work-item-id')!
+                  if (itemId !== activeDragRef.current.item.id) {
+                    const placement = e.clientY < closest.midpoint ? 'before' : 'after'
+                    foundItem = { id: itemId, placement }
+                  } else {
+                    shouldClear = true
+                  }
+                }
+              }
+
+              if (foundItem) {
+                if (
+                  dragOverItemRef.current?.id !== foundItem.id ||
+                  dragOverItemRef.current?.placement !== foundItem.placement
+                ) {
+                  dragOverItemRef.current = foundItem
+                  setDragOverItem(foundItem)
+                }
+              } else if (shouldClear || cards.length === 0) {
+                if (dragOverItemRef.current) {
+                  dragOverItemRef.current = null
+                  setDragOverItem(null)
+                }
+              }
+            } else {
+              if (dragOverItemRef.current) {
+                dragOverItemRef.current = null
+                setDragOverItem(null)
+              }
+            }
           } else {
             dragOverColumnIdRef.current = null
             setDragOverColumnId(null)
+            if (dragOverItemRef.current) {
+              dragOverItemRef.current = null
+              setDragOverItem(null)
+            }
           }
         }
       }
@@ -240,10 +327,13 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
 
       if (currentDrag && droppedOnTrash) {
         handleDeleteCard(currentDrag.item)
-      } else if (currentDrag && targetColumnId && targetColumnId !== currentDrag.item.columnId) {
-        const targetColumn = board.columns.find((c) => c.id === targetColumnId)
-        if (targetColumn) {
-          handleMove(currentDrag.item, targetColumn)
+      } else if (currentDrag && targetColumnId) {
+        const targetItem = dragOverItemRef.current
+        if (targetColumnId !== currentDrag.item.columnId || targetItem) {
+          const targetColumn = board.columns.find((c) => c.id === targetColumnId)
+          if (targetColumn) {
+            handleMove(currentDrag.item, targetColumn, targetItem)
+          }
         }
       }
 
@@ -297,10 +387,14 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     if (!title) return
 
     const description = (newDescriptionByColumn[column.id] ?? '').trim()
-    const created = await createWorkItem(board.id, column.id, title, 'Task', 'Medium', description || undefined)
+    const priority = newPriorityByColumn[column.id] ?? 'Medium'
+    const category = newCategoryByColumn[column.id] || undefined
+    const created = await createWorkItem(board.id, column.id, title, 'Task', priority, description || undefined, { category })
     onItemsChange((prev) => (prev.some((i) => i.id === created.id) ? prev : [...prev, created]))
     setNewTitleByColumn((prev) => ({ ...prev, [column.id]: '' }))
     setNewDescriptionByColumn((prev) => ({ ...prev, [column.id]: '' }))
+    setNewPriorityByColumn((prev) => ({ ...prev, [column.id]: 'Medium' }))
+    setNewCategoryByColumn((prev) => ({ ...prev, [column.id]: '' }))
   }
 
   function toggleAddColumn(columnId: string, open: boolean) {
@@ -312,10 +406,35 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     })
   }
 
-  async function handleMove(item: WorkItem, targetColumn: BoardColumn) {
-    const position = itemsByColumn.get(targetColumn.id)?.length ?? 0
-    await moveWorkItem(board.id, item.id, targetColumn.id, position)
-    onItemsChange((prev) => prev.map((i) => (i.id === item.id ? { ...i, columnId: targetColumn.id, position } : i)))
+  async function handleMove(item: WorkItem, targetColumn: BoardColumn, targetItemInfo?: { id: string; placement: 'before' | 'after' } | null) {
+    let newPosition = 0
+    let targetList = itemsByColumn.get(targetColumn.id) ?? []
+    targetList = targetList.filter(i => i.id !== item.id)
+
+    if (targetItemInfo) {
+      const targetIndex = targetList.findIndex(i => i.id === targetItemInfo.id)
+      if (targetIndex !== -1) {
+        newPosition = targetItemInfo.placement === 'before' ? targetIndex : targetIndex + 1
+      } else {
+        newPosition = targetList.length
+      }
+    } else {
+      newPosition = targetList.length
+    }
+
+    const updatedItems = [...targetList]
+    updatedItems.splice(newPosition, 0, { ...item, columnId: targetColumn.id, position: newPosition })
+    const reorderedIds = new Map(updatedItems.map((ui, idx) => [ui.id, idx]))
+
+    onItemsChange((prev) => prev.map((i) => {
+      if (i.id === item.id) return { ...i, columnId: targetColumn.id, position: newPosition }
+      if (i.columnId === targetColumn.id && reorderedIds.has(i.id)) {
+        return { ...i, position: reorderedIds.get(i.id)! }
+      }
+      return i
+    }))
+
+    await moveWorkItem(board.id, item.id, targetColumn.id, newPosition)
   }
 
   function handleCardPointerDown(e: React.PointerEvent<HTMLLIElement>, item: WorkItem, columnId: string) {
@@ -695,7 +814,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
           key={column.id}
           data-column-id={column.id}
           className={`glass-panel flex flex-col flex-1 min-w-0 rounded-xl relative overflow-hidden transition-all duration-200 ${
-            dragOverColumnId === column.id ? 'ring-2 ring-brand-primary bg-brand-primary/10 border-brand-primary/50 shadow-lg shadow-brand-primary/10 scale-[1.01]' : ''
+            dragOverColumnId === column.id ? 'ring-2 ring-brand-primary bg-brand-primary/10 border-brand-primary/50 shadow-lg shadow-brand-primary/10' : ''
           }`}
         >
           {/* Status Color Line */}
@@ -752,6 +871,28 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                   rows={2}
                   className="mt-2 w-full resize-none rounded-lg border bg-transparent px-3 py-2 text-sm placeholder-slate-400 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                 />
+                <div className="mt-2 flex gap-2">
+                  <select
+                    value={newPriorityByColumn[column.id] ?? 'Medium'}
+                    onChange={(e) => setNewPriorityByColumn((prev) => ({ ...prev, [column.id]: e.target.value as WorkItemPriority }))}
+                    className="w-full rounded-lg border bg-transparent px-2 py-1.5 text-xs text-slate-700 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
+                  >
+                    <option value="Low" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Low</option>
+                    <option value="Medium" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Medium</option>
+                    <option value="High" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">High</option>
+                    <option value="Urgent" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Urgent</option>
+                  </select>
+                  <select
+                    value={newCategoryByColumn[column.id] ?? ''}
+                    onChange={(e) => setNewCategoryByColumn((prev) => ({ ...prev, [column.id]: e.target.value as WorkItemCategory | '' }))}
+                    className="w-full rounded-lg border bg-transparent px-2 py-1.5 text-xs text-slate-700 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
+                  >
+                    <option value="" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Kein Typ</option>
+                    <option value="Feature" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Feature</option>
+                    <option value="Bug" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Bug</option>
+                    <option value="Chore" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Chore</option>
+                  </select>
+                </div>
                 <div className="mt-3 flex items-center justify-end gap-2">
                   <button
                     type="button"
@@ -769,17 +910,24 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
 
             {(itemsByColumn.get(column.id) ?? []).map((item) => {
               const isBeingDragged = activeDrag?.item.id === item.id
+              const isDragOverBefore = dragOverItem?.id === item.id && dragOverItem.placement === 'before'
+              const isDragOverAfter = dragOverItem?.id === item.id && dragOverItem.placement === 'after'
+
               return (
-                <li
-                  key={item.id}
-                  onPointerDown={(e) => handleCardPointerDown(e, item, column.id)}
-                  onContextMenu={(e) => handleCardContextMenu(e, item)}
-                  className={`group relative flex flex-col gap-3 rounded-xl border select-none touch-none transition-all duration-200 ${
-                    isBeingDragged
-                      ? 'border-2 border-dashed border-brand-primary/50 bg-brand-primary/5 dark:border-brand-primary/50 dark:bg-brand-primary/10 opacity-60 shadow-inner scale-[0.98] min-h-[120px]'
-                      : 'border-slate-200/50 bg-white/70 p-5 shadow-sm backdrop-blur-md cursor-grab active:cursor-grabbing hover:-translate-y-1 hover:shadow-lg hover:shadow-brand-primary/10 dark:border-slate-700/50 dark:bg-slate-800/70'
-                  }`}
-                >
+                <Fragment key={item.id}>
+                  {isDragOverBefore && activeDrag && (
+                    <li data-drag-placeholder="true" style={{ height: activeDrag.cardHeight }} className="rounded-xl border-2 border-dashed border-brand-primary/40 bg-brand-primary/5 transition-all duration-200" />
+                  )}
+                  <li
+                    data-work-item-id={item.id}
+                    onPointerDown={(e) => handleCardPointerDown(e, item, column.id)}
+                    onContextMenu={(e) => handleCardContextMenu(e, item)}
+                    className={`group relative flex flex-col gap-3 rounded-xl border select-none touch-none transition-all duration-200 ${
+                      isBeingDragged
+                        ? 'border-2 border-dashed border-brand-primary/50 bg-brand-primary/5 dark:border-brand-primary/50 dark:bg-brand-primary/10 opacity-60 shadow-inner scale-[0.98] min-h-[120px]'
+                        : 'border-slate-200/50 bg-white/70 p-5 shadow-sm backdrop-blur-md cursor-grab active:cursor-grabbing hover:-translate-y-1 hover:shadow-lg hover:shadow-brand-primary/10 dark:border-slate-700/50 dark:bg-slate-800/70'
+                    }`}
+                  >
                   {!isBeingDragged && (
                     <>
                       <div className="flex items-start justify-between gap-3">
@@ -825,10 +973,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                             onChange={(e) => handlePriorityChange(item, e.target.value as WorkItemPriority)}
                             className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
                           >
-                            <option value="Low">Low</option>
-                            <option value="Medium">Medium</option>
-                            <option value="High">High</option>
-                            <option value="Urgent">Urgent</option>
+                            <option value="Low" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Low</option>
+                            <option value="Medium" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Medium</option>
+                            <option value="High" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">High</option>
+                            <option value="Urgent" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Urgent</option>
                           </select>
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.Medium}`}>
                             {item.priority}
@@ -840,10 +988,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                             onChange={(e) => handleCategoryChange(item, e.target.value as WorkItemCategory | '')}
                             className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
                           >
-                            <option value="">Kein Typ</option>
-                            <option value="Feature">Feature</option>
-                            <option value="Bug">Bug</option>
-                            <option value="Chore">Chore</option>
+                            <option value="" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Kein Typ</option>
+                            <option value="Feature" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Feature</option>
+                            <option value="Bug" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Bug</option>
+                            <option value="Chore" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Chore</option>
                           </select>
                           <span
                             className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
@@ -863,9 +1011,9 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                             onChange={(e) => handleAssign(item, e.target.value)}
                             className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
                           >
-                            <option value="">Nicht zugewiesen</option>
+                            <option value="" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Nicht zugewiesen</option>
                             {users.map((u) => (
-                              <option key={u.id} value={u.id}>{u.displayName}</option>
+                              <option key={u.id} value={u.id} className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">{u.displayName}</option>
                             ))}
                           </select>
                           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500 ring-2 ring-white transition-all group-hover:ring-brand-primary/30 dark:bg-slate-700 dark:text-slate-200 dark:ring-slate-800 dark:group-hover:ring-brand-primary/30">
@@ -878,6 +1026,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                     </>
                   )}
                 </li>
+                  {isDragOverAfter && activeDrag && (
+                    <li data-drag-placeholder="true" style={{ height: activeDrag.cardHeight }} className="rounded-xl border-2 border-dashed border-brand-primary/40 bg-brand-primary/5 transition-all duration-200" />
+                  )}
+                </Fragment>
               )
             })}
           </div>
@@ -894,7 +1046,11 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
             width: activeDrag.cardWidth,
             pointerEvents: 'none',
             zIndex: 99999,
-            transform: dragOverTrash ? 'scale(0.15) rotate(15deg)' : 'rotate(2.5deg) scale(1.02)',
+            transform: dragOverTrash 
+              ? 'scale(0.15) rotate(15deg)' 
+              : (dragOverColumnId && dragOverColumnId !== activeDrag.startColumnId)
+                ? 'scale(0.95) rotate(0deg)'
+                : 'rotate(2.5deg) scale(1.02)',
             transformOrigin: `${activeDrag.offsetX}px ${activeDrag.offsetY}px`,
             opacity: dragOverTrash ? 0.3 : 1,
             transition: 'transform 0.3s cubic-bezier(0.2, 0, 0, 1), opacity 0.3s ease-out',
