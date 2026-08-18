@@ -29,11 +29,25 @@ const HEADER_HEIGHT = MONTH_ROW_HEIGHT + WEEK_ROW_HEIGHT + DAY_ROW_HEIGHT
 // Height of the scrollbar-only strip placed above the month/year row so the one visible
 // horizontal scrollbar is anchored there instead of at the bottom of the day rows.
 const SCROLLBAR_ROW_HEIGHT = 12
+const COL_NUMBER = 56
 const COL_ID = 64
 const COL_TYPE = 76
 const COL_STATUS = 104
 const COL_PRIORITY = 80
-const LABEL_WIDTH = 500
+const LABEL_WIDTH = 556
+const CONNECTOR_DOT_RADIUS = 4
+// One color per Phase, cycled through when there are more phases than colors.
+const CONNECTOR_COLOR_CLASSES = [
+  'text-amber-500 dark:text-amber-400',
+  'text-emerald-500 dark:text-emerald-400',
+  'text-sky-500 dark:text-sky-400',
+  'text-fuchsia-500 dark:text-fuchsia-400',
+  'text-orange-500 dark:text-orange-400',
+  'text-cyan-500 dark:text-cyan-400',
+  'text-rose-500 dark:text-rose-400',
+  'text-lime-500 dark:text-lime-400',
+]
+const DEFAULT_CONNECTOR_COLOR_CLASS = 'text-slate-400 dark:text-slate-500'
 
 function startOfDay(d: Date) {
   const x = new Date(d)
@@ -239,6 +253,9 @@ interface TaskRow {
   depth: number
   item: WorkItem
   hasChildren: boolean
+  // WBS-style outline number derived purely from tree position/order (1, 1.1, 1.2, 1.1.1, ...) -
+  // not persisted, recomputed every render from the same sibling order the rows are drawn in.
+  number: string
 }
 
 interface MilestoneRow {
@@ -490,7 +507,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   function minStartForParent(parentId: string): string {
     const parent = workItems.find((w) => w.id === parentId)
     const bound = parent?.dueDate ?? parent?.startDate
-    return bound ? toDateInputValue(new Date(bound)) : ''
+    // Strictly the day after the parent finishes, not the same day - a subtask starts once its
+    // parent is actually done, not still on its last day.
+    return bound ? toDateInputValue(addDays(new Date(bound), 1)) : ''
   }
 
   function openChildForm(parentId: string) {
@@ -571,7 +590,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
   // each task/phase child's own subtree (which may itself mix tasks and milestones) follows
   // immediately after it, recursively. This is how a milestone ends up nested inside its phase
   // instead of always sitting flat at the top level.
-  function buildRows(parentId: string | null, depth: number): Row[] {
+  function buildRows(parentId: string | null, depth: number, numberPrefix: string): Row[] {
     const taskChildren = (itemsByParent.get(parentId) ?? []).filter((w) => w.type === 'Phase' || w.startDate || w.dueDate)
     const milestoneChildren = milestonesByParent.get(parentId) ?? []
 
@@ -581,22 +600,39 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       depth,
       item,
       hasChildren: (itemsByParent.get(item.id)?.length ?? 0) > 0 || (milestonesByParent.get(item.id)?.length ?? 0) > 0,
+      number: '',
     }))
     const milestoneRowsHere: MilestoneRow[] = milestoneChildren.map((m) => ({ kind: 'milestone', key: `m-${m.id}`, depth, milestone: m }))
 
     const sorted = [...taskRowsHere, ...milestoneRowsHere].sort((a, b) => rowSortKey(a) - rowSortKey(b))
 
+    // Only task/phase rows consume a number slot - a milestone interleaved between them doesn't
+    // shift the count, so siblings stay 1.1, 1.2, 1.3 regardless of milestones in between.
+    let taskCounter = 0
     return sorted.flatMap((row) => {
       if (row.kind === 'milestone') return [row]
-      const nested = collapsed.has(row.item.id) ? [] : buildRows(row.item.id, depth + 1)
-      return [row, ...nested]
+      taskCounter += 1
+      const number = numberPrefix ? `${numberPrefix}.${taskCounter}` : `${taskCounter}`
+      const numberedRow: TaskRow = { ...row, number }
+      const nested = collapsed.has(row.item.id) ? [] : buildRows(row.item.id, depth + 1, number)
+      return [numberedRow, ...nested]
     })
   }
 
   const rows: Row[] = useMemo(() => {
-    return buildRows(null, 0).filter((r) => r.kind === 'milestone' || matchesFilters(r.item))
+    return buildRows(null, 0, '').filter((r) => r.kind === 'milestone' || matchesFilters(r.item))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workItems, milestones, collapsed, filterStatuses, filterPriorities, filterAssignees, searchQuery])
+
+  // Only needed for the parent/child connector lines below - maps a Task/Phase's id to its
+  // current row index so a connector can be positioned without re-scanning rows for every parent.
+  const rowIndexByTaskId = useMemo(() => {
+    const map = new Map<string, number>()
+    rows.forEach((r, i) => {
+      if (r.kind === 'task') map.set(r.item.id, i)
+    })
+    return map
+  }, [rows])
 
   function effectiveRange(item: WorkItem) {
     const base = item.startDate ? startOfDay(new Date(item.startDate)) : item.dueDate ? startOfDay(new Date(item.dueDate)) : null
@@ -638,8 +674,121 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     return item.type === 'Phase' ? phaseRange(item) : effectiveRange(item)
   }
 
+  // Every Phase gets its own connector color (cycling through the palette for more phases than
+  // colors), assigned in top-to-bottom row order so it lines up with the "Phase 1, Phase 2, ..."
+  // numbering the user sees in the # column.
+  const phaseColorClassById = useMemo(() => {
+    const map = new Map<string, string>()
+    let idx = 0
+    for (const row of rows) {
+      if (row.kind === 'task' && row.item.type === 'Phase') {
+        map.set(row.item.id, CONNECTOR_COLOR_CLASSES[idx % CONNECTOR_COLOR_CLASSES.length])
+        idx++
+      }
+    }
+    return map
+  }, [rows])
+
+  function ancestorPhaseId(item: WorkItem): string | null {
+    let current: WorkItem | undefined = item
+    while (current?.parentWorkItemId) {
+      const parent = workItemById.get(current.parentWorkItemId)
+      if (!parent) return null
+      if (parent.type === 'Phase') return parent.id
+      current = parent
+    }
+    return null
+  }
+
+  // One connector per Task that has Task children: a single polyline from the parent bar's
+  // top-right corner (its end date) down through a small "half dot" marker on each child's bar
+  // in row order, ending at the last child - not the parent's own bar's left edge (a Phase's
+  // rolled-up range isn't a real bar to connect from, hence Task-only parents). All connectors
+  // whose parent task lives under the same Phase share that Phase's color.
+  const parentChildConnectors = useMemo(() => {
+    const barTopOffset = (ROW_HEIGHT - 20) / 2
+    const dotOffset = 14
+    const result: { key: string; d: string; colorClass: string; dots: { key: string; cx: number; cy: number }[] }[] = []
+
+    for (const row of rows) {
+      if (row.kind !== 'task' || row.item.type !== 'Task') continue
+
+      const parentIndex = rowIndexByTaskId.get(row.item.id)
+      if (parentIndex === undefined) continue
+      const parentRange = effectiveRange(row.item)
+      if (!parentRange) continue
+
+      const phaseId = ancestorPhaseId(row.item)
+      const colorClass = (phaseId && phaseColorClassById.get(phaseId)) || DEFAULT_CONNECTOR_COLOR_CLASS
+
+      const children = (itemsByParent.get(row.item.id) ?? [])
+        .filter((w) => w.type === 'Task')
+        .map((w) => ({ item: w, rowIndex: rowIndexByTaskId.get(w.id) }))
+        .filter((c): c is { item: WorkItem; rowIndex: number } => c.rowIndex !== undefined)
+        .sort((a, b) => a.rowIndex - b.rowIndex)
+
+      if (children.length === 0) continue
+
+      const parentRight = (diffDays(parentRange.finish, rangeStart) + 1) * dayWidth - 1
+      // Vertically centered on the bar (bar spans barTopOffset..barTopOffset+20), not the top edge.
+      const parentTopY = parentIndex * ROW_HEIGHT + barTopOffset + 10
+
+      const points = children
+        .map(({ item: child, rowIndex }) => {
+          const childRange = effectiveRange(child)
+          if (!childRange) return null
+          const dotX = diffDays(childRange.start, rangeStart) * dayWidth + 1 + dotOffset
+          const dotY = rowIndex * ROW_HEIGHT + barTopOffset
+          return { key: child.id, dotX, dotY }
+        })
+        .filter((p): p is { key: string; dotX: number; dotY: number } => p !== null)
+
+      let d = `M ${parentRight} ${parentTopY}`
+      const dots: { key: string; cx: number; cy: number }[] = []
+      let cursorY = parentTopY
+
+      points.forEach((p) => {
+        // Right-angled instead of a direct diagonal, with the kink kept late: run horizontal
+        // first, at whatever height the line is already at, all the way over to the child's own
+        // column, and only then drop straight down into the dot - so the bend sits right next to
+        // the subtask, not right after leaving the parent.
+        d += ` L ${p.dotX} ${cursorY} L ${p.dotX} ${p.dotY}`
+        cursorY = p.dotY
+        dots.push({ key: p.key, cx: p.dotX, cy: p.dotY })
+      })
+
+      if (dots.length > 0) {
+        result.push({ key: `pc-${row.item.id}`, d, colorClass, dots })
+      }
+    }
+
+    return result
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, rowIndexByTaskId, itemsByParent, workItemById, phaseColorClassById, rangeStart, dayWidth, drag])
+
   async function commitDateChange(item: WorkItem, start: Date, finish: Date) {
     const shifts = computeCascadeShifts(item.id, finish, workItems)
+
+    // Subtasks keep whatever day-gap they currently have after their parent's end date - not
+    // just a 1-day minimum - in both directions: stretching the parent pushes them out by the
+    // same number of days, shortening it pulls them back in by the same amount. The whole
+    // subtree moves together since a shifted child's own finish date moves by the same delta,
+    // which then carries on to its own children on the next level down.
+    const previousFinish = item.dueDate ? startOfDay(new Date(item.dueDate)) : null
+    const deltaFinish = previousFinish ? diffDays(finish, previousFinish) : 0
+    if (deltaFinish !== 0) {
+      const stack = [item.id]
+      while (stack.length > 0) {
+        const parentId = stack.pop()!
+        for (const child of itemsByParent.get(parentId) ?? []) {
+          if (child.type !== 'Task' || !child.startDate || !child.dueDate || shifts.has(child.id)) continue
+          const childStart = startOfDay(new Date(child.startDate))
+          const childFinish = startOfDay(new Date(child.dueDate))
+          shifts.set(child.id, { start: addDays(childStart, deltaFinish), finish: addDays(childFinish, deltaFinish) })
+          stack.push(child.id)
+        }
+      }
+    }
 
     const updated = await updateWorkItem(item.boardId, item.id, {
       title: item.title,
@@ -724,6 +873,11 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         setError('Das Startdatum einer Unteraufgabe darf nicht vor dem Fälligkeitsdatum der übergeordneten Aufgabe liegen.')
         return
       }
+    }
+
+    if (newType === 'Task' && newEnd && newEnd < newStart) {
+      setError('Das Enddatum darf nicht vor dem Startdatum liegen.')
+      return
     }
 
     // A Phase has no dates of its own - its bar is rolled up live from its subtasks (see phaseRange).
@@ -1477,6 +1631,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
         <div className="shrink-0 border-r border-slate-200 dark:border-slate-800" style={{ width: LABEL_WIDTH }}>
           <div style={{ height: SCROLLBAR_ROW_HEIGHT }} />
           <div className="flex items-center border-b border-slate-200 bg-slate-50/80 font-semibold dark:border-slate-700/60 dark:bg-slate-800/50" style={{ height: HEADER_HEIGHT }}>
+            <span style={{ width: COL_NUMBER }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+              #
+            </span>
             <span style={{ width: COL_ID }} className="px-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
               ID
             </span>
@@ -1509,6 +1666,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     setContextMenu({ kind: 'milestone', milestone: m, x: e.clientX, y: e.clientY })
                   }}
                 >
+                  <span style={{ width: COL_NUMBER }} className="px-2 text-xs text-slate-400 dark:text-slate-500" />
                   <span style={{ width: COL_ID }} className="px-2 text-xs text-slate-500" />
                   <span className="flex flex-1 items-center gap-1.5 truncate px-2 text-sm font-bold text-purple-700 dark:text-purple-300" style={{ paddingLeft: row.depth * 16 }}>
                     <span className="text-xs">◆</span>
@@ -1536,6 +1694,9 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 key={row.key}
                 onContextMenu={(e) => openRowContextMenu(e, row)}
               >
+                <span style={{ width: COL_NUMBER }} className="truncate px-2 font-mono text-xs font-semibold text-slate-500 dark:text-slate-400">
+                  {row.number}
+                </span>
                 <span style={{ width: COL_ID }} className="truncate px-2 font-mono text-xs font-bold text-slate-500 dark:text-slate-400">
                   {item.referenceCode}
                 </span>
@@ -1746,7 +1907,25 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                 </div>
               )}
 
-
+              {/* Parent → Child Dependency Connectors: a line from a Task's end date to each of
+                  its subtasks' bars, with a "half dot" marker resting on each subtask's top edge.
+                  Rendered after the bars in the DOM so the dots visibly sit on top of them. */}
+              {parentChildConnectors.length > 0 && (
+                <svg
+                  className="pointer-events-none absolute left-0 top-0 z-30"
+                  width={chartWidth}
+                  height={rows.length * ROW_HEIGHT}
+                >
+                  {parentChildConnectors.map((connector) => (
+                    <g key={connector.key} className={connector.colorClass}>
+                      <path d={connector.d} fill="none" stroke="currentColor" strokeWidth={1.5} />
+                      {connector.dots.map((dot) => (
+                        <circle key={dot.key} cx={dot.cx} cy={dot.cy} r={CONNECTOR_DOT_RADIUS} fill="currentColor" />
+                      ))}
+                    </g>
+                  ))}
+                </svg>
+              )}
 
               {rows.length === 0 && (
                 <div
@@ -1933,13 +2112,24 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                       type="date"
                       min={(newParentId && minStartForParent(newParentId)) || undefined}
                       value={newStart}
-                      onChange={(e) => setNewStart(e.target.value)}
+                      onChange={(e) => {
+                        const start = e.target.value
+                        setNewStart(start)
+                        // Keep the end date from ever sitting before the (now later) start date.
+                        if (start && newEnd && newEnd < start) setNewEnd(start)
+                      }}
                       className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                     />
                   </div>
                   <div className="flex-1">
                     <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">Ende (optional)</label>
-                    <input type="date" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100" />
+                    <input
+                      type="date"
+                      min={newStart || undefined}
+                      value={newEnd}
+                      onChange={(e) => setNewEnd(e.target.value)}
+                      className="w-full rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
+                    />
                   </div>
                 </div>
               ) : (
