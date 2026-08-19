@@ -968,9 +968,28 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       event.currentTarget.releasePointerCapture(event.pointerId)
 
       const range = effectiveRange(item)
+      if (!range || drag.deltaDays === 0) {
+        setDrag(null)
+        return
+      }
+      // Keep showing the dragged position (drag stays set) until the commit lands, instead of
+      // clearing it right away - clearing immediately made the bar snap back to its old,
+      // not-yet-updated position for a moment, then jump again once the response arrived, which
+      // showed up as the bar visibly jittering on release.
+      commitDateChange(item, range.start, range.finish)
+        .catch(() => setError('Termin konnte nicht gespeichert werden.'))
+        .finally(() => setDrag(null))
+    }
+  }
+
+  // A lost/canceled pointer capture (e.g. the browser aborting the gesture) previously left drag
+  // stuck forever, since only pointerup cleared it - the bar looked permanently "still grabbed"
+  // even after releasing the mouse button. Reset on cancel too, without committing anything.
+  function handlePointerCancel(item: WorkItem) {
+    return (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!drag || drag.itemId !== item.id) return
+      event.currentTarget.releasePointerCapture(event.pointerId)
       setDrag(null)
-      if (!range || drag.deltaDays === 0) return
-      commitDateChange(item, range.start, range.finish).catch(() => setError('Termin konnte nicht gespeichert werden.'))
     }
   }
 
@@ -2145,6 +2164,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                         onPointerDown={isPhase ? undefined : handlePointerDown(item)}
                         onPointerMove={isPhase ? undefined : handlePointerMove}
                         onPointerUp={isPhase ? undefined : handlePointerUp(item)}
+                        onPointerCancel={isPhase ? undefined : handlePointerCancel(item)}
                         title={isPhase ? `${item.title} — ${formatDate(range.start.toISOString())} bis ${formatDate(range.finish.toISOString())}` : undefined}
                         className={`group absolute flex items-center rounded-sm ${barColor} ${isPhase ? 'opacity-90' : 'cursor-grab'} ${blocked ? 'border-l-4 border-amber-400' : ''}`}
                         style={{

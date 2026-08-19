@@ -5,7 +5,7 @@ export type BarColorMode = 'default' | 'status' | 'priority'
 export const BAR_COLOR_MODE_PREFERENCE_KEY = 'timelineBarColorMode'
 
 export const BAR_COLOR_MODE_OPTIONS: { value: BarColorMode; label: string; description: string }[] = [
-  { value: 'default', label: 'Wie jetzt', description: 'Phasen orange, Aufgaben mit Unteraufgaben grau, sonst nach Status/Spalte eingefärbt.' },
+  { value: 'default', label: 'Standard', description: 'Phasen orange, Aufgaben mit Unteraufgaben grau, sonst nach Status/Spalte eingefärbt.' },
   { value: 'status', label: 'Nach Status', description: 'Alle Aufgaben-Balken durchgehend nach Status eingefärbt (Neu, In Arbeit, Fertig, Pausiert, ...).' },
   { value: 'priority', label: 'Nach Priorität', description: 'Balken nach Priorität eingefärbt (Niedrig, Mittel, Hoch, Dringend).' },
 ]
