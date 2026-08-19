@@ -8,7 +8,7 @@ public record AddProjectMemberRequest(string Username);
 
 public record ProjectMemberSummaryDto(string Id, string DisplayName);
 
-public record ColumnTicketCountDto(string ColumnName, int Count);
+public record ColumnTicketCountDto(string ColumnName, int Count, int TimelineCount, int KanbanOnlyCount);
 
 public record ProjectDto(
     string Id,
@@ -20,11 +20,22 @@ public record ProjectDto(
     // Project-wide completion if you're the owner, otherwise your own task completion - see
     // ProjectsController for the exact rule.
     double CompletionPercent,
+    // Of that same population (all items if owner, else just your tasks) - how many have a
+    // Timeline date (StartDate or DueDate) set vs. are Kanban-only. Together these always add up
+    // to the population CompletionPercent was computed from.
+    int TimelineItemCount,
+    int KanbanOnlyItemCount,
     // Open (non-Done) Task counts per board column, in column order - same breakdown as the
     // Kanban board itself (e.g. Neu / In Arbeit / Pausiert), not just a single total.
     List<ColumnTicketCountDto> OpenTicketsByColumn,
     // Same breakdown, but only counting Tasks assigned to the current user.
     List<ColumnTicketCountDto> MyTicketsByColumn,
+    // Timeline-vs-Kanban-only split of the same open tickets OpenTicketsByColumn/MyTicketsByColumn
+    // total up to.
+    int OpenTimelineCount,
+    int OpenKanbanOnlyCount,
+    int MyOpenTimelineCount,
+    int MyOpenKanbanOnlyCount,
     // Open Tasks with a DueDate in the past - project-wide, and just the current user's.
     int OverdueCount,
     int MyOverdueCount,

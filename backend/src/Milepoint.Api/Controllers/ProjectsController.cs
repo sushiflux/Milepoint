@@ -369,6 +369,18 @@ public class ProjectsController : ControllerBase
         return list;
     }
 
+    // Same "open ticket" population BuildColumnCounts's non-Done columns add up to - Tasks (not
+    // Phases) sitting in a column that isn't Done.
+    private static IEnumerable<WorkItem> OpenTasks(IEnumerable<WorkItem> items) =>
+        items.Where(w => w.Type == WorkItemType.Task && w.Column.Type != BoardColumnType.Done);
+
+    private static (int Timeline, int KanbanOnly) SplitTimelineVsKanban(IEnumerable<WorkItem> items)
+    {
+        var list = items as ICollection<WorkItem> ?? items.ToList();
+        var timeline = list.Count(w => w.StartDate is not null || w.DueDate is not null);
+        return (timeline, list.Count - timeline);
+    }
+
     private static List<ColumnTicketCountDto> BuildColumnCounts(Board? board, IEnumerable<WorkItem> items)
     {
         if (board is null)
@@ -376,15 +388,20 @@ public class ProjectsController : ControllerBase
             return [];
         }
 
-        var taskCountByColumn = items
+        var tasksByColumn = items
             .Where(w => w.Type == WorkItemType.Task)
             .GroupBy(w => w.ColumnId)
-            .ToDictionary(g => g.Key, g => g.Count());
+            .ToDictionary(g => g.Key, g => g.ToList());
 
         return board.Columns
             .Where(c => c.Type != BoardColumnType.Done)
             .OrderBy(c => c.Order)
-            .Select(c => new ColumnTicketCountDto(c.Name, taskCountByColumn.GetValueOrDefault(c.Id, 0)))
+            .Select(c =>
+            {
+                var columnTasks = tasksByColumn.GetValueOrDefault(c.Id, []);
+                var (timeline, kanbanOnly) = SplitTimelineVsKanban(columnTasks);
+                return new ColumnTicketCountDto(c.Name, columnTasks.Count, timeline, kanbanOnly);
+            })
             .ToList();
     }
 
@@ -427,6 +444,11 @@ public class ProjectsController : ControllerBase
         var overdueCount = items.Count(IsOverdue);
         var myOverdueCount = myTasks.Count(IsOverdue);
 
+        var barScope = isOwner ? items : myTasks;
+        var (timelineItemCount, kanbanOnlyItemCount) = SplitTimelineVsKanban(barScope);
+        var (openTimelineCount, openKanbanOnlyCount) = SplitTimelineVsKanban(OpenTasks(items));
+        var (myOpenTimelineCount, myOpenKanbanOnlyCount) = SplitTimelineVsKanban(OpenTasks(myTasks));
+
         return new ProjectDto(
             project.Id,
             project.Name,
@@ -435,8 +457,14 @@ public class ProjectsController : ControllerBase
             isOwner,
             isFavorite,
             Math.Round(completionPercent, 1),
+            timelineItemCount,
+            kanbanOnlyItemCount,
             BuildColumnCounts(board, items),
             BuildColumnCounts(board, myTasks),
+            openTimelineCount,
+            openKanbanOnlyCount,
+            myOpenTimelineCount,
+            myOpenKanbanOnlyCount,
             overdueCount,
             myOverdueCount,
             lastActivityAt,

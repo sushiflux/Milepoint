@@ -40,7 +40,17 @@ const STAR_OUTLINE = (
   </svg>
 )
 
-function TicketBadgeRow({ items, overdueCount }: { items: ColumnTicketCount[]; overdueCount: number }) {
+function TicketBadgeRow({
+  items,
+  overdueCount,
+  timelineCount,
+  kanbanOnlyCount,
+}: {
+  items: ColumnTicketCount[]
+  overdueCount: number
+  timelineCount: number
+  kanbanOnlyCount: number
+}) {
   const total = items.reduce((sum, c) => sum + c.count, 0)
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -50,6 +60,15 @@ function TicketBadgeRow({ items, overdueCount }: { items: ColumnTicketCount[]; o
           className="rounded-md bg-brand-primary px-2.5 py-1 text-[11px] font-bold text-white dark:bg-brand-primary-light"
         >
           Gesamt {total}
+        </span>
+      )}
+      {timelineCount + kanbanOnlyCount > 0 && (
+        <span
+          title={`${timelineCount} in der Timeline geplant, ${kanbanOnlyCount} nur im Kanban ohne Termin`}
+          className="flex overflow-hidden rounded-md text-[11px] font-bold text-white"
+        >
+          <span className="bg-indigo-500 px-2 py-1 dark:bg-indigo-400">{timelineCount}</span>
+          <span className="bg-indigo-200 px-2 py-1 text-indigo-900 dark:bg-indigo-800 dark:text-indigo-100">{kanbanOnlyCount}</span>
         </span>
       )}
       {overdueCount > 0 && (
@@ -63,9 +82,22 @@ function TicketBadgeRow({ items, overdueCount }: { items: ColumnTicketCount[]; o
       {items.map((c) => (
         <span
           key={c.columnName}
-          className="rounded-md border border-brand-primary/20 bg-brand-primary/5 px-2.5 py-1 text-[11px] font-medium text-brand-primary-dark dark:border-brand-primary/30 dark:bg-brand-primary/20 dark:text-white"
+          title={`${c.timelineCount} in der Timeline geplant, ${c.kanbanOnlyCount} nur im Kanban ohne Termin`}
+          className="flex items-center overflow-hidden rounded-md border border-brand-primary/20 dark:border-brand-primary/30"
         >
-          {c.columnName} <span className="ml-1 font-bold">{c.count}</span>
+          <span className="bg-brand-primary/5 px-2.5 py-1 text-[11px] font-medium text-brand-primary-dark dark:bg-brand-primary/20 dark:text-white">
+            {c.columnName}
+          </span>
+          {c.timelineCount + c.kanbanOnlyCount > 0 ? (
+            <>
+              <span className="bg-indigo-500 px-1.5 py-1 text-[11px] font-bold text-white dark:bg-indigo-400">{c.timelineCount}</span>
+              <span className="bg-indigo-200 px-1.5 py-1 text-[11px] font-bold text-indigo-900 dark:bg-indigo-800 dark:text-indigo-100">{c.kanbanOnlyCount}</span>
+            </>
+          ) : (
+            <span className="bg-brand-primary/5 px-1.5 py-1 text-[11px] font-bold text-brand-primary-dark dark:bg-brand-primary/20 dark:text-white">
+              {c.count}
+            </span>
+          )}
         </span>
       ))}
     </div>
@@ -316,10 +348,35 @@ export default function ProjectsPage() {
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
           <div className="mb-2 flex items-center justify-between">
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-200">{progressLabel}</p>
-            <p className="text-[11px] font-bold text-brand-primary dark:text-brand-primary-light">{project.completionPercent}%</p>
+            <p className="text-[11px] font-bold text-brand-primary dark:text-brand-primary-light">{project.completionPercent}% fertig</p>
           </div>
-          <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden shadow-inner">
-            <div className="h-full rounded-full bg-gradient-to-r from-brand-primary to-brand-accent transition-all duration-1000 ease-out" style={{ width: `${project.completionPercent}%` }} />
+          {/* Filled width = completion percent (like before) - but the filled portion itself is
+              split by color into Timeline vs. Kanban-only, instead of one flat color. */}
+          <div
+            className="h-2 w-full overflow-hidden rounded-full bg-slate-200 shadow-inner dark:bg-slate-700"
+            title={`${project.timelineItemCount} in der Timeline geplant, ${project.kanbanOnlyItemCount} nur im Kanban ohne Termin`}
+          >
+            <div
+              className="flex h-full transition-all duration-1000 ease-out"
+              style={{ width: `${project.completionPercent}%` }}
+            >
+              {project.timelineItemCount + project.kanbanOnlyItemCount > 0 && (
+                <>
+                  <div
+                    className="h-full bg-indigo-500 dark:bg-indigo-400"
+                    style={{ width: `${(project.timelineItemCount / (project.timelineItemCount + project.kanbanOnlyItemCount)) * 100}%` }}
+                  />
+                  <div
+                    className="h-full bg-indigo-200 dark:bg-indigo-800"
+                    style={{ width: `${(project.kanbanOnlyItemCount / (project.timelineItemCount + project.kanbanOnlyItemCount)) * 100}%` }}
+                  />
+                </>
+              )}
+            </div>
+          </div>
+          <div className="mt-1 flex items-center justify-between text-[10px] font-medium text-slate-500 dark:text-slate-400">
+            <span>Timeline {project.timelineItemCount}</span>
+            <span>Kanban {project.kanbanOnlyItemCount}</span>
           </div>
         </div>
 
@@ -327,7 +384,12 @@ export default function ProjectsPage() {
           <div className="mt-5 relative pt-5">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
             <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-200">Gesamtübersicht</p>
-            <TicketBadgeRow items={project.openTicketsByColumn} overdueCount={project.overdueCount} />
+            <TicketBadgeRow
+              items={project.openTicketsByColumn}
+              overdueCount={project.overdueCount}
+              timelineCount={project.openTimelineCount}
+              kanbanOnlyCount={project.openKanbanOnlyCount}
+            />
           </div>
         )}
 
@@ -335,7 +397,12 @@ export default function ProjectsPage() {
           <div className="mt-5 relative pt-5">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-[1px] bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700/50 to-transparent" />
             {showsFullBreakdown && <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-brand-accent">Meine Aufgaben</p>}
-            <TicketBadgeRow items={project.myTicketsByColumn} overdueCount={project.myOverdueCount} />
+            <TicketBadgeRow
+              items={project.myTicketsByColumn}
+              overdueCount={project.myOverdueCount}
+              timelineCount={project.myOpenTimelineCount}
+              kanbanOnlyCount={project.myOpenKanbanOnlyCount}
+            />
           </div>
         )}
 

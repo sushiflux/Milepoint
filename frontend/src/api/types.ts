@@ -15,6 +15,9 @@ export interface ProjectMemberSummary {
 export interface ColumnTicketCount {
   columnName: string
   count: number
+  /** Timeline-vs-Kanban-only split of this column's own count. */
+  timelineCount: number
+  kanbanOnlyCount: number
 }
 
 export interface Project {
@@ -26,10 +29,18 @@ export interface Project {
   isFavorite: boolean
   /** Project-wide completion if isOwner, otherwise your own task completion. */
   completionPercent: number
+  /** Of that same population - how many have a Timeline date (StartDate/DueDate) set vs. are Kanban-only. */
+  timelineItemCount: number
+  kanbanOnlyItemCount: number
   /** Open (non-Done) Task counts per board column, in column order - e.g. Neu / In Arbeit / Pausiert. */
   openTicketsByColumn: ColumnTicketCount[]
   /** Same breakdown, but only counting Tasks assigned to the current user. */
   myTicketsByColumn: ColumnTicketCount[]
+  /** Timeline-vs-Kanban-only split of the open tickets openTicketsByColumn/myTicketsByColumn total up to. */
+  openTimelineCount: number
+  openKanbanOnlyCount: number
+  myOpenTimelineCount: number
+  myOpenKanbanOnlyCount: number
   /** Open Tasks with a DueDate in the past - project-wide, and just the current user's. */
   overdueCount: number
   myOverdueCount: number
