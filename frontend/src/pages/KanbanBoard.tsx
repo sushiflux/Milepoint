@@ -343,7 +343,12 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
         if (targetColumnId !== currentDrag.item.columnId || targetItem) {
           const targetColumn = board.columns.find((c) => c.id === targetColumnId)
           if (targetColumn) {
-            handleMove(currentDrag.item, targetColumn, targetItem)
+            // handleMove updates local state optimistically before the request resolves - on
+            // failure (e.g. an expired session) the card stays showing as moved locally until
+            // the next reload picks up the real server state. Not ideal, but no worse than
+            // before, and avoids an unhandled rejection now that a 401 no longer hard-navigates
+            // away (see api/client.ts).
+            handleMove(currentDrag.item, targetColumn, targetItem).catch(() => undefined)
           }
         }
       }
