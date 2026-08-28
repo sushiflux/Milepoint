@@ -17,11 +17,16 @@ available" is re-checked at the start of every session, not just filled in once.
 | Redis | 8 (Alpine) | 8.10.1 | https://github.com/redis/redis/releases |
 | Caddy | 2 (Alpine) | 2.11.4 | https://github.com/caddyserver/caddy/releases |
 
-**TypeScript 7.0 note**: TypeScript 7 is a from-scratch native (Go-based) compiler; as of this
-writing, `typescript-eslint` (the ESLint integration) only supports TypeScript `<6.1.0`, so 7.0
-would break linting entirely. Staying on 6.0.3 (the last classic-compiler release before 7.0)
-until `typescript-eslint` catches up - re-check `npm view typescript-eslint peerDependencies`
-before attempting 7.x again.
+**TypeScript 7.0 note** (checked 2026-08-28, decision: wait): TypeScript 7 is a from-scratch
+native (Go-based) compiler with no stable programmatic API yet - Microsoft has said that's coming
+in 7.1, which itself is still nightly-only (`7.1.0-dev.*`, no stable release). Because of that,
+`typescript-eslint` can't hook into it at all yet - not just a conservative peer range, its
+canary build (`typescript-eslint@canary`) is *still* capped at `typescript: '>=4.8.4 <6.1.0'`,
+with no TS 7 work visible in progress. Forcing the install wouldn't reliably work even with
+`--force`. Staying on 6.0.3 (the last classic-compiler release before 7.0) until both TS 7.1
+ships stable and `typescript-eslint` adds support - re-check `npm view typescript-eslint
+peerDependencies` and `npm view typescript-eslint@canary peerDependencies` before attempting 7.x
+again.
 
 Sources: `backend/src/Milepoint.Api/Milepoint.Api.csproj` (.NET), `frontend/Dockerfile.dev` /
 `backend/Dockerfile.dev` (Node, .NET SDK base images), `frontend/package.json` (React, Vite,

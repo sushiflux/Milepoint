@@ -17,6 +17,17 @@ entry below for how that's computed. The topmost section's version is always com
 date plus the current commit count) even before that commit actually exists yet, so it's headed
 with its real number rather than a placeholder.
 
+## v2026.8.28.67 — since v2026.8.28.66
+
+📝 Other
+
+- **Re-investigated TypeScript 7.0, decided to keep waiting** (see `VERSIONS.md`): confirmed
+  `typescript-eslint`'s canary build (`8.68.1-alpha.6`) still caps `typescript` at `<6.1.0`, no TS
+  7 work visible yet. Root cause is deeper than a conservative peer range - TS 7.0 doesn't expose
+  a stable programmatic API for tools to hook into; Microsoft has said that lands in 7.1, which is
+  itself still nightly-only (`7.1.0-dev.*`). Documented in `VERSIONS.md` so the next check has the
+  full context instead of re-deriving it.
+
 ## v2026.8.28.66 — since v2026.8.28.65
 
 📦 Dependencies
@@ -225,6 +236,18 @@ Eintrag „Versionsschema geändert" unten für die genaue Berechnung. Die Versi
 Abschnitts lässt sich immer berechnen (heutiges Datum plus aktuelle Commit-Anzahl), auch bevor
 dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.8.28.67 — seit v2026.8.28.66
+
+📝 Sonstiges
+
+- **TypeScript 7.0 erneut geprüft, Entscheidung bleibt: abwarten** (siehe `VERSIONS.md`):
+  bestätigt, dass `typescript-eslint`s Canary-Build (`8.68.1-alpha.6`) `typescript` weiterhin auf
+  `<6.1.0` deckelt, keine sichtbare Vorarbeit für TS 7. Der eigentliche Grund liegt tiefer als nur
+  ein konservativer Peer-Bereich - TS 7.0 bietet noch keine stabile programmatische API, über die
+  Tools reinhaken könnten; laut Microsoft kommt die mit 7.1, die selbst noch nur als Nightly
+  existiert (`7.1.0-dev.*`). In `VERSIONS.md` dokumentiert, damit die nächste Prüfung den vollen
+  Kontext hat statt ihn neu herzuleiten.
 
 ## v2026.8.28.66 — seit v2026.8.28.65
 
