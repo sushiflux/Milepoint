@@ -13,10 +13,63 @@ Technical change log for Milepoint — every notable change, including internal 
 bugfixes with no user-facing effect, cleanup, and infrastructure updates. For the customer-facing
 summary see [CHANGELOG.md](CHANGELOG.md). Version headers are `Year.Month.Day.Commit`
 (`Commit` = `git rev-list --count HEAD` at that commit) - see the "Versioning scheme changed"
-entry below for how that's computed. Entries not yet under a version number are uncommitted at
-time of writing.
+entry below for how that's computed. The topmost section's version is always computable (today's
+date plus the current commit count) even before that commit actually exists yet, so it's headed
+with its real number rather than a placeholder.
 
-## Current
+## v2026.8.28.66 — since v2026.8.28.65
+
+📦 Dependencies
+
+- **Database engines upgraded, with backup/restore (not a wipe)**: PostgreSQL 17→18.6, SQL Server
+  2022→2025. Both engines' data volumes use a version-specific on-disk format, so the existing
+  volumes (`postgres_data`, `mssql_data`, live data) couldn't just be pointed at the new images -
+  each was backed up first (`pg_dump --format=custom` for Postgres, `BACKUP DATABASE` to a `.bak`
+  for SQL Server, both copied out to `.backups/` on the host, gitignored), the volume recreated
+  fresh, schema rebuilt via the app's own `Database.MigrateAsync()` startup call, then the backup
+  restored into the new engine (`pg_restore --clean --if-exists`; `RESTORE DATABASE ... WITH
+  REPLACE` for SQL Server, which also transparently upgrades the row-version format in place).
+  Row counts verified to match pre/post on both.
+  - Postgres 18's official image changed its expected volume layout: it now wants a single mount
+    at `/var/lib/postgresql` (not `.../data`) so it can manage a major-version-specific
+    subdirectory itself (supports `pg_upgrade --link` without a mount-boundary in the way) -
+    `docker-compose.yml`'s `postgres` volume mount updated accordingly, or the container refuses
+    to start ("there appears to be PostgreSQL data in /var/lib/postgresql/data (unused
+    mount/volume)").
+  - Migrating the SQL Server side needed `dotnet ef database update --context
+    SqlServerPmDbContext` run manually (temporarily overriding `DB_PROVIDER`/`ConnectionStrings__Mssql`
+    via `docker exec -e`), since the app's own auto-migrate only runs for whichever provider
+    `DB_PROVIDER` is actually set to (Postgres, normally) - `Program.cs` never touches the other
+    context. The globally-installed `dotnet-ef` CLI tool couldn't open a connection at all against
+    the new SQL Server 2025 container (`SocketException (0x80004005): Success`, TCP error 35,
+    despite the port being reachable and DNS resolving fine) - root cause not fully pinned down,
+    but the actual running app (using the project's own referenced
+    `Microsoft.EntityFrameworkCore.SqlServer 10.0.11`, not the separately-installed global tool)
+    connected and migrated without issue when `DB_PROVIDER` was pointed at `mssql` for a normal
+    `docker compose up` restart - so the schema was built that way instead, then the backup
+    restored via `sqlcmd` directly.
+- **Redis 7→8-alpine**: no code changes needed - Redis is only used for a health-check ping
+  (`healthChecks.AddRedis`, `Program.cs`) here, no persisted data or cache correctness to worry
+  about.
+- **Node.js 22→24-alpine** (`frontend/Dockerfile.dev`) - Node 24 is the current Active LTS (22
+  moved to Maintenance LTS).
+- **Frontend toolchain bumped to latest across the board**: React 19.0→19.2.8, Vite 6.0→8.2.2,
+  Tailwind CSS 4.0→4.3.3, `@microsoft/signalr` 8→10, `react-router-dom` 7.1→7.18, ESLint 9→10,
+  `eslint-plugin-react-hooks` 5→7, `globals` 15→17, `@types/*` to their matching latest.
+  - **TypeScript stayed at 6.0.3, not the latest 7.0.2**: TypeScript 7 is a from-scratch native
+    (Go-based) compiler rewrite; `typescript-eslint`'s current peer range is `typescript: '>=4.8.4
+    <6.1.0'` (confirmed via `npm view typescript-eslint peerDependencies`), so 7.0 would break
+    linting outright (`npm install` fails ERESOLVE). 6.0.3 is the newest release still inside that
+    supported range (the last classic-compiler release before 7.0) - a real major-version bump
+    over the previously-installed 5.9.3, just not the very latest.
+  - `eslint-plugin-react-hooks` 5→7 brought new stricter rules (`react-hooks/set-state-in-effect`,
+    `react-hooks/static-components`, `react-hooks/immutability`, `react-hooks/refs`) that flag 14
+    pre-existing patterns across `NoteGraphView.tsx`, `NotesView.tsx`, `ProjectsPage.tsx`, and
+    `TimelineView.tsx` (e.g. `TimelineView.tsx`'s `LabelRow` being declared as a component inside
+    another component's render body) that passed under the old rule set. Left unfixed for now -
+    flagged to the user as a separate follow-up rather than bundled into a version-bump change;
+    `npm run build` (which only runs `tsc -b && vite build`, not lint) is unaffected.
+## v2026.8.28.65 — since v2026.8.20.64
 
 📝 Other
 
@@ -32,6 +85,8 @@ time of writing.
   not-yet-committed work). Backfilled with the last few days of actual commit history, using each
   entry's real `git rev-list --count` at the time to assign it to the version it actually shipped
   under, rather than lumping everything under one undated bucket.
+- **Introduced `VERSIONS.md`**: a live, always-current snapshot table (not history) of every major
+  runtime/framework/tool version in use, with a link to check for updates per row.
 
 ## v2026.8.20.64 — since v2026.8.19.63
 
@@ -166,10 +221,70 @@ Technisches Änderungsprotokoll für Milepoint — jede nennenswerte Änderung, 
 Refactorings, Bugfixes ohne Nutzer-Auswirkung, Aufräumarbeiten und Infrastruktur-Updates. Für die
 kundenseitige Zusammenfassung siehe [CHANGELOG.md](CHANGELOG.md). Versions-Überschriften folgen
 `Year.Month.Day.Commit` (`Commit` = `git rev-list --count HEAD` bei diesem Commit) - siehe den
-Eintrag „Versionsschema geändert" unten für die genaue Berechnung. Einträge ohne Versionsnummer
-sind zum Zeitpunkt des Schreibens noch nicht committed.
+Eintrag „Versionsschema geändert" unten für die genaue Berechnung. Die Version des obersten
+Abschnitts lässt sich immer berechnen (heutiges Datum plus aktuelle Commit-Anzahl), auch bevor
+dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
+Platzhalters.
 
-## Aktuell
+## v2026.8.28.66 — seit v2026.8.28.65
+
+📦 Abhängigkeiten
+
+- **Datenbank-Engines aktualisiert, mit Backup/Restore (kein Wipe)**: PostgreSQL 17→18.6, SQL
+  Server 2022→2025. Beide Engines nutzen ein versionsspezifisches Datenformat auf der Platte, die
+  bestehenden Volumes (`postgres_data`, `mssql_data`, Live-Daten) konnten also nicht einfach auf
+  die neuen Images gezeigt werden - zuerst gesichert (`pg_dump --format=custom` für Postgres,
+  `BACKUP DATABASE` in eine `.bak`-Datei für SQL Server, beide auf den Host nach `.backups/`
+  kopiert, gitignored), das Volume frisch neu angelegt, Schema über den eigenen
+  `Database.MigrateAsync()`-Aufruf der App beim Start wieder aufgebaut, dann das Backup in die
+  neue Engine zurückgespielt (`pg_restore --clean --if-exists`; `RESTORE DATABASE ... WITH
+  REPLACE` bei SQL Server, was dabei auch transparent das Zeilenversions-Format upgraded).
+  Datensätze vor/nach Abgleich geprüft, stimmen überein.
+  - Postgres 18s offizielles Image hat das erwartete Volume-Layout geändert: erwartet jetzt einen
+    einzelnen Mount unter `/var/lib/postgresql` (nicht `.../data`), damit es selbst ein
+    major-versionsspezifisches Unterverzeichnis verwalten kann (ermöglicht `pg_upgrade --link`
+    ohne Mount-Grenze im Weg) - `docker-compose.yml`s `postgres`-Volume-Mount entsprechend
+    angepasst, sonst verweigert der Container den Start ("there appears to be PostgreSQL data in
+    /var/lib/postgresql/data (unused mount/volume)").
+  - Die Migration der SQL-Server-Seite brauchte ein manuelles `dotnet ef database update
+    --context SqlServerPmDbContext` (mit temporär überschriebenem
+    `DB_PROVIDER`/`ConnectionStrings__Mssql` via `docker exec -e`), da die eigene Auto-Migration
+    der App nur für den gerade aktiven `DB_PROVIDER` läuft (normalerweise Postgres) -
+    `Program.cs` fasst den anderen Kontext nie an. Das global installierte `dotnet-ef`-CLI-Tool
+    konnte gar keine Verbindung zum neuen SQL-Server-2025-Container aufbauen
+    (`SocketException (0x80004005): Success`, TCP-Fehler 35, obwohl der Port erreichbar war und
+    DNS sauber auflöste) - Ursache nicht abschließend geklärt, aber die tatsächlich laufende App
+    (nutzt das eigene referenzierte `Microsoft.EntityFrameworkCore.SqlServer 10.0.11`, nicht das
+    separat installierte globale Tool) verband und migrierte problemlos, als `DB_PROVIDER` bei
+    einem normalen `docker compose up`-Neustart auf `mssql` zeigte - das Schema wurde also so
+    aufgebaut, danach das Backup direkt per `sqlcmd` zurückgespielt.
+- **Redis 7→8-alpine**: keine Code-Änderung nötig - Redis wird hier nur für einen
+  Health-Check-Ping genutzt (`healthChecks.AddRedis`, `Program.cs`), keine persistierten Daten
+  oder Cache-Korrektheit zu beachten.
+- **Node.js 22→24-alpine** (`frontend/Dockerfile.dev`) - Node 24 ist die aktuelle Active LTS (22
+  ist auf Maintenance LTS gewechselt).
+- **Frontend-Toolchain komplett auf den neuesten Stand gebracht**: React 19.0→19.2.8, Vite
+  6.0→8.2.2, Tailwind CSS 4.0→4.3.3, `@microsoft/signalr` 8→10, `react-router-dom` 7.1→7.18,
+  ESLint 9→10, `eslint-plugin-react-hooks` 5→7, `globals` 15→17, `@types/*` auf die jeweils
+  passende neueste Version.
+  - **TypeScript blieb bei 6.0.3, nicht beim neuesten 7.0.2**: TypeScript 7 ist ein von Grund auf
+    neuer nativer (Go-basierter) Compiler; `typescript-eslint`s aktueller Peer-Bereich ist
+    `typescript: '>=4.8.4 <6.1.0'` (bestätigt über `npm view typescript-eslint
+    peerDependencies`), 7.0 würde das Linting also komplett kaputt machen (`npm install`
+    schlägt mit ERESOLVE fehl). 6.0.3 ist die neueste Version noch innerhalb dieses
+    unterstützten Bereichs (die letzte Release mit dem klassischen Compiler vor 7.0) - ein
+    echter Major-Sprung gegenüber dem vorher installierten 5.9.3, nur nicht das allerneueste.
+  - `eslint-plugin-react-hooks` 5→7 brachte neue, strengere Regeln
+    (`react-hooks/set-state-in-effect`, `react-hooks/static-components`,
+    `react-hooks/immutability`, `react-hooks/refs`), die 14 bestehende Muster über
+    `NoteGraphView.tsx`, `NotesView.tsx`, `ProjectsPage.tsx` und `TimelineView.tsx` hinweg
+    markieren (z. B. `TimelineView.tsx`s `LabelRow`, die als Komponente innerhalb des
+    Render-Bodys einer anderen Komponente deklariert ist), die unter dem alten Regelwerk
+    durchgingen. Vorerst unbehoben gelassen - dem Nutzer als separates Follow-up gemeldet statt
+    in eine Versions-Update-Änderung gebündelt; `npm run build` (läuft nur `tsc -b && vite
+    build`, kein Lint) ist davon nicht betroffen.
+
+## v2026.8.28.65 — seit v2026.8.20.64
 
 📝 Sonstiges
 
@@ -182,10 +297,13 @@ sind zum Zeitpunkt des Schreibens noch nicht committed.
   Der `/api/version`-Fallback in `backend/.../Program.cs` von `v0.0.0` auf `v0.0.0.0` angepasst,
   passend zur neuen Segmentanzahl.
 - **Diese Datei und `CHANGELOG.md` eingeführt**, aufgebaut wie bei Fluxo (zweisprachig EN/DE über
-  `#english`/`#deutsch`-Anker, ein Abschnitt pro Version mit festem Kategorien-Set, „Aktuell" für
-  noch nicht committete Arbeit). Rückwirkend mit den letzten Tagen echter Commit-Historie befüllt,
-  wobei jeder Eintrag über sein tatsächliches `git rev-list --count` der Version zugeordnet wurde,
-  unter der er wirklich ausgeliefert wurde, statt alles in einem undatierten Topf zu sammeln.
+  `#english`/`#deutsch`-Anker, ein Abschnitt pro Version mit festem Kategorien-Set). Rückwirkend
+  mit den letzten Tagen echter Commit-Historie befüllt, wobei jeder Eintrag über sein
+  tatsächliches `git rev-list --count` der Version zugeordnet wurde, unter der er wirklich
+  ausgeliefert wurde, statt alles in einem undatierten Topf zu sammeln.
+- **`VERSIONS.md` eingeführt**: eine live, immer aktuelle Übersichtstabelle (keine Historie) jeder
+  wichtigen Runtime-/Framework-/Tool-Version im Einsatz, mit Link zum Prüfen auf Updates pro
+  Zeile.
 
 ## v2026.8.20.64 — seit v2026.8.19.63
 

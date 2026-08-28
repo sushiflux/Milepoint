@@ -2,7 +2,7 @@ name: milepoint
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:18.6-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-milepoint}
       POSTGRES_USER: ${POSTGRES_USER:-milepoint}
@@ -10,7 +10,10 @@ services:
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # Postgres 18+'s official image expects a mount at /var/lib/postgresql (not .../data) so it
+      # can manage a major-version-specific subdirectory itself, enabling pg_upgrade --link-style
+      # in-place major upgrades without a mount-boundary in the way.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-milepoint} -d ${POSTGRES_DB:-milepoint}"]
       interval: 5s
@@ -18,7 +21,7 @@ services:
       retries: 10
 
   mssql:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    image: mcr.microsoft.com/mssql/server:2025-latest
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD fehlt in .env}
@@ -35,7 +38,7 @@ services:
       start_period: 30s
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:

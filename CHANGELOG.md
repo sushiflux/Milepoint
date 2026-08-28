@@ -13,7 +13,15 @@ What changes for you as a Milepoint user, grouped per release: ✨ New · 🔄 C
 🔒 Security · 🗑️ Removed · ⚠️ Deprecated (only the categories that actually apply to a
 release are shown).
 
-## v2026.8.20.64 (current)
+## v2026.8.28.66
+
+🔄 Change
+
+- Updated the underlying platform (database engines, JavaScript runtime, and several build/tooling
+  dependencies) to their current versions - no visible change in behavior, but keeps things secure
+  and performant going forward.
+
+## v2026.8.20.64
 
 🔧 Fix
 
@@ -91,7 +99,15 @@ Was sich für dich als Milepoint-Nutzer:in ändert, gruppiert pro Release: ✨ N
 🔧 Behoben · 🔒 Sicherheit · 🗑️ Entfernt · ⚠️ Veraltet (nur die Kategorien, die für ein Release
 tatsächlich zutreffen, werden gezeigt).
 
-## v2026.8.20.64 (aktuell)
+## v2026.8.28.66
+
+🔄 Geändert
+
+- Die zugrunde liegende Plattform (Datenbank-Engines, JavaScript-Laufzeit und mehrere Build-/
+  Tooling-Abhängigkeiten) auf aktuelle Versionen gebracht - kein sichtbares Verhaltensänderung,
+  aber sicherheitstechnisch und performancetechnisch auf dem neuesten Stand.
+
+## v2026.8.20.64
 
 🔧 Behoben
 
