@@ -42,8 +42,12 @@ function New-StrongPassword {
 }
 
 function Get-AppVersion {
-    $versionFile = Join-Path $RootDir 'VERSION'
-    $base = if (Test-Path $versionFile) { (Get-Content $versionFile -Raw).Trim() } else { '0.0' }
+    # Year.Month.Day.CommitCount, no zero-padding (e.g. v2026.8.28.64) - mirrors Fluxo's
+    # versioning. No manually-maintained base file anymore (see scripts/git-hooks/post-commit,
+    # which keeps this current after every commit) - just today's date plus the running total
+    # commit count.
+    $today = Get-Date
+    $datePart = "$($today.Year).$($today.Month).$($today.Day)"
 
     $gitExe = Resolve-GitExe
     $commitCount = $null
@@ -52,7 +56,7 @@ function Get-AppVersion {
     }
     if (-not $commitCount) { $commitCount = '0' }
 
-    return "v$base.$commitCount"
+    return "v$datePart.$commitCount"
 }
 
 function Resolve-GitExe {

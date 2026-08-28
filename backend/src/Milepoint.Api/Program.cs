@@ -203,13 +203,14 @@ app.MapHealthChecks("/healthz");
 // Read fresh on every request (not baked into IConfiguration at startup) so the version
 // updates immediately when scripts/git-hooks/post-commit rewrites this file after a commit,
 // without requiring a container restart.
-// Dev and prod use the exact same vYear.Release.Commit scheme, no separate "-dev" marker -
-// the fallback below only matters before the first start.ps1/post-commit run has ever
-// written the file, and still follows the same format rather than a literal "dev" string.
+// Dev and prod use the exact same vYear.Month.Day.Commit scheme (e.g. v2026.8.28.64), no
+// separate "-dev" marker - the fallback below only matters before the first
+// start.ps1/post-commit run has ever written the file, and still follows the same format
+// rather than a literal "dev" string.
 var versionFilePath = Path.Combine(builder.Environment.ContentRootPath, "version.txt");
 app.MapGet("/api/version", () =>
 {
-    var version = File.Exists(versionFilePath) ? File.ReadAllText(versionFilePath).Trim() : "v0.0.0";
+    var version = File.Exists(versionFilePath) ? File.ReadAllText(versionFilePath).Trim() : "v0.0.0.0";
     return Results.Ok(new { version });
 });
 
