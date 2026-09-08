@@ -42,7 +42,12 @@ public class WhisperTranscriptionService : ITranscriptionProvider
 
         using var content = new MultipartFormDataContent();
         using var streamContent = new StreamContent(audio);
-        streamContent.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
+        // MediaTypeHeaderValue's constructor only accepts a bare MIME type ("audio/webm") and
+        // throws FormatException on a full Content-Type string with parameters attached (e.g. the
+        // "audio/webm;codecs=opus" browsers commonly report for a MediaRecorder blob) - Parse()
+        // handles the full string correctly, including any codec parameter.
+        var effectiveContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType;
+        streamContent.Headers.ContentType = MediaTypeHeaderValue.Parse(effectiveContentType);
         content.Add(streamContent, "audio_file", "audio");
 
         var requestUri = $"{endpointUrl.TrimEnd('/')}/asr?task=transcribe&language={Uri.EscapeDataString(whisperLanguage)}&output=json";

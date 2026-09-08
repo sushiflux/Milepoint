@@ -128,7 +128,17 @@ export default function DictationButton({ onTranscribed, onInterimResult, classN
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error === 'no-speech' || event.error === 'aborted') return
-      showError('Spracherkennung fehlgeschlagen.')
+      // Surface the actual browser error code - the Web Speech API's errors mostly map to fixable
+      // causes (not-allowed = mic permission, network = the browser couldn't reach its speech
+      // recognition backend, service-not-allowed = browser policy blocked it) rather than "broken".
+      const reasons: Record<string, string> = {
+        'not-allowed': 'Mikrofonzugriff wurde verweigert.',
+        'service-not-allowed': 'Der Browser hat den Zugriff auf den Spracherkennungsdienst blockiert.',
+        network: 'Der Browser konnte den Spracherkennungsdienst nicht erreichen (Netzwerkproblem).',
+        'audio-capture': 'Kein Mikrofon gefunden.',
+        'language-not-supported': 'Die eingestellte Sprache wird nicht unterstützt.',
+      }
+      showError(reasons[event.error] ?? `Spracherkennung fehlgeschlagen (${event.error}).`)
       recognitionRef.current = null
     }
 

@@ -132,8 +132,13 @@ public class TranscriptionController : ControllerBase
             return BadRequest("Audiodatei zu groß (maximal 25 MB).");
         }
 
+        // Browsers commonly report a MediaRecorder blob's type with codec parameters attached
+        // (e.g. "audio/webm;codecs=opus"), not just the bare MIME type - strip everything from the
+        // first ";" before checking the allowlist, or every real-world recording would be rejected
+        // despite its base type being supported.
         var contentType = audio.ContentType;
-        if (string.IsNullOrWhiteSpace(contentType) || !AllowedContentTypes.Contains(contentType))
+        var baseContentType = contentType?.Split(';', 2)[0].Trim();
+        if (string.IsNullOrWhiteSpace(baseContentType) || !AllowedContentTypes.Contains(baseContentType))
         {
             return BadRequest("Nicht unterstützter Audio-Dateityp.");
         }
@@ -161,7 +166,7 @@ public class TranscriptionController : ControllerBase
         try
         {
             await using var stream = audio.OpenReadStream();
-            var text = await provider.TranscribeAsync(stream, contentType, settings.Language, ct);
+            var text = await provider.TranscribeAsync(stream, contentType!, settings.Language, ct);
             return Ok(new { text });
         }
         catch (TranscriptionConfigurationException ex)

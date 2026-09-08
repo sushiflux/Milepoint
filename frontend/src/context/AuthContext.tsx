@@ -15,6 +15,13 @@ interface AuthContextValue extends AuthState {
   // showing (nothing unmounts), and a modal on top prompts to log back in without losing
   // whatever the user was in the middle of typing.
   sessionExpired: boolean
+  // Increments on every successful signIn (including re-login via SessionExpiredModal). Pages
+  // that load their own data in a useEffect keyed off e.g. projectId need this in their
+  // dependency array too - otherwise a request that failed with 401 while the session was
+  // expired never gets retried after the user logs back in, since projectId itself didn't
+  // change and the effect has no other reason to re-run (the concrete symptom this fixes:
+  // ProjectPage getting stuck on "Projekt wird geladen…" forever after a re-login).
+  authVersion: number
   signIn: (token: string, username: string, displayName: string, roles: string[]) => void
   signOut: () => void
 }
@@ -43,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     roles: readRoles(),
   }))
   const [sessionExpired, setSessionExpired] = useState(false)
+  const [authVersion, setAuthVersion] = useState(0)
 
   useEffect(() => {
     const handleExpired = () => setSessionExpired(true)
@@ -57,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(STORAGE_ROLES, JSON.stringify(roles))
     setState({ token, username, displayName, roles })
     setSessionExpired(false)
+    setAuthVersion((v) => v + 1)
   }
 
   const signOut = () => {
@@ -72,7 +81,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isProjectLeader = state.roles.includes('Projektleiter')
 
   return (
-    <AuthContext.Provider value={{ ...state, isAdmin, isProjectLeader, sessionExpired, signIn, signOut }}>
+    <AuthContext.Provider value={{ ...state, isAdmin, isProjectLeader, sessionExpired, authVersion, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   )

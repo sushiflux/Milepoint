@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
+import { getVersion } from '../api/version'
 import ThemeToggle from './ThemeToggle'
 import ProjectSwitcher from './ProjectSwitcher'
 import logoDark from '../assets/logo-dark.svg'
@@ -41,8 +42,18 @@ export default function Header() {
   const { displayName, signOut } = useAuth()
   const { theme } = useTheme()
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [appVersion, setAppVersion] = useState<string | null>(null)
   const logo = theme === 'dark' ? logoDark : logoLight
   const wordmark = theme === 'dark' ? wordmarkDark : wordmarkLight
+
+  // Fetched once on mount rather than per dropdown-open - GET /api/version is cheap and public,
+  // but there's no reason to re-fetch it every time the user opens their profile menu since it
+  // only changes when the backend container is rebuilt/restarted anyway.
+  useEffect(() => {
+    getVersion()
+      .then((res) => setAppVersion(res.version))
+      .catch(() => setAppVersion(null))
+  }, [])
 
   return (
     <header className="sticky top-0 z-40 flex h-14 w-full items-center justify-between border-b border-slate-200/70 bg-white/85 px-4 backdrop-blur-xl transition-colors dark:border-slate-800/70 dark:bg-[#0b0a1a]/85">
@@ -158,6 +169,11 @@ export default function Header() {
                     {LOGOUT_ICON}
                     Abmelden
                   </button>
+                </div>
+
+                {/* Footer: app version, always visible somewhere in the UI per project convention */}
+                <div className="mt-2 border-t border-slate-100 pt-2 text-center text-[10px] font-medium text-slate-400 dark:border-slate-800 dark:text-slate-500">
+                  Milepoint {appVersion ?? '–'}
                 </div>
               </div>
             </>

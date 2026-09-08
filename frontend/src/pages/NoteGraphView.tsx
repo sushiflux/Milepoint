@@ -131,6 +131,7 @@ function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, widt
 
 export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onConnectNotes }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const svgRef = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ width: 900, height: 600 })
   const sizeRef = useRef(size)
   sizeRef.current = size
@@ -426,21 +427,34 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     wake(0.4)
   }
 
-  function handleWheel(event: React.WheelEvent<SVGSVGElement>) {
-    event.preventDefault()
-    autoFitRef.current = false
-    const rect = event.currentTarget.getBoundingClientRect()
-    const mouseX = event.clientX - rect.left
-    const mouseY = event.clientY - rect.top
-    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12
+  // Attached manually with { passive: false } instead of React's onWheel prop - React registers
+  // wheel listeners as passive by default (for scroll-performance reasons that don't apply to an
+  // SVG canvas that isn't a scroll container), and a passive listener silently ignores
+  // preventDefault(), logging "Unable to preventDefault inside passive event listener
+  // invocation." on every scroll tick without actually stopping the page from scrolling.
+  useEffect(() => {
+    const el = svgRef.current
+    if (!el) return
 
-    setTransform((prev) => {
-      const newK = Math.min(Math.max(prev.k * factor, MIN_ZOOM), MAX_ZOOM)
-      const worldX = (mouseX - prev.x) / prev.k
-      const worldY = (mouseY - prev.y) / prev.k
-      return { x: mouseX - worldX * newK, y: mouseY - worldY * newK, k: newK }
-    })
-  }
+    function handleWheel(event: WheelEvent) {
+      event.preventDefault()
+      autoFitRef.current = false
+      const rect = el!.getBoundingClientRect()
+      const mouseX = event.clientX - rect.left
+      const mouseY = event.clientY - rect.top
+      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12
+
+      setTransform((prev) => {
+        const newK = Math.min(Math.max(prev.k * factor, MIN_ZOOM), MAX_ZOOM)
+        const worldX = (mouseX - prev.x) / prev.k
+        const worldY = (mouseY - prev.y) / prev.k
+        return { x: mouseX - worldX * newK, y: mouseY - worldY * newK, k: newK }
+      })
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheel)
+  }, [])
 
   return (
     <div
@@ -534,10 +548,10 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
         <p className="p-6 text-sm text-slate-500">Noch keine Notizen. Rechtsklick, um eine anzulegen.</p>
       ) : (
         <svg
+          ref={svgRef}
           viewBox={`0 0 ${size.width} ${size.height}`}
           preserveAspectRatio="none"
           className={`h-full w-full touch-none ${connectMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
-          onWheel={handleWheel}
           onPointerDown={handleBackgroundPointerDown}
           onPointerMove={handleSvgPointerMove}
           onPointerUp={handleSvgPointerUp}

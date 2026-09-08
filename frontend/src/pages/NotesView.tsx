@@ -3,11 +3,15 @@ import { createNote, deleteNote, updateNote } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note } from '../api/types'
 import NoteGraphView from './NoteGraphView'
+import TreeGraphView from './notesGraph/TreeGraphView'
+import type { TreeLayoutId } from './notesGraph/treeLayouts'
 import AddButton from '../components/AddButton'
 import DictationButton from '../components/DictationButton'
+import { usePreferences } from '../context/PreferencesContext'
 
 interface Props {
   projectId: string
+  projectName: string
   notes: Note[]
   onNotesChange: (notes: Note[]) => void
 }
@@ -20,11 +24,47 @@ interface OpenTab {
 }
 
 type ViewMode = 'list' | 'graph'
+// 'free' is the physics-simulated force graph (NoteGraphView, based on the free cross-links);
+// the other four are static tree layouts sharing TreeGraphView, based on the parent/child
+// hierarchy - see notesGraph/treeLayouts.ts for how each one computes node positions.
+type GraphLayout = 'free' | TreeLayoutId
 
+const VIEW_MODE_PREFERENCE_KEY = 'notesViewMode'
+const GRAPH_LAYOUT_PREFERENCE_KEY = 'notesGraphLayout'
 const LINK_PATTERN = /\[\[([^[\]]+)]]/g
 
-export default function NotesView({ projectId, notes, onNotesChange }: Props) {
-  const [viewMode, setViewMode] = useState<ViewMode>('list')
+const GRAPH_LAYOUT_LABELS: Record<GraphLayout, string> = {
+  free: 'Frei',
+  mindmap: 'Mind Map',
+  'tree-horizontal': 'Baum (links → rechts)',
+  'tree-vertical': 'Organigramm (oben → unten)',
+  fishbone: 'Fischgräten',
+}
+
+function isViewMode(value: string): value is ViewMode {
+  return value === 'list' || value === 'graph'
+}
+
+function isGraphLayout(value: string): value is GraphLayout {
+  return value === 'free' || value === 'mindmap' || value === 'tree-horizontal' || value === 'tree-vertical' || value === 'fishbone'
+}
+
+export default function NotesView({ projectId, projectName, notes, onNotesChange }: Props) {
+  const { getPreference, setPreference } = usePreferences()
+  const storedViewMode = getPreference(VIEW_MODE_PREFERENCE_KEY, 'list')
+  const [viewMode, setViewModeState] = useState<ViewMode>(isViewMode(storedViewMode) ? storedViewMode : 'list')
+  const storedGraphLayout = getPreference(GRAPH_LAYOUT_PREFERENCE_KEY, 'free')
+  const [graphLayout, setGraphLayoutState] = useState<GraphLayout>(isGraphLayout(storedGraphLayout) ? storedGraphLayout : 'free')
+
+  function setViewMode(mode: ViewMode) {
+    setViewModeState(mode)
+    setPreference(VIEW_MODE_PREFERENCE_KEY, mode)
+  }
+
+  function setGraphLayout(layout: GraphLayout) {
+    setGraphLayoutState(layout)
+    setPreference(GRAPH_LAYOUT_PREFERENCE_KEY, layout)
+  }
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState('')
@@ -123,7 +163,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   }
 
   async function handleSave() {
-    if (!activeTab) return
+    if (!activeTab || !activeNote) return
     setError(null)
     try {
       const updated = await updateNote(projectId, activeTab.noteId, activeTab.draftTitle.trim(), activeTab.draftContent)
@@ -207,32 +247,78 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
   }
 
+  // Shared by all four tree layouts (Mind Map, Baum, Organigramm, Fischgräten) - they only differ
+  // in node placement (see notesGraph/treeLayouts.ts), the hierarchy interactions are identical.
+  function handleTreeSelect(note: Note) {
+    openNote(note)
+    setViewMode('list')
+  }
+
+  async function handleTreeCreateRootNote(title: string) {
+    const created = await createNote(projectId, title, '', null)
+    onNotesChange([...notes, created])
+  }
+
+  async function handleTreeSetParent(noteId: string, parentNoteId: string | null) {
+    const note = notes.find((n) => n.id === noteId)
+    if (!note) return
+    const updated = await updateNote(projectId, note.id, note.title, note.content, { setParentNoteId: true, parentNoteId })
+    onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
+  }
+
   return (
     <div className="space-y-4">
-      <div className="flex w-fit rounded-lg p-1 glass-panel">
-        <button
-          onClick={() => setViewMode('list')}
-          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
-        >
-          Liste
-        </button>
-        <button
-          onClick={() => setViewMode('graph')}
-          className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'graph' ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
-        >
-          Graph
-        </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex w-fit rounded-lg p-1 glass-panel">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'list' ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
+          >
+            Liste
+          </button>
+          <button
+            onClick={() => setViewMode('graph')}
+            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${viewMode === 'graph' ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}
+          >
+            Graph
+          </button>
+        </div>
+
+        {viewMode === 'graph' && (
+          <select
+            value={graphLayout}
+            onChange={(e) => isGraphLayout(e.target.value) && setGraphLayout(e.target.value)}
+            className="rounded-lg border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-slate-600 outline-none transition-colors focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300"
+          >
+            {(Object.keys(GRAPH_LAYOUT_LABELS) as GraphLayout[]).map((layout) => (
+              <option key={layout} value={layout}>
+                {GRAPH_LAYOUT_LABELS[layout]}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 
       {viewMode === 'graph' ? (
-        <NoteGraphView
-          notes={notes}
-          onSelectNote={handleGraphSelect}
-          onCreateNote={handleGraphCreateNote}
-          onConnectNotes={handleGraphConnect}
-        />
+        graphLayout === 'free' ? (
+          <NoteGraphView
+            notes={notes}
+            onSelectNote={handleGraphSelect}
+            onCreateNote={handleGraphCreateNote}
+            onConnectNotes={handleGraphConnect}
+          />
+        ) : (
+          <TreeGraphView
+            projectName={projectName}
+            notes={notes}
+            layout={graphLayout}
+            onSelectNote={handleTreeSelect}
+            onCreateRootNote={handleTreeCreateRootNote}
+            onSetParent={handleTreeSetParent}
+          />
+        )
       ) : (
         <div className="flex gap-6">
           <aside className="w-56 shrink-0 space-y-3">

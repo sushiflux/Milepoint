@@ -27,6 +27,7 @@ public class NotesController : ControllerBase
             .Where(n => n.ProjectId == projectId)
             .Include(n => n.OutgoingLinks).ThenInclude(l => l.TargetNote)
             .Include(n => n.IncomingLinks).ThenInclude(l => l.SourceNote)
+            .Include(n => n.ChildNotes)
             .OrderBy(n => n.Title)
             .ToListAsync();
 
@@ -55,11 +56,18 @@ public class NotesController : ControllerBase
             return Conflict("Eine Notiz mit diesem Titel existiert bereits in diesem Projekt.");
         }
 
+        if (request.ParentNoteId is not null &&
+            !await _db.Notes.AnyAsync(n => n.Id == request.ParentNoteId && n.ProjectId == projectId))
+        {
+            return BadRequest("Übergeordnete Notiz gehört nicht zu diesem Projekt.");
+        }
+
         var note = new Note
         {
             ProjectId = projectId,
             Title = request.Title,
-            Content = request.Content
+            Content = request.Content,
+            ParentNoteId = request.ParentNoteId
         };
 
         _db.Notes.Add(note);
@@ -87,8 +95,33 @@ public class NotesController : ControllerBase
             return Conflict("Eine Notiz mit diesem Titel existiert bereits in diesem Projekt.");
         }
 
+        if (request.SetParentNoteId && request.ParentNoteId is not null)
+        {
+            if (request.ParentNoteId == noteId)
+            {
+                return BadRequest("Eine Notiz kann nicht ihre eigene übergeordnete Notiz sein.");
+            }
+
+            if (!await _db.Notes.AnyAsync(n => n.Id == request.ParentNoteId && n.ProjectId == projectId))
+            {
+                return BadRequest("Übergeordnete Notiz gehört nicht zu diesem Projekt.");
+            }
+
+            if (await WouldCreateCycleAsync(noteId, request.ParentNoteId))
+            {
+                return BadRequest("Diese Zuordnung würde einen Zyklus in der Notiz-Hierarchie erzeugen.");
+            }
+        }
+
         note.Title = request.Title;
         note.Content = request.Content;
+        // Only touch the hierarchy when the caller explicitly asked to (see SetParentNoteId's doc
+        // comment on UpdateNoteRequest) - a plain title/content save must never silently detach a
+        // note from its parent just because the request happened to omit ParentNoteId.
+        if (request.SetParentNoteId)
+        {
+            note.ParentNoteId = request.ParentNoteId;
+        }
         note.UpdatedAt = DateTimeOffset.UtcNow;
 
         await SyncOutgoingLinksAsync(projectId, note);
@@ -111,6 +144,16 @@ public class NotesController : ControllerBase
             .Where(l => l.SourceNoteId == noteId || l.TargetNoteId == noteId)
             .ToListAsync();
         _db.NoteLinks.RemoveRange(links);
+
+        // Deletion decision: children are promoted to root-level notes (ParentNoteId = null)
+        // rather than deleted along with their parent. Unlike WorkItem's subtree-delete (a Kanban
+        // task's subtasks are meaningless without it), a note's children are independent content a
+        // user wrote deliberately - silently deleting a whole branch of someone's notes because
+        // they removed the top one would be surprising and is not reversible. Matches Restrict on
+        // the FK above: this explicit re-parent has to happen before the parent row can go away.
+        await _db.Notes
+            .Where(n => n.ParentNoteId == noteId)
+            .ExecuteUpdateAsync(s => s.SetProperty(n => n.ParentNoteId, (string?)null));
 
         _db.Notes.Remove(note);
         await _db.SaveChangesAsync();
@@ -148,15 +191,55 @@ public class NotesController : ControllerBase
             .Where(n => n.ProjectId == projectId && n.Id == noteId)
             .Include(n => n.OutgoingLinks).ThenInclude(l => l.TargetNote)
             .Include(n => n.IncomingLinks).ThenInclude(l => l.SourceNote)
+            .Include(n => n.ChildNotes)
             .FirstOrDefaultAsync();
 
         return note is null ? null : ToDto(note);
+    }
+
+    // Walks the ancestor chain starting at targetParentId (the note about to become candidateNoteId's
+    // parent) all the way up to the root, checking whether candidateNoteId itself shows up along the
+    // way. If it does, setting the parent would close a loop (directly, e.g. A -> A, or transitively,
+    // e.g. A -> B -> C -> A) - the whole point of a tree is that every node has a finite path to a
+    // root, so any parent assignment that reintroduces a node into its own ancestor chain is rejected.
+    // Bounded by MaxDepthGuard rather than trusting the data to be acyclic already, so a
+    // pre-existing bug/manual DB edit can't turn this into an infinite loop.
+    private async Task<bool> WouldCreateCycleAsync(string candidateNoteId, string targetParentId)
+    {
+        const int maxDepthGuard = 10_000;
+        var currentId = targetParentId;
+
+        for (var depth = 0; depth < maxDepthGuard; depth++)
+        {
+            if (currentId == candidateNoteId)
+            {
+                return true;
+            }
+
+            var parentId = await _db.Notes
+                .Where(n => n.Id == currentId)
+                .Select(n => n.ParentNoteId)
+                .FirstOrDefaultAsync();
+
+            if (parentId is null)
+            {
+                return false;
+            }
+
+            currentId = parentId;
+        }
+
+        // Ancestor chain longer than the guard allows - treat as a (pre-existing) cycle rather
+        // than risk an unbounded loop.
+        return true;
     }
 
     private static NoteDto ToDto(Note note) => new(
         note.Id,
         note.Title,
         note.Content,
+        note.ParentNoteId,
+        note.ChildNotes.Select(c => c.Id).ToList(),
         note.OutgoingLinks.Select(l => new NoteLinkRefDto(l.TargetNoteId, l.TargetNote.Title)).ToList(),
         note.IncomingLinks.Select(l => new NoteLinkRefDto(l.SourceNoteId, l.SourceNote.Title)).ToList(),
         note.CreatedAt,

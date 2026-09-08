@@ -56,7 +56,12 @@ public class OpenAiTranscriptionService : ITranscriptionProvider
 
         using var content = new MultipartFormDataContent();
         using var streamContent = new StreamContent(audio);
-        streamContent.Headers.ContentType = new MediaTypeHeaderValue(string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType);
+        // MediaTypeHeaderValue's constructor only accepts a bare MIME type and throws
+        // FormatException on a full Content-Type string with parameters attached (e.g. the
+        // "audio/webm;codecs=opus" browsers commonly report for a MediaRecorder blob) - Parse()
+        // handles the full string correctly, including any codec parameter.
+        var effectiveContentType = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : contentType;
+        streamContent.Headers.ContentType = MediaTypeHeaderValue.Parse(effectiveContentType);
         content.Add(streamContent, "file", "audio" + GuessExtension(contentType));
         content.Add(new StringContent(TranscriptionModel), "model");
         // whisper-1 accepts a bare ISO-639-1 code, same trimming as the Whisper provider.

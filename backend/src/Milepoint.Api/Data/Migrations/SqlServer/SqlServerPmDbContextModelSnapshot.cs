@@ -399,6 +399,10 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("ParentNoteId")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<string>("ProjectId")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -413,6 +417,8 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .HasColumnType("datetimeoffset");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ParentNoteId");
 
                     b.HasIndex("ProjectId", "Title")
                         .IsUnique();
@@ -805,11 +811,18 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
 
             modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
                 {
+                    b.HasOne("Milepoint.Api.Models.Note", "ParentNote")
+                        .WithMany("ChildNotes")
+                        .HasForeignKey("ParentNoteId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("Milepoint.Api.Models.Project", "Project")
                         .WithMany()
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("ParentNote");
 
                     b.Navigation("Project");
                 });
@@ -969,6 +982,8 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
 
             modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
                 {
+                    b.Navigation("ChildNotes");
+
                     b.Navigation("IncomingLinks");
 
                     b.Navigation("OutgoingLinks");

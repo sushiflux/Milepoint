@@ -248,6 +248,17 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
                 .WithMany()
                 .HasForeignKey(n => n.ProjectId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Restrict, not Cascade/SetNull at the DB level: NotesController.Delete explicitly
+            // promotes direct children to root (ParentNoteId = null) before removing the parent
+            // row, same reasoning/pattern as WorkItem.ParentWorkItemId. Restrict makes that
+            // in-code step mandatory - a raw delete that skipped it would fail loudly instead of
+            // silently orphaning/cascading away child notes.
+            entity.Property(n => n.ParentNoteId).HasMaxLength(40);
+            entity.HasOne(n => n.ParentNote)
+                .WithMany(n => n.ChildNotes)
+                .HasForeignKey(n => n.ParentNoteId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<NoteLink>(entity =>

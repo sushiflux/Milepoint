@@ -116,7 +116,11 @@ export default function ProjectsPage() {
   const [renameValue, setRenameValue] = useState('')
 
   const navigate = useNavigate()
-  const { isProjectLeader } = useAuth()
+  // authVersion changes on every successful (re-)login (see AuthContext's doc comment) - without
+  // it in the load effect below, a 401 mid-load left this page stuck on its error message even
+  // after the user resolved the session-expiry prompt, since projectId-less pages had no other
+  // reason to retry.
+  const { isProjectLeader, authVersion } = useAuth()
   const { getPreference, setPreference } = usePreferences()
   const viewMode = getPreference(VIEW_MODE_PREFERENCE_KEY, 'tiles') as ViewMode
 
@@ -140,7 +144,8 @@ export default function ProjectsPage() {
 
   useEffect(() => {
     loadProjects().catch(() => setError('Projekte konnten nicht geladen werden.'))
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authVersion])
 
   async function handleCreateProject(event: FormEvent) {
     event.preventDefault()

@@ -1,0 +1,50 @@
+﻿using Microsoft.EntityFrameworkCore.Migrations;
+
+#nullable disable
+
+namespace Milepoint.Api.Data.Migrations.Postgres
+{
+    /// <inheritdoc />
+    public partial class AddNoteParent : Migration
+    {
+        /// <inheritdoc />
+        protected override void Up(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.AddColumn<string>(
+                name: "ParentNoteId",
+                table: "Notes",
+                type: "character varying(40)",
+                maxLength: 40,
+                nullable: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Notes_ParentNoteId",
+                table: "Notes",
+                column: "ParentNoteId");
+
+            migrationBuilder.AddForeignKey(
+                name: "FK_Notes_Notes_ParentNoteId",
+                table: "Notes",
+                column: "ParentNoteId",
+                principalTable: "Notes",
+                principalColumn: "Id",
+                onDelete: ReferentialAction.Restrict);
+        }
+
+        /// <inheritdoc />
+        protected override void Down(MigrationBuilder migrationBuilder)
+        {
+            migrationBuilder.DropForeignKey(
+                name: "FK_Notes_Notes_ParentNoteId",
+                table: "Notes");
+
+            migrationBuilder.DropIndex(
+                name: "IX_Notes_ParentNoteId",
+                table: "Notes");
+
+            migrationBuilder.DropColumn(
+                name: "ParentNoteId",
+                table: "Notes");
+        }
+    }
+}

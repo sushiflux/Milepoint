@@ -5,6 +5,8 @@ import { getTimeline } from '../api/timeline'
 import { getNotes } from '../api/notes'
 import { getUsers, type UserSummary } from '../api/users'
 import type { Board, Milestone, Note, Project, WorkItem } from '../api/types'
+import { ApiError } from '../api/client'
+import { useAuth } from '../context/AuthContext'
 import TimelineView from './TimelineView'
 import KanbanBoard from './KanbanBoard'
 import NotesView from './NotesView'
@@ -16,6 +18,9 @@ const VALID_TABS: Tab[] = ['timeline', 'kanban', 'notes']
 
 export default function ProjectPage() {
   const { projectId, tab } = useParams<{ projectId: string; tab: string }>()
+  // authVersion changes on every successful (re-)login - see AuthContext's doc comment on why
+  // this needs to be a load dependency, not just projectId.
+  const { authVersion } = useAuth()
 
   const [project, setProject] = useState<Project | null>(null)
   const [board, setBoard] = useState<Board | null>(null)
@@ -24,12 +29,14 @@ export default function ProjectPage() {
   const [notes, setNotes] = useState<Note[]>([])
   const [users, setUsers] = useState<UserSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [retryCount, setRetryCount] = useState(0)
 
   useEffect(() => {
     if (!projectId) return
 
-    Promise.all([getProjects(), getBoards(projectId), getTimeline(projectId), getNotes(projectId), getUsers()]).then(
-      async ([projects, boardList, timeline, noteList, userList]) => {
+    Promise.all([getProjects(), getBoards(projectId), getTimeline(projectId), getNotes(projectId), getUsers()])
+      .then(async ([projects, boardList, timeline, noteList, userList]) => {
         setProject(projects.find((p) => p.id === projectId) ?? null)
         // Every project gets a board automatically on creation - this only provisions one for
         // projects that predate that (or somehow still have none), so Kanban always has columns.
@@ -40,9 +47,21 @@ export default function ProjectPage() {
         setNotes(noteList)
         setUsers(userList)
         setLoading(false)
-      },
-    )
-  }, [projectId])
+      })
+      .catch((err) => {
+        // Without this, a 401 (session expired mid-load) rejected the whole Promise.all with
+        // nothing catching it - loading never left "true" (stuck on the spinner forever) and the
+        // rejection surfaced only as an unhandled promise error in the console. A 401 specifically
+        // resolves itself once the user logs back in via SessionExpiredModal (authVersion below
+        // retriggers this effect then) - other errors get a visible message plus a retry button
+        // instead of silently spinning forever.
+        if (err instanceof ApiError && err.status === 401) {
+          return
+        }
+        setLoadError(err instanceof ApiError ? err.message || 'Projekt konnte nicht geladen werden.' : 'Projekt konnte nicht geladen werden.')
+        setLoading(false)
+      })
+  }, [projectId, authVersion, retryCount])
 
   if (!projectId) return null
 
@@ -50,6 +69,26 @@ export default function ProjectPage() {
     return <Navigate to={`/projects/${projectId}/timeline`} replace />
   }
   const activeTab = tab as Tab
+
+  if (loadError) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center font-sans">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <p className="text-sm font-medium text-red-500 dark:text-red-400">{loadError}</p>
+          <button
+            onClick={() => {
+              setLoadError(null)
+              setLoading(true)
+              setRetryCount((c) => c + 1)
+            }}
+            className="rounded-lg bg-brand-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-brand-accent-light"
+          >
+            Erneut versuchen
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (loading || !project || !board) {
     return (
@@ -83,7 +122,7 @@ export default function ProjectPage() {
 
           {activeTab === 'kanban' && <KanbanBoard board={board} items={workItems} users={users} onItemsChange={setWorkItems} />}
 
-          {activeTab === 'notes' && <NotesView projectId={projectId} notes={notes} onNotesChange={setNotes} />}
+          {activeTab === 'notes' && <NotesView projectId={projectId} projectName={project.name} notes={notes} onNotesChange={setNotes} />}
           </main>
         </div>
       </div>
