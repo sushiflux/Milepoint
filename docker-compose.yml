@@ -69,7 +69,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       DB_PROVIDER: ${DB_PROVIDER:-postgres}
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-milepoint};Username=${POSTGRES_USER:-milepoint};Password=${POSTGRES_PASSWORD:?}
-      ConnectionStrings__Mssql: Server=mssql,1433;Database=${MSSQL_DB:-Milepoint};User Id=sa;Password=${MSSQL_SA_PASSWORD:?};TrustServerCertificate=True
+      ConnectionStrings__Mssql: Server=mssql,1433;Database=${MSSQL_DB:-Milepoint};User Id=sa;Password=${MSSQL_SA_PASSWORD:?};TrustServerCertificate=True;Encrypt=False
       ConnectionStrings__Redis: redis:6379
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY fehlt in .env}
       JWT_ISSUER: ${JWT_ISSUER:-milepoint-api}
@@ -118,6 +118,58 @@ services:
       retries: 10
       start_period: 30s
 
+  # Optional: self-hosted speech-to-text for the voice-dictation feature. Not part of the
+  # default `docker compose up` - most users stick with the browser-based (client-side) provider
+  # and need no server-side transcription at all. Only starts via the "whisper" profile:
+  #   docker compose --profile whisper up -d whisper   (or start.ps1 -WithWhisper)
+  whisper:
+    # onerahmet/openai-whisper-asr-webservice, pinned to v1.10.0 (latest stable as of 2026-09-08,
+    # actively maintained - github.com/ahmetoner/whisper-asr-webservice). Pinned to an exact tag
+    # for reproducibility (image is multi-GB and bundles specific model-engine versions), not
+    # `:latest`. Bump the tag deliberately when a newer release is verified, same as any other
+    # image in this file - check VERSIONS.md.
+    image: onerahmet/openai-whisper-asr-webservice:v1.10.0
+    profiles: ["whisper"]
+    environment:
+      # openai_whisper | faster_whisper | whisperx - openai_whisper is the reference engine and
+      # needs no extra setup (faster_whisper/whisperx need extra deps/HF tokens for some features).
+      ASR_ENGINE: ${WHISPER_ASR_ENGINE:-openai_whisper}
+      # Model size trades accuracy for speed/memory - "base" is a reasonable default for CPU-only
+      # inference (small/fast, good-enough accuracy for dictation). Bump to "small" for noticeably
+      # better accuracy at ~2x the compute, or "medium"/"large-v3" for near-best accuracy if this
+      # machine has the CPU headroom (or a GPU, see below) - large models are multiple GB and slow
+      # on CPU. Whisper is multilingual out of the box, so German works with any of these sizes
+      # without a separate language-specific model.
+      ASR_MODEL: ${WHISPER_ASR_MODEL:-base}
+      # cuda | cpu - stays cpu by default since this machine may not have a GPU exposed to Docker.
+      # To enable GPU acceleration (noticeably faster transcription):
+      #   1) switch the image tag above to the "-gpu" variant, e.g. v1.10.0-gpu
+      #   2) set ASR_DEVICE=cuda here (or via WHISPER_ASR_DEVICE in .env)
+      #   3) add to this service:
+      #        deploy:
+      #          resources:
+      #            reservations:
+      #              devices:
+      #                - driver: nvidia
+      #                  count: 1
+      #                  capabilities: [gpu]
+      #      (requires the NVIDIA Container Toolkit installed on the Docker host)
+      ASR_DEVICE: ${WHISPER_ASR_DEVICE:-cpu}
+    ports:
+      - "${WHISPER_PORT:-9000}:9000"
+    volumes:
+      # Persists downloaded model weights across container restarts/recreates - without this,
+      # every fresh container re-downloads the model (100s of MB) before it can serve a request.
+      - whisper_models:/root/.cache/whisper
+    healthcheck:
+      # No dedicated /health endpoint in this image - "/" redirects to the Swagger UI ("/docs"),
+      # which responds without needing a file upload, making it a reliable liveness check.
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9000/docs"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   caddy:
     image: caddy:2-alpine
     environment:
@@ -138,3 +190,4 @@ volumes:
   backend_nuget_cache:
   frontend_node_modules:
   caddy_data:
+  whisper_models:

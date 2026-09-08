@@ -1,9 +1,12 @@
 import Header from '../components/Header'
 import { usePreferences } from '../context/PreferencesContext'
+import { useAuth } from '../context/AuthContext'
 import { BAR_COLOR_MODE_OPTIONS, BAR_COLOR_MODE_PREFERENCE_KEY, resolveBarColorMode } from '../lib/timelinePreferences'
+import TranscriptionSettingsSection from '../components/TranscriptionSettingsSection'
 
 export default function SettingsPage() {
   const { getPreference, setPreference } = usePreferences()
+  const { isAdmin } = useAuth()
   const barColorMode = resolveBarColorMode(getPreference(BAR_COLOR_MODE_PREFERENCE_KEY, ''))
 
   return (
@@ -49,6 +52,16 @@ export default function SettingsPage() {
             </div>
           </div>
         </section>
+
+        {isAdmin && (
+          <div>
+            <div className="mb-2">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Administration</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Instanzweite Einstellungen - nur für Administratoren sichtbar.</p>
+            </div>
+            <TranscriptionSettingsSection />
+          </div>
+        )}
       </main>
     </div>
   )

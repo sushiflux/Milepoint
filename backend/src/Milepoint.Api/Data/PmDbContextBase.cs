@@ -1,10 +1,20 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Milepoint.Api.Models;
 
 namespace Milepoint.Api.Data;
 
-public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
+// IDataProtectionKeyContext: Data Protection's key ring is persisted here (DataProtectionKeys
+// table, below) rather than to disk. There's no dedicated writable volume for the backend
+// container in this project's docker-compose.yml (only a dev-only source bind mount and a NuGet
+// cache volume - neither is appropriate for a durable secret store, and neither exists at all in
+// a non-bind-mounted/prod-style deployment of the image). The database is already the durable,
+// backed-up store shared by both providers, so persisting keys there means API keys encrypted via
+// TranscriptionSettingsService stay decryptable across container restarts/recreates without
+// introducing a new volume, gitignore entry, or key-file path to manage. See Program.cs's
+// AddDataProtection().PersistKeysToDbContext<PmDbContextBase>() call.
+public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDataProtectionKeyContext
 {
     protected PmDbContextBase(DbContextOptions options) : base(options)
     {
@@ -24,6 +34,11 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
     public DbSet<MilestoneDependency> MilestoneDependencies => Set<MilestoneDependency>();
     public DbSet<Note> Notes => Set<Note>();
     public DbSet<NoteLink> NoteLinks => Set<NoteLink>();
+    public DbSet<TranscriptionSettings> TranscriptionSettings => Set<TranscriptionSettings>();
+
+    // IDataProtectionKeyContext requires a settable DbSet property (not just Set<T>()) named
+    // exactly DataProtectionKeys - see class-level comment above for why keys live here.
+    public DbSet<Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey> DataProtectionKeys { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -251,6 +266,37 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>
                 .WithMany(n => n.IncomingLinks)
                 .HasForeignKey(l => l.TargetNoteId)
                 .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        builder.Entity<TranscriptionSettings>(entity =>
+        {
+            // No IsRowVersion/concurrency token here on purpose: this is a rarely-written admin
+            // config singleton, not a high-contention row - EF's default "last write wins" is
+            // fine, matching every other entity in this DbContext (none use concurrency tokens).
+            entity.Property(t => t.Id).ValueGeneratedNever();
+            entity.Property(t => t.WhisperEndpointUrl).HasMaxLength(500);
+            entity.Property(t => t.OpenAiApiKeyEncrypted).HasMaxLength(2000);
+            entity.Property(t => t.GoogleApiKeyEncrypted).HasMaxLength(2000);
+            entity.Property(t => t.Language).HasMaxLength(20).IsRequired();
+            entity.Property(t => t.AutoSummarize).IsRequired();
+
+            // Singleton enforced at the data layer: only TranscriptionSettings.SingletonId (1) is
+            // ever valid. A CHECK constraint (rather than relying purely on application code) means
+            // even a rogue direct insert/manual DB edit can't create a second row. The column name
+            // is double-quoted ("Id") rather than bare - Postgres folds an unquoted identifier to
+            // lowercase, but EF creates the actual column as mixed-case "Id", so a bare `Id = 1`
+            // check fails at migration time with "column \"id\" does not exist" (confirmed live -
+            // this comment previously claimed unquoted was fine on Postgres, which was wrong).
+            // Double-quoted identifiers work identically as quoted identifiers on SqlServer (under
+            // the default QUOTED_IDENTIFIER ON that EF Core migrations run with), so the same
+            // constraint body still works unmodified in both provider-specific migrations.
+            // Fully-qualified on purpose: this class also exposes a same-named DbSet<TranscriptionSettings>
+            // property (line 37) - inside PmDbContextBase, an unqualified "TranscriptionSettings" resolves
+            // to that instance property (a DbSet), not the Models.TranscriptionSettings type, since member
+            // lookup within the class's own scope wins over an external type name.
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_TranscriptionSettings_SingletonId",
+                $"\"Id\" = {Models.TranscriptionSettings.SingletonId}"));
         });
     }
 }

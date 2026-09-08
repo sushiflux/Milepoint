@@ -1,11 +1,14 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Milepoint.Api.Auth;
 using Milepoint.Api.Data;
 using Milepoint.Api.Hubs;
+using Milepoint.Api.Services;
+using Milepoint.Api.Services.Transcription;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,6 +52,53 @@ if (!string.IsNullOrWhiteSpace(redisConnection))
 {
     healthChecks.AddRedis(redisConnection, name: "redis");
 }
+
+// Persist Data Protection's key ring to the database (PmDbContextBase.DataProtectionKeys) instead
+// of the default ephemeral/local-disk behavior. Without this, keys are lost on every container
+// restart/recreate ("No XML encryptor configured" warning is the symptom for Identity's own use of
+// Data Protection today) - and TranscriptionSettingsService's encrypted OpenAI/Google API keys
+// would become permanently undecryptable the moment the backend container restarts. Works
+// identically for both providers since PmDbContextBase (not the provider-specific subclass) is the
+// registered IDataProtectionKeyContext, and PersistKeysToDbContext resolves it through DI per use
+// via its own scope rather than needing a singleton instance here.
+builder.Services.AddDataProtection()
+    .SetApplicationName("Milepoint")
+    .PersistKeysToDbContext<PmDbContextBase>();
+
+// Singleton: IDataProtectionProvider is itself a singleton service with an internally cached key
+// ring, and CreateProtector (called once in the constructor) is safe to reuse across the app's
+// lifetime - no per-request state here, so there's no reason to pay for a scoped/transient
+// resolution on every request that touches transcription settings.
+builder.Services.AddSingleton<TranscriptionSettingsService>();
+
+// Named/typed HttpClients for the three server-side transcription providers (Browser needs none -
+// it never reaches the backend, see TranscriptionController). Whisper's target host is admin-
+// configured per TranscriptionSettings.WhisperEndpointUrl and can change at runtime, so it gets a
+// bare named client with no fixed BaseAddress (the service builds the full URL itself); OpenAI/
+// Google always talk to the same fixed API host regardless of admin config, so those get a
+// BaseAddress each. A shared, generous-but-bounded Timeout across all three accounts for
+// transcription (and, for OpenAI/Google, an optional second summarization call) potentially taking
+// longer than ASP.NET Core's HttpClient default of 100s would still allow, while still failing
+// fast enough that a hung provider doesn't tie up a request indefinitely.
+var transcriptionHttpTimeout = TimeSpan.FromSeconds(90);
+builder.Services.AddHttpClient(WhisperTranscriptionService.HttpClientName, client =>
+{
+    client.Timeout = transcriptionHttpTimeout;
+});
+builder.Services.AddHttpClient(OpenAiTranscriptionService.HttpClientName, client =>
+{
+    client.BaseAddress = new Uri("https://api.openai.com/");
+    client.Timeout = transcriptionHttpTimeout;
+});
+builder.Services.AddHttpClient(GoogleTranscriptionService.HttpClientName, client =>
+{
+    client.BaseAddress = new Uri("https://generativelanguage.googleapis.com/");
+    client.Timeout = transcriptionHttpTimeout;
+});
+
+builder.Services.AddScoped<WhisperTranscriptionService>();
+builder.Services.AddScoped<OpenAiTranscriptionService>();
+builder.Services.AddScoped<GoogleTranscriptionService>();
 
 builder.Services
     .AddIdentityCore<ApplicationUser>(options =>
@@ -203,14 +253,14 @@ app.MapHealthChecks("/healthz");
 // Read fresh on every request (not baked into IConfiguration at startup) so the version
 // updates immediately when scripts/git-hooks/post-commit rewrites this file after a commit,
 // without requiring a container restart.
-// Dev and prod use the exact same vYear.Month.Day.Commit scheme (e.g. v2026.8.28.64), no
+// Dev and prod use the exact same vYear.Month.CommitOfTheYear scheme (e.g. v2026.8.64), no
 // separate "-dev" marker - the fallback below only matters before the first
 // start.ps1/post-commit run has ever written the file, and still follows the same format
 // rather than a literal "dev" string.
 var versionFilePath = Path.Combine(builder.Environment.ContentRootPath, "version.txt");
 app.MapGet("/api/version", () =>
 {
-    var version = File.Exists(versionFilePath) ? File.ReadAllText(versionFilePath).Trim() : "v0.0.0.0";
+    var version = File.Exists(versionFilePath) ? File.ReadAllText(versionFilePath).Trim() : "v0.0.0";
     return Results.Ok(new { version });
 });
 

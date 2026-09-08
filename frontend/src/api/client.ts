@@ -20,10 +20,8 @@ function getToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY)
 }
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function performFetch(path: string, options: RequestInit, headers: Headers): Promise<Response> {
   const token = getToken()
-  const headers = new Headers(options.headers)
-  headers.set('Content-Type', 'application/json')
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
@@ -44,9 +42,27 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     throw new ApiError(response.status, text || response.statusText)
   }
 
+  return response
+}
+
+export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers)
+  headers.set('Content-Type', 'application/json')
+
+  const response = await performFetch(path, options, headers)
+
   if (response.status === 204) {
     return undefined as T
   }
 
+  return (await response.json()) as T
+}
+
+// For multipart/form-data uploads (e.g. audio blobs for /api/transcribe) - deliberately does NOT
+// set Content-Type itself, since the browser must generate the multipart boundary from the
+// FormData body; setting it manually would produce a malformed request the server can't parse.
+export async function apiFetchMultipart<T>(path: string, formData: FormData): Promise<T> {
+  const headers = new Headers()
+  const response = await performFetch(path, { method: 'POST', body: formData }, headers)
   return (await response.json()) as T
 }

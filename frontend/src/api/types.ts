@@ -132,3 +132,30 @@ export interface Note {
   createdAt: string
   updatedAt: string
 }
+
+// Mirrors backend Models/TranscriptionEnums.cs's TranscriptionProvider enum (serialized as a
+// string by the default System.Text.Json enum behavior used across this API).
+export type TranscriptionProvider = 'Browser' | 'Whisper' | 'OpenAI' | 'Google'
+
+// Mirrors Dtos/TranscriptionSettings/TranscriptionSettingsDtos.cs's TranscriptionSettingsResponse.
+export interface TranscriptionSettings {
+  provider: TranscriptionProvider
+  whisperEndpointUrl: string | null
+  language: string
+  hasOpenAiKey: boolean
+  hasGoogleKey: boolean
+  autoSummarize: boolean
+}
+
+// Mirrors UpdateTranscriptionSettingsRequest. openAiApiKey/googleApiKey are tri-state: omit/undefined
+// (or null) leaves the stored key untouched, '' clears it, a non-empty string replaces it - see the
+// backend DTO's own doc comment for the full rationale. Callers must not collapse this to a simple
+// falsy check.
+export interface UpdateTranscriptionSettingsRequest {
+  provider: TranscriptionProvider
+  whisperEndpointUrl: string | null
+  language: string
+  openAiApiKey?: string | null
+  googleApiKey?: string | null
+  autoSummarize: boolean
+}

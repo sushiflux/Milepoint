@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createNote, deleteNote, updateNote } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note } from '../api/types'
 import NoteGraphView from './NoteGraphView'
 import AddButton from '../components/AddButton'
+import DictationButton from '../components/DictationButton'
 
 interface Props {
   projectId: string
@@ -38,6 +39,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
 
   const activeTab = tabs.find((t) => t.noteId === activeTabId) ?? null
   const activeNote = notes.find((n) => n.id === activeTabId) ?? null
+  const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   // Keep non-dirty open tabs in sync if their note changes via another path (e.g. a graph
   // "Notizen verbinden" edit while the target note is already open here) - tabs with
@@ -73,6 +75,34 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   function updateActiveDraft(patch: Partial<Pick<OpenTab, 'draftTitle' | 'draftContent'>>) {
     if (!activeTabId) return
     setTabs((prev) => prev.map((t) => (t.noteId === activeTabId ? { ...t, ...patch, dirty: true } : t)))
+  }
+
+  // Inserts dictated text at the current cursor position of the content textarea (or appends with
+  // a separating space/newline if the textarea isn't focused/no selection is known).
+  function insertDictatedText(text: string) {
+    if (!activeTabId) return
+    const el = contentTextareaRef.current
+    setTabs((prev) =>
+      prev.map((t) => {
+        if (t.noteId !== activeTabId) return t
+        const current = t.draftContent
+        if (!el) {
+          const separator = current.length > 0 && !current.endsWith('\n') ? ' ' : ''
+          return { ...t, draftContent: current + separator + text, dirty: true }
+        }
+        const start = el.selectionStart ?? current.length
+        const end = el.selectionEnd ?? current.length
+        const next = current.slice(0, start) + text + current.slice(end)
+        // Restore the cursor right after the inserted text on the next tick, once React has
+        // applied the new value to the controlled textarea.
+        requestAnimationFrame(() => {
+          const pos = start + text.length
+          el.focus()
+          el.setSelectionRange(pos, pos)
+        })
+        return { ...t, draftContent: next, dirty: true }
+      }),
+    )
   }
 
   async function handleCreate(event: FormEvent) {
@@ -318,13 +348,19 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                   </button>
                 </div>
 
-                <textarea
-                  value={activeTab.draftContent}
-                  onChange={(e) => updateActiveDraft({ draftContent: e.target.value })}
-                  placeholder="Text… [[Andere Notiz]] verlinkt automatisch."
-                  rows={12}
-                  className="w-full rounded-xl border border-slate-300 bg-white/50 px-4 py-3 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100 backdrop-blur-sm"
-                />
+                <div className="relative">
+                  <textarea
+                    ref={contentTextareaRef}
+                    value={activeTab.draftContent}
+                    onChange={(e) => updateActiveDraft({ draftContent: e.target.value })}
+                    placeholder="Text… [[Andere Notiz]] verlinkt automatisch."
+                    rows={12}
+                    className="w-full rounded-xl border border-slate-300 bg-white/50 px-4 py-3 pr-14 text-sm outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-100 backdrop-blur-sm"
+                  />
+                  <div className="absolute right-3 top-3">
+                    <DictationButton onTranscribed={insertDictatedText} />
+                  </div>
+                </div>
 
                 <div className="glass-panel rounded-xl p-5">
                   <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-brand-primary-light">Vorschau</h3>
