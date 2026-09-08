@@ -7,6 +7,7 @@
   .\start.ps1 -Action status   Zeigt den Container-Status
   .\start.ps1 -Action logs     Folgt den Logs aller Services
   .\start.ps1 -Db mssql        Wechselt DB_PROVIDER und startet nur das Backend neu
+  .\start.ps1 -WithWhisper     Startet zusätzlich den optionalen Speech-to-Text-Dienst (whisper)
 #>
 
 param(
@@ -16,7 +17,13 @@ param(
     [ValidateSet('postgres', 'mssql')]
     [string]$Db,
 
-    [switch]$NoBuild
+    [switch]$NoBuild,
+
+    # Optionaler Speech-to-Text-Dienst für die Voice-Dictation-Funktion (siehe docker-compose.yml,
+    # Service "whisper"). Läuft standardmäßig NICHT mit - die meisten Nutzer verwenden den
+    # Browser-basierten Provider ohne serverseitige Transkription. Aktiviert das Compose-Profil
+    # "whisper" zusätzlich zum normalen Start/Stop/Restart.
+    [switch]$WithWhisper
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,17 +49,19 @@ function New-StrongPassword {
 }
 
 function Get-AppVersion {
-    # Year.Month.Day.CommitCount, no zero-padding (e.g. v2026.8.28.64) - mirrors Fluxo's
-    # versioning. No manually-maintained base file anymore (see scripts/git-hooks/post-commit,
-    # which keeps this current after every commit) - just today's date plus the running total
-    # commit count.
+    # Year.Month.CommitOfTheYear, no zero-padding (e.g. v2026.8.64) - mirrors Fluxo's versioning.
+    # No manually-maintained base file anymore (see scripts/git-hooks/post-commit, which keeps
+    # this current after every commit) - just the current year/month plus the count of commits
+    # since Jan 1 of the current year (not the repo's total commit count, so this resets to 1 on
+    # the first commit of each new calendar year instead of growing unbounded).
     $today = Get-Date
-    $datePart = "$($today.Year).$($today.Month).$($today.Day)"
+    $datePart = "$($today.Year).$($today.Month)"
 
     $gitExe = Resolve-GitExe
     $commitCount = $null
     if ($gitExe) {
-        try { $commitCount = & $gitExe -C $RootDir rev-list --count HEAD 2>$null } catch { $commitCount = $null }
+        $yearStart = "$($today.Year)-01-01T00:00:00"
+        try { $commitCount = & $gitExe -C $RootDir rev-list --count HEAD "--since=$yearStart" 2>$null } catch { $commitCount = $null }
     }
     if (-not $commitCount) { $commitCount = '0' }
 
@@ -161,7 +170,8 @@ function Find-FreePort([int]$StartPort, [System.Collections.Generic.HashSet[int]
 function Resolve-Ports {
     $portKeys = @(
         'CADDY_PORT', 'CADDY_HTTPS_PORT', 'FRONTEND_PORT', 'BACKEND_PORT', 'POSTGRES_PORT',
-        'MSSQL_PORT', 'REDIS_PORT', 'MAILPIT_SMTP_PORT', 'MAILPIT_UI_PORT', 'ADMINER_PORT'
+        'MSSQL_PORT', 'REDIS_PORT', 'MAILPIT_SMTP_PORT', 'MAILPIT_UI_PORT', 'ADMINER_PORT',
+        'WHISPER_PORT'
     )
     # Belegte Ports auch untereinander erkennen: ein Port, der bei OS-Check gerade frei
     # aussieht (weil der eigene Container mit diesem Port noch nicht läuft), darf trotzdem
@@ -181,7 +191,14 @@ function Resolve-Ports {
 }
 
 function Invoke-Compose([string[]]$ComposeArgs) {
-    & docker compose -p $ProjectName --env-file $EnvFile @ComposeArgs
+    # --profile whisper aktiviert den optionalen whisper-Service zusätzlich zu den profillosen
+    # (Standard-)Services - Compose startet Services ohne "profiles:"-Eintrag immer, unabhängig
+    # von --profile, siehe docker-compose.yml. Ohne -WithWhisper bleibt whisper unberührt (weder
+    # gestartet noch gestoppt), damit ein bereits separat laufender whisper-Container durch einen
+    # normalen "start.ps1 stop" nicht versehentlich mit heruntergefahren wird.
+    $profileArgs = @()
+    if ($WithWhisper) { $profileArgs = @('--profile', 'whisper') }
+    & docker compose -p $ProjectName --env-file $EnvFile @profileArgs @ComposeArgs
     if ($LASTEXITCODE -ne 0) {
         throw "docker compose $($ComposeArgs -join ' ') ist fehlgeschlagen (Exit Code $LASTEXITCODE)."
     }
@@ -216,6 +233,7 @@ function Wait-ForHealth([int]$TimeoutSeconds = 240) {
     Write-Host "`nWarte auf Healthchecks..." -ForegroundColor Cyan
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $servicesWithHealthcheck = @('postgres', 'mssql', 'redis', 'backend', 'frontend')
+    if ($WithWhisper) { $servicesWithHealthcheck += 'whisper' }
 
     while ((Get-Date) -lt $deadline) {
         $containers = Get-ComposeContainers
@@ -417,6 +435,10 @@ Write-Host "`nMilepoint-Stack läuft ($appVersion):" -ForegroundColor Green
 Write-Host "  App:      https://localhost:$caddyHttpsPort  (http://localhost:$caddyPort leitet automatisch um)"
 Write-Host "  Adminer:  http://localhost:$adminerPort"
 Write-Host "  Mailpit:  http://localhost:$mailpitPort"
+if ($WithWhisper) {
+    $whisperPort = Get-EnvValue -Path $EnvFile -Key 'WHISPER_PORT'
+    Write-Host "  Whisper:  http://localhost:$whisperPort  (Speech-to-Text, POST /asr)"
+}
 Write-Host "`nBeim ersten Aufruf warnt der Browser vor dem Zertifikat (selbst ausgestellte, lokale CA von Caddy)."
 Write-Host "Einmalig als vertrauenswürdig einrichten: siehe docs/03-runbook.md Abschnitt 'HTTPS lokal vertrauen'."
 Write-Host "`nLogin (nur beim allerersten Anlegen des Admin-Kontos gültig):"

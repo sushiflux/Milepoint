@@ -3,11 +3,16 @@
 # the actual commit count immediately after every commit - not just whenever start.ps1
 # happens to be re-run. Wired up automatically by start.ps1 via `git config core.hooksPath`.
 #
-# Scheme: Year.Month.Day.CommitCount, no zero-padding (e.g. v2026.8.28.64) - mirrors Fluxo's
-# versioning. The date is always "today" at commit time; there's no manually-maintained base
-# file to keep in sync (see VERSION, since removed) - just today's date plus the running
-# total commit count, which never resets or needs bumping by hand.
+# Scheme: Year.Month.CommitOfTheYear, no zero-padding (e.g. v2026.8.64). No day segment and no
+# daily reset - commits are usually made in small end-of-session batches, not evenly through the
+# day, so a per-day counter mostly just reads ".1" or ".2" and adds little information. Counting
+# per year instead gives an at-a-glance sense of overall commit volume for that year. The last
+# segment resets to 1 on the first commit of each new calendar year (git rev-list --count
+# --since, anchored at Jan 1 of the current year), not the repo's total commit count - otherwise
+# it grows unbounded over the project's lifetime instead of staying a meaningful "how many
+# commits this year" figure.
 
 root_dir="$(git rev-parse --show-toplevel)"
-count="$(git -C "$root_dir" rev-list --count HEAD)"
-printf 'v%s.%s' "$(date +%Y.%-m.%-d)" "$count" > "$root_dir/backend/src/Milepoint.Api/version.txt"
+year="$(date +%Y)"
+count="$(git -C "$root_dir" rev-list --count HEAD --since="${year}-01-01T00:00:00")"
+printf 'v%s.%s.%s' "$year" "$(date +%-m)" "$count" > "$root_dir/backend/src/Milepoint.Api/version.txt"

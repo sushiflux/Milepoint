@@ -16,6 +16,7 @@ available" is re-checked at the start of every session, not just filled in once.
 | SQL Server | 2025 | 2025 | https://learn.microsoft.com/en-us/sql/sql-server/what-s-new-in-sql-server |
 | Redis | 8 (Alpine) | 8.10.1 | https://github.com/redis/redis/releases |
 | Caddy | 2 (Alpine) | 2.11.4 | https://github.com/caddyserver/caddy/releases |
+| Whisper ASR Webservice | v1.10.0 (optional, `whisper` profile) | v1.10.0 | https://hub.docker.com/r/onerahmet/openai-whisper-asr-webservice/tags |
 
 **TypeScript 7.0 note** (checked 2026-08-28, decision: wait): TypeScript 7 is a from-scratch
 native (Go-based) compiler with no stable programmatic API yet - Microsoft has said that's coming
@@ -30,4 +31,4 @@ again.
 
 Sources: `backend/src/Milepoint.Api/Milepoint.Api.csproj` (.NET), `frontend/Dockerfile.dev` /
 `backend/Dockerfile.dev` (Node, .NET SDK base images), `frontend/package.json` (React, Vite,
-TypeScript, Tailwind), `docker-compose.yml` (PostgreSQL, SQL Server, Redis, Caddy).
+TypeScript, Tailwind), `docker-compose.yml` (PostgreSQL, SQL Server, Redis, Caddy, Whisper).

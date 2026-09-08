@@ -13,7 +13,7 @@ What changes for you as a Milepoint user, grouped per release: ✨ New · 🔄 C
 🔒 Security · 🗑️ Removed · ⚠️ Deprecated (only the categories that actually apply to a
 release are shown).
 
-## v2026.8.28.66
+## v2026.8.66
 
 🔄 Change
 
@@ -21,7 +21,7 @@ release are shown).
   dependencies) to their current versions - no visible change in behavior, but keeps things secure
   and performant going forward.
 
-## v2026.8.20.64
+## v2026.8.64
 
 🔧 Fix
 
@@ -29,7 +29,7 @@ release are shown).
   Kanban card) whenever your session had quietly expired in the background. You're now asked to
   log back in without losing your work.
 
-## v2026.8.19.63
+## v2026.8.63
 
 ✨ New
 
@@ -62,7 +62,7 @@ release are shown).
   releasing the mouse button.
 - Fixed clicking a bar's resize handle sometimes moving the whole bar instead of resizing it.
 
-## v2026.8.18.56
+## v2026.8.56
 
 ✨ New
 
@@ -99,7 +99,7 @@ Was sich für dich als Milepoint-Nutzer:in ändert, gruppiert pro Release: ✨ N
 🔧 Behoben · 🔒 Sicherheit · 🗑️ Entfernt · ⚠️ Veraltet (nur die Kategorien, die für ein Release
 tatsächlich zutreffen, werden gezeigt).
 
-## v2026.8.28.66
+## v2026.8.66
 
 🔄 Geändert
 
@@ -107,7 +107,7 @@ tatsächlich zutreffen, werden gezeigt).
   Tooling-Abhängigkeiten) auf aktuelle Versionen gebracht - kein sichtbares Verhaltensänderung,
   aber sicherheitstechnisch und performancetechnisch auf dem neuesten Stand.
 
-## v2026.8.20.64
+## v2026.8.64
 
 🔧 Behoben
 
@@ -115,7 +115,7 @@ tatsächlich zutreffen, werden gezeigt).
   eine halb ausgefüllte Kanban-Karte), sobald deine Sitzung im Hintergrund unbemerkt abgelaufen
   war. Du wirst jetzt gebeten, dich erneut anzumelden, ohne dass etwas verloren geht.
 
-## v2026.8.19.63
+## v2026.8.63
 
 ✨ Neu
 
@@ -152,7 +152,7 @@ tatsächlich zutreffen, werden gezeigt).
 - Behoben, dass ein Klick auf den Anfasser eines Balkens manchmal den ganzen Balken verschoben hat
   statt ihn in der Größe zu ändern.
 
-## v2026.8.18.56
+## v2026.8.56
 
 ✨ Neu
 
