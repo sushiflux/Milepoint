@@ -390,6 +390,10 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<string>("Color")
+                        .HasMaxLength(9)
+                        .HasColumnType("character varying(9)");
+
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasColumnType("text");
@@ -405,6 +409,9 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
+
+                    b.Property<int?>("Shape")
+                        .HasColumnType("integer");
 
                     b.Property<string>("Title")
                         .IsRequired()

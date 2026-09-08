@@ -392,6 +392,10 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<string>("Color")
+                        .HasMaxLength(9)
+                        .HasColumnType("nvarchar(9)");
+
                     b.Property<string>("Content")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -407,6 +411,9 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
+
+                    b.Property<int?>("Shape")
+                        .HasColumnType("int");
 
                     b.Property<string>("Title")
                         .IsRequired()

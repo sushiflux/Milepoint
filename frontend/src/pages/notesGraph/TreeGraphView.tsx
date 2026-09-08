@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
-import type { Note } from '../../api/types'
+import type { Note, NoteShape } from '../../api/types'
 import { computeTreeLayout, type Point, type TreeLayoutId } from './treeLayouts'
+import { NoteNodeVisual } from './NoteNodeShape'
+import NoteAppearanceMenu from './NoteAppearanceMenu'
 
 interface Props {
   projectName: string
@@ -10,6 +12,7 @@ interface Props {
   onSelectNote: (note: Note) => void
   onCreateRootNote: (title: string) => Promise<void>
   onSetParent: (noteId: string, parentNoteId: string | null) => Promise<void>
+  onChangeAppearance: (noteId: string, patch: { color?: string | null; shape?: NoteShape | null }) => Promise<void>
 }
 
 interface Transform {
@@ -21,7 +24,6 @@ interface Transform {
 const MIN_ZOOM = 0.15
 const MAX_ZOOM = 5
 const CENTER_RADIUS = 34
-const NODE_RADIUS = 4.5
 
 // Same fit-to-view approach used by NoteGraphView's free layout, reused here so every graph
 // layout feels identical when zooming/panning even though the underlying geometry differs.
@@ -57,7 +59,15 @@ function computeFitTransform(points: Point[], width: number, height: number): Tr
  * nodes/edges; zoom/pan, node dragging (reparenting), click-to-open, and the create/context menus
  * are implemented once here instead of once per layout.
  */
-export default function TreeGraphView({ projectName, notes, layout: layoutId, onSelectNote, onCreateRootNote, onSetParent }: Props) {
+export default function TreeGraphView({
+  projectName,
+  notes,
+  layout: layoutId,
+  onSelectNote,
+  onCreateRootNote,
+  onSetParent,
+  onChangeAppearance,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ width: 900, height: 600 })
@@ -182,6 +192,24 @@ export default function TreeGraphView({ projectName, notes, layout: layoutId, on
     }
   }
 
+  async function changeNodeColor(noteId: string, color: string | null) {
+    try {
+      await onChangeAppearance(noteId, { color })
+      setActionError(null)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Farbe konnte nicht geändert werden.')
+    }
+  }
+
+  async function changeNodeShape(noteId: string, shape: NoteShape | null) {
+    try {
+      await onChangeAppearance(noteId, { shape })
+      setActionError(null)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Form konnte nicht geändert werden.')
+    }
+  }
+
   function handleNodePointerDown(id: string) {
     return (event: React.PointerEvent<SVGGElement>) => {
       if (event.button !== 0) return
@@ -224,7 +252,10 @@ export default function TreeGraphView({ projectName, notes, layout: layoutId, on
     const worldY = (screenY - t.y) / t.k
 
     let closestId: string | null = null
-    let closestDist = 28 / t.k // Hit radius in world units, scaled so zoom doesn't change hit feel.
+    // Hit radius in world units, scaled so zoom doesn't change hit feel. Widened from the previous
+    // small-circle-node value (28) since nodes now render as text-sized boxes (see
+    // notesGraph/NoteNodeShape.tsx) rather than small fixed dots.
+    let closestDist = 55 / t.k
     for (const n of nodes) {
       if (n.id === drag.id) continue
       const dist = Math.hypot(n.x - worldX, n.y - worldY)
@@ -365,6 +396,12 @@ export default function TreeGraphView({ projectName, notes, layout: layoutId, on
             >
               Elternzuordnung entfernen
             </button>
+            <NoteAppearanceMenu
+              color={nodeMenuNote.color}
+              shape={nodeMenuNote.shape}
+              onChangeColor={(color) => changeNodeColor(nodeMenuNote.id, color)}
+              onChangeShape={(shape) => changeNodeShape(nodeMenuNote.id, shape)}
+            />
           </div>
         </>
       )}
@@ -451,36 +488,28 @@ export default function TreeGraphView({ projectName, notes, layout: layoutId, on
               const isHovered = n.id === hoveredId
               const isDragOver = n.id === dragOverId
               const isDragged = n.id === draggedId
-              const fillClass = isDragOver
-                ? 'fill-amber-500'
-                : isHovered
-                  ? 'fill-brand-primary dark:fill-brand-primary-light'
-                  : 'fill-slate-500 dark:fill-slate-400'
+              const emphasized = isHovered || isDragOver
+              const emphasisClassName = isDragOver ? 'stroke-amber-500' : 'stroke-brand-primary dark:stroke-brand-primary-light'
 
               return (
                 <g
                   key={n.id}
+                  className="cursor-pointer"
                   opacity={isDragged ? 0.5 : 1}
                   onPointerDown={handleNodePointerDown(n.id)}
                   onPointerEnter={() => setHoveredId(n.id)}
                   onPointerLeave={() => setHoveredId((prev) => (prev === n.id ? null : prev))}
                   onContextMenu={handleNodeContextMenu(n.id)}
                 >
-                  <circle
-                    cx={n.x}
-                    cy={n.y}
-                    r={isDragOver ? NODE_RADIUS + 2.5 : NODE_RADIUS}
-                    className={`cursor-pointer ${fillClass} ${isHovered || isDragOver ? 'stroke-slate-900 dark:stroke-white' : ''}`}
-                    strokeWidth={isHovered || isDragOver ? 1.5 : 0}
-                  />
-                  <text
+                  <NoteNodeVisual
                     x={n.x}
-                    y={n.y + NODE_RADIUS + 12}
-                    textAnchor="middle"
-                    className={`pointer-events-none select-none text-[10px] ${isHovered ? 'fill-slate-700 dark:fill-slate-200' : 'fill-slate-500'}`}
-                  >
-                    {n.note.title}
-                  </text>
+                    y={n.y}
+                    title={n.note.title}
+                    shape={n.note.shape}
+                    color={n.note.color}
+                    emphasized={emphasized}
+                    emphasisClassName={emphasisClassName}
+                  />
                 </g>
               )
             })}

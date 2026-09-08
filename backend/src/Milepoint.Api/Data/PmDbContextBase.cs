@@ -259,6 +259,10 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
                 .WithMany(n => n.ChildNotes)
                 .HasForeignKey(n => n.ParentNoteId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // 9 chars covers the longest valid value (#RRGGBBAA); the actually-accepted formats
+            // (#fff / #3b82f6, validated in NotesController) are shorter still.
+            entity.Property(n => n.Color).HasMaxLength(9);
         });
 
         builder.Entity<NoteLink>(entity =>

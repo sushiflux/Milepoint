@@ -18,12 +18,126 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
-## v2026.9.68
+## v2026.9.71
+
+✨ New
+
+- **Per-note color and shape, plus color palettes, across all tree/graph views**:
+  - Backend: `Note` gains `Color` (hex string, validated `^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`,
+    400 with a specific message on an invalid value) and `Shape` (new `NoteShape` enum:
+    `Rounded`/`Rectangle`/`Diamond`/`Underline`/`Ellipse`). Deliberately **no**
+    `SetParentNoteId`-style tri-state flag for these two - unlike the parent hierarchy, the note
+    editor always has both values in hand whenever it saves at all, so every `PUT` just applies
+    them as given (`null` = revert to default); every `updateNote()` caller on the frontend must
+    pass the note's current `color`/`shape` through even on a plain title/content save, or they'd
+    be silently reset. Migrations `AddNoteColorShape` for both providers, verified live.
+  - `notesGraph/colorSchemes.ts`: 6 predefined palettes (Standard/Lebendig/Pastell/Ozean/
+    Sonnenuntergang/Wald), all 44 colors WCAG-checked (≥4.5:1 against whichever of white/dark text
+    reads better) - two initial candidates were swapped for darker variants after failing the
+    check. `getReadableTextColor()` picks the in-node text color per note automatically.
+  - `notesGraph/NoteNodeShape.tsx`: shared `NoteNodeVisual` renders all five shapes as SVG, sized
+    to the title's length, with the title inside the shape (Underline: text + line, no
+    background/border) - replaces the previous fixed-size `<circle>` in both graph views. Default
+    fill for notes without a custom color moved to a fixed `#475569` (theme-independent) - the
+    prior theme-conditional slate tone would have read at only 2.56:1 against white inner text in
+    dark mode.
+  - `notesGraph/NoteAppearanceMenu.tsx`: the color/shape picker appended to each node's context
+    menu (all palettes as clickable swatches, a "Zurücksetzen" per property, five shape-preview
+    buttons) - newly added to `NoteGraphView.tsx`'s free-layout view too, which had no per-node
+    context menu at all before this.
+  - `treeLayouts.ts`'s spacing constants (e.g. `SIBLING_SPACING` 56→88, `DEPTH_SPACING` 220→260)
+    and `NoteGraphView.tsx`'s force-simulation constants (`REPULSION` 2000→5500, `LINK_DISTANCE`
+    90→160) increased so the now text-sized node boxes don't overlap.
+  - `assignSchemeColors()`/`colorForIndex()` (bulk-assign a palette across several notes at once)
+    exist but aren't wired to a UI trigger yet - no concrete "apply to these notes" action was
+    specified; add one when there's a specific place for it.
+
+📝 Other
+
+- Created `CLAUDE.md` at the repo root (via `/init`) - commands, and the architectural points that
+  need reading multiple files to piece together (dual EF Core provider setup, the two independent
+  note relationship graphs, the two different "leave this field alone" update conventions, etc.).
+
+## v2026.9.70
+
+✨ New
+
+- **Note hierarchy (parent/child), separate from the existing free cross-links**, plus four tree
+  views to browse it:
+  - `Note` gains `ParentNoteId`/`ChildNotes`; `NotesController` enforces same-project and
+    cycle-detection (`WouldCreateCycleAsync`) on reassignment, and promotes children to root notes
+    on delete instead of cascading. `UpdateNoteRequest` gained a `SetParentNoteId` bool - a plain
+    title/content save must never implicitly touch the hierarchy, since `ParentNoteId` alone can't
+    distinguish "leave unchanged" from "clear it" (both deserialize to `null` when omitted).
+  - Migrations for both providers (`AddNoteParent`), verified live on Postgres and SqlServer.
+  - `notesGraph/treeLayouts.ts` computes four tree layouts (mind map, left-to-right tree,
+    top-to-bottom org chart, fishbone) from one shared parent/child traversal;
+    `notesGraph/TreeGraphView.tsx` is the shared canvas (zoom/pan, drag-to-reparent, create/
+    context menus) all four share, replacing the earlier single-layout `NoteRadialView.tsx`. Fixes
+    a bug where root notes never got a connector line to the center - `buildEdges` now always
+    routes an edge from the virtual center for every depth-1 node.
+  - `NotesView.tsx` now has a single "Graph" tab with a layout picker instead of separate tabs per
+    layout (`notesGraphLayout` preference).
+
+🔧 Fix
+
+- **Session-expiry left the page stuck loading forever after a re-login**: `ProjectPage`'s
+  `Promise.all` had no `.catch()`, so a 401 (session expired mid-load) rejected silently
+  (`Uncaught (in promise) ApiError` in the console) and `loading` never left `true`. Now shows a
+  retry button for real errors and waits out a 401 specifically. `AuthContext` gains
+  `authVersion`, bumped on every successful (re-)login, so `ProjectPage`/`ProjectsPage`'s load
+  effects re-run automatically once the user logs back in via `SessionExpiredModal` instead of
+  requiring a manual page reload.
+- **Dictation upload rejected with "Nicht unterstützter Audio-Dateityp." / 500**: browsers report a
+  `MediaRecorder` blob's type with codec parameters attached (e.g. `audio/webm;codecs=opus`),
+  which both the backend's content-type allowlist check and `MediaTypeHeaderValue`'s constructor
+  rejected outright (the latter throwing `FormatException`, surfacing as a 500 in
+  `WhisperTranscriptionService`/`OpenAiTranscriptionService`). Fixed by comparing only the base
+  MIME type (before the first `;`) against the allowlist and using `MediaTypeHeaderValue.Parse()`
+  instead of the constructor.
+- **"Unable to preventDefault inside passive event listener invocation" on every scroll tick** in
+  both graph views: React's `onWheel` prop is always registered passive; the zoom handler needs a
+  manually-attached `addEventListener('wheel', ..., { passive: false })` instead.
+
+📝 Other
+
+- App version (already computed by the backend) is now actually shown somewhere in the UI - the
+  header's profile dropdown - fetched once via a new `api/version.ts` on mount.
+
+## v2026.9.69
+
+✨ New
+
+- **Voice dictation for Notes, admin-configurable across four providers** (Browser/Whisper/
+  OpenAI/Google), via a new reusable `DictationButton`:
+  - **Backend**: `TranscriptionSettings` (singleton row, `Models/TranscriptionSettings.cs`) holds
+    the active provider, Whisper endpoint URL, language, an `AutoSummarize` flag, and the OpenAI/
+    Google API keys encrypted at rest via ASP.NET Core Data Protection
+    (`TranscriptionSettingsService`). Data Protection's key ring is now persisted to the database
+    (`PersistKeysToDbContext<PmDbContextBase>`) instead of ephemeral local storage, so encrypted
+    keys survive container restarts.
+  - `TranscriptionController`: `GET`/`PUT /api/transcription-settings` (Admin-only, tri-state key
+    semantics - omit to keep, empty string to clear, non-empty to replace) and
+    `POST /api/transcribe` (any authenticated user), dispatching to one of three
+    `ITranscriptionProvider` implementations (`Whisper`/`OpenAi`/`GoogleTranscriptionService`) over
+    named `HttpClient`s. 25MB request size limit; provider errors return a generic 502 with
+    details only logged (API keys redacted from logged error text), never leaked to the client.
+  - Migrations for both providers: `AddTranscriptionSettings` and `AddTranscriptionAutoSummarize`.
+  - **Frontend**: `DictationButton` has idle/recording/processing/error states, `MediaRecorder`-
+    based capture for the three server-side providers, native `SpeechRecognition` for Browser
+    (disabled with a tooltip where the API is unavailable, e.g. Firefox). Wired into
+    `NotesView.tsx`, inserting the transcribed text at the cursor position.
+  - `TranscriptionSettingsSection` in `SettingsPage.tsx` (admin-only): provider picker with a
+    short explanation per option, Whisper endpoint field, API key fields (show only whether a key
+    is set, never the value), language picker, and an auto-summarize toggle (enabled only for
+    OpenAI/Google).
+  - New `ToggleSwitch` component (red/off - green/on) - the project's first toggle switch,
+    contrast-checked in both themes; establishes the pattern for future toggles.
 
 📦 Dependencies
 
-- **Added an optional, profile-gated Whisper speech-to-text service** for the upcoming
-  voice-dictation feature:
+- **Added an optional, profile-gated Whisper speech-to-text service** for the voice-dictation
+  feature above:
   - `docker-compose.yml` gets a new `whisper` service
     (`onerahmet/openai-whisper-asr-webservice:v1.10.0`, confirmed the current latest stable tag
     on Docker Hub as of this check), gated behind `profiles: ["whisper"]` so it never starts on a
@@ -61,6 +175,22 @@ placeholder.
       transcription path, but the volume itself is a no-op to keep around empty).
   - `VERSIONS.md` gets a new row for the Whisper ASR Webservice image, linking to its Docker Hub
     tags page for future update checks.
+
+## v2026.9.68
+
+📝 Other
+
+- **Versioning scheme changed again: `Year.Month.Day.CommitOfTheDay` → `Year.Month.CommitOfTheYear`**:
+  dropped the day segment and the daily reset - this user mostly commits in small end-of-session
+  batches rather than evenly through the day, so a per-day counter mostly just read `.1`/`.2` and
+  added little information. A per-year counter gives a more meaningful at-a-glance sense of
+  overall commit volume instead. `scripts/git-hooks/post-commit` and `start.ps1`'s `Get-AppVersion`
+  now compute the count via `git rev-list --count HEAD --since="$(date +%Y)-01-01T00:00:00"`
+  instead of `--since=midnight`. Existing `CHANGELOG.dev.md`/`CHANGELOG.md` version headings
+  recomputed to the new 3-segment scheme (all commits so far are within 2026, so the yearly count
+  equals the previous total count - only the day segment actually disappears).
+- **Copyright holder renamed: SynShift Labs → SushiFlux Develop** (company rename) in `NOTICE` and
+  `docs/02-decisions.md`.
 
 ## v2026.8.67
 
@@ -306,12 +436,138 @@ lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses 
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
 
-## v2026.9.68
+## v2026.9.71
+
+✨ Neu
+
+- **Individuelle Notiz-Farbe und -Form, plus Farbpaletten, in allen Baum-/Graph-Ansichten**:
+  - Backend: `Note` erhält `Color` (Hex-String, validiert über
+    `^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`, bei ungültigem Wert 400 mit konkreter Fehlermeldung) und
+    `Shape` (neues `NoteShape`-Enum: `Rounded`/`Rectangle`/`Diamond`/`Underline`/`Ellipse`).
+    Bewusst **kein** `SetParentNoteId`-artiges Tri-State-Flag für diese beiden - anders als bei
+    der Eltern-Hierarchie hat der Notiz-Editor beide Werte beim Speichern immer zur Hand, jedes
+    `PUT` wendet sie also einfach wie angegeben an (`null` = auf Standard zurücksetzen); jeder
+    `updateNote()`-Aufrufer im Frontend muss `color`/`shape` der Notiz auch bei einem reinen
+    Titel/Inhalt-Speichern mitschicken, sonst würden sie stillschweigend zurückgesetzt.
+    Migrationen `AddNoteColorShape` für beide Provider, live verifiziert.
+  - `notesGraph/colorSchemes.ts`: 6 vordefinierte Paletten (Standard/Lebendig/Pastell/Ozean/
+    Sonnenuntergang/Wald), alle 44 Farben WCAG-geprüft (≥4.5:1 gegen die jeweils besser lesbare
+    Variante von Weiß/Dunkel-Text) - zwei ursprüngliche Kandidatenfarben wurden nach
+    fehlgeschlagener Prüfung durch dunklere Varianten ersetzt. `getReadableTextColor()` wählt die
+    Textfarbe im Knoten automatisch passend zur Hintergrundfarbe.
+  - `notesGraph/NoteNodeShape.tsx`: die gemeinsame `NoteNodeVisual`-Komponente rendert alle fünf
+    Formen als SVG, zur Titellänge passend dimensioniert, mit dem Titeltext innerhalb der Form
+    (bei Underline: Text + Linie, kein Hintergrund/Rahmen) - ersetzt den bisherigen festen
+    `<circle>` in beiden Graph-Ansichten. Die Standard-Füllfarbe für Notizen ohne eigene Farbe
+    wurde auf einen festen Ton (`#475569`, theme-unabhängig) umgestellt - der bisherige
+    theme-abhängige Grauton hätte im Dark Theme mit weißem Innentext nur 2.56:1 Kontrast erreicht.
+  - `notesGraph/NoteAppearanceMenu.tsx`: das Farbe/Form-Panel im Kontextmenü jedes Knotens (alle
+    Paletten als anklickbare Farbkreise, ein "Zurücksetzen" pro Eigenschaft, fünf
+    Form-Vorschau-Buttons) - neu auch in `NoteGraphView.tsx`s freier Ansicht ergänzt, die zuvor
+    gar kein Pro-Knoten-Kontextmenü hatte.
+  - Abstandskonstanten in `treeLayouts.ts` (z. B. `SIBLING_SPACING` 56→88, `DEPTH_SPACING`
+    220→260) und die Physiksimulation-Konstanten in `NoteGraphView.tsx` (`REPULSION` 2000→5500,
+    `LINK_DISTANCE` 90→160) vergrößert, damit sich die jetzt textgroßen Knoten-Boxen nicht
+    überlappen.
+  - `assignSchemeColors()`/`colorForIndex()` (mehrere Notizen auf einmal aus einer Palette
+    einfärben) existieren als Funktion, sind aber noch an keine UI-Aktion angebunden - der Auftrag
+    nannte keinen konkreten Auslöse-Ort; bei Bedarf einen ergänzen, sobald klar ist, wo das
+    hingehört.
+
+📝 Sonstiges
+
+- `CLAUDE.md` im Repo-Root angelegt (über `/init`) - Befehle sowie die Architektur-Zusammenhänge,
+  die sich erst durch mehrere Dateien erschließen (duale EF-Core-Provider-Konfiguration, die zwei
+  unabhängigen Notiz-Beziehungsgraphen, die zwei unterschiedlichen „Feld unangetastet lassen"-
+  Update-Konventionen, usw.).
+
+## v2026.9.70
+
+✨ Neu
+
+- **Notiz-Hierarchie (Eltern/Kind), getrennt von der bestehenden freien Querverknüpfung**, plus
+  vier Baumansichten zum Durchsuchen:
+  - `Note` erhält `ParentNoteId`/`ChildNotes`; `NotesController` erzwingt bei einer Umzuordnung
+    Zugehörigkeit zum selben Projekt und prüft auf Zyklen (`WouldCreateCycleAsync`), Kinder werden
+    beim Löschen zu Wurzel-Notizen hochgestuft statt kaskadierend gelöscht zu werden.
+    `UpdateNoteRequest` hat jetzt ein `SetParentNoteId`-Bool - ein reines Titel/Inhalt-Speichern
+    darf die Hierarchie nie unbeabsichtigt anfassen, da `ParentNoteId` allein nicht zwischen
+    „unverändert lassen" und „auf null setzen" unterscheiden kann (beides deserialisiert bei
+    fehlendem Feld gleichermaßen zu `null`).
+  - Migrationen für beide Provider (`AddNoteParent`), live auf Postgres und SqlServer verifiziert.
+  - `notesGraph/treeLayouts.ts` berechnet vier Baumlayouts (Mind Map, Baum links→rechts,
+    Organigramm oben→unten, Fischgräten) aus einem gemeinsamen Eltern/Kind-Durchlauf;
+    `notesGraph/TreeGraphView.tsx` ist die gemeinsame Zeichenfläche (Zoom/Pan, Umhängen per Drag,
+    Erstellen-/Kontextmenüs), die sich alle vier teilen - ersetzt die bisherige,
+    einzel-Layout-Ansicht `NoteRadialView.tsx`. Behebt einen Bug, bei dem Wurzel-Notizen nie eine
+    Verbindungslinie zum Zentrum bekamen - `buildEdges` routet jetzt für jeden Knoten der Tiefe 1
+    immer eine Kante vom virtuellen Zentrum.
+  - `NotesView.tsx` hat jetzt einen einzigen "Graph"-Tab mit Layout-Auswahl statt separater Tabs
+    pro Layout (`notesGraphLayout`-Präferenz).
+
+🔧 Behoben
+
+- **Nach Sitzungsablauf blieb die Seite nach erneuter Anmeldung dauerhaft im Ladezustand hängen**:
+  `ProjectPage`s `Promise.all` hatte kein `.catch()`, wodurch ein 401 (Sitzung während des Ladens
+  abgelaufen) stillschweigend abgelehnt wurde (`Uncaught (in promise) ApiError` in der Konsole)
+  und `loading` nie wieder auf `false` gesetzt wurde. Zeigt jetzt bei echten Fehlern einen
+  „Erneut versuchen"-Button und wartet bei einem 401 gezielt ab. `AuthContext` erhält jetzt
+  `authVersion`, das bei jeder erfolgreichen (Neu-)Anmeldung erhöht wird, sodass die
+  Lade-Effekte von `ProjectPage`/`ProjectsPage` automatisch neu laufen, sobald sich der Nutzer
+  über `SessionExpiredModal` erneut anmeldet - kein manuelles Neuladen der Seite mehr nötig.
+- **Diktier-Upload scheiterte mit "Nicht unterstützter Audio-Dateityp." bzw. 500**: Browser melden
+  den Content-Type eines `MediaRecorder`-Blobs mit angehängten Codec-Parametern (z. B.
+  `audio/webm;codecs=opus`), was sowohl die Content-Type-Allowlist-Prüfung im Backend als auch der
+  Konstruktor von `MediaTypeHeaderValue` rundweg ablehnten (letzterer warf eine `FormatException`,
+  die als 500 in `WhisperTranscriptionService`/`OpenAiTranscriptionService` durchschlug). Behoben,
+  indem nur der Basis-MIME-Typ (vor dem ersten `;`) gegen die Allowlist geprüft wird und
+  `MediaTypeHeaderValue.Parse()` statt des Konstruktors verwendet wird.
+- **"Unable to preventDefault inside passive event listener invocation" bei jedem Scroll-Tick** in
+  beiden Graph-Ansichten: Reacts `onWheel`-Prop wird immer passiv registriert; der Zoom-Handler
+  braucht stattdessen ein manuell angehängtes
+  `addEventListener('wheel', ..., { passive: false })`.
+
+📝 Sonstiges
+
+- Die App-Version (vom Backend bereits berechnet) wird jetzt tatsächlich irgendwo in der
+  Oberfläche angezeigt - im Profil-Dropdown des Headers, per neuem `api/version.ts` einmalig beim
+  Laden abgerufen.
+
+## v2026.9.69
+
+✨ Neu
+
+- **Sprachdiktat für Notizen, administrierbar über vier Provider** (Browser/Whisper/OpenAI/
+  Google), über einen neuen wiederverwendbaren `DictationButton`:
+  - **Backend**: `TranscriptionSettings` (Singleton-Zeile, `Models/TranscriptionSettings.cs`)
+    hält den aktiven Provider, die Whisper-Endpoint-URL, Sprache, ein `AutoSummarize`-Flag und die
+    OpenAI-/Google-API-Keys verschlüsselt-at-rest über ASP.NET Core Data Protection
+    (`TranscriptionSettingsService`). Der Data-Protection-Schlüsselbund wird jetzt in der
+    Datenbank persistiert (`PersistKeysToDbContext<PmDbContextBase>`) statt flüchtig lokal
+    gespeichert, damit verschlüsselte Keys Container-Neustarts überstehen.
+  - `TranscriptionController`: `GET`/`PUT /api/transcription-settings` (nur Admin, Tri-State-
+    Semantik für die Keys - weglassen = unverändert, leer = löschen, nicht-leer = ersetzen) und
+    `POST /api/transcribe` (jeder eingeloggte Nutzer), leitet an eine von drei
+    `ITranscriptionProvider`-Implementierungen weiter (`Whisper`-/`OpenAi`-/
+    `GoogleTranscriptionService`) über benannte `HttpClient`s. 25-MB-Anfragelimit;
+    Provider-Fehler liefern einen generischen 502, Details landen nur im Log (API-Keys werden aus
+    geloggtem Fehlertext entfernt), nie an den Client durchgereicht.
+  - Migrationen für beide Provider: `AddTranscriptionSettings` und `AddTranscriptionAutoSummarize`.
+  - **Frontend**: `DictationButton` hat die Zustände idle/aufnehmend/verarbeitend/Fehler,
+    `MediaRecorder`-basierte Aufnahme für die drei serverseitigen Provider, native
+    `SpeechRecognition` für Browser (deaktiviert mit Tooltip, wo die API fehlt, z. B. Firefox).
+    Eingebunden in `NotesView.tsx`, fügt den transkribierten Text an der Cursor-Position ein.
+  - `TranscriptionSettingsSection` in `SettingsPage.tsx` (nur Admin): Provider-Auswahl mit kurzer
+    Erklärung pro Option, Whisper-Endpoint-Feld, API-Key-Felder (zeigen nur, ob ein Key gesetzt
+    ist, nie den Wert), Sprachauswahl, und ein Zusammenfassen-Umschalter (nur bei OpenAI/Google
+    aktivierbar).
+  - Neue `ToggleSwitch`-Komponente (rot/aus - grün/an) - der erste Toggle-Switch des Projekts,
+    kontrastgeprüft in beiden Themes; legt das Muster für künftige Toggles fest.
 
 📦 Abhängigkeiten
 
-- **Optionalen, profilgesteuerten Whisper-Speech-to-Text-Dienst hinzugefügt** für die geplante
-  Voice-Dictation-Funktion:
+- **Optionalen, profilgesteuerten Whisper-Speech-to-Text-Dienst hinzugefügt** für die
+  Voice-Dictation-Funktion oben:
   - `docker-compose.yml` erhält einen neuen `whisper`-Service
     (`onerahmet/openai-whisper-asr-webservice:v1.10.0`, geprüft und bestätigt als aktuell
     neuester stabiler Tag auf Docker Hub zum Zeitpunkt dieser Prüfung), abgesichert über
@@ -352,6 +608,23 @@ Platzhalters.
       Transkription - das leere Volume selbst zu behalten ist aber ein No-Op).
   - `VERSIONS.md` erhält eine neue Zeile für das Whisper-ASR-Webservice-Image mit Link zur
     Docker-Hub-Tags-Seite für künftige Update-Prüfungen.
+
+## v2026.9.68
+
+📝 Sonstiges
+
+- **Versionsschema erneut geändert: `Year.Month.Day.CommitOfTheDay` → `Year.Month.CommitOfTheYear`**:
+  Tages-Segment und täglicher Reset entfallen - dieser Nutzer committet meist in kleinen
+  Feierabend-Blöcken statt gleichmäßig über den Tag verteilt, weshalb ein Tages-Zähler meist nur
+  „.1"/„.2" zeigte und wenig Information brachte. Ein Jahres-Zähler gibt stattdessen auf einen
+  Blick ein aussagekräftigeres Bild des gesamten Commit-Volumens. `scripts/git-hooks/post-commit`
+  und `start.ps1`s `Get-AppVersion` berechnen die Zahl jetzt über
+  `git rev-list --count HEAD --since="$(date +%Y)-01-01T00:00:00"` statt `--since=midnight`.
+  Bestehende Versions-Überschriften in `CHANGELOG.dev.md`/`CHANGELOG.md` auf das neue
+  3-Segment-Schema umgerechnet (alle bisherigen Commits liegen in 2026, die Jahreszahl entspricht
+  also der vorherigen Gesamt-Commit-Zahl - nur das Tages-Segment fällt tatsächlich weg).
+- **Copyright-Inhaber umbenannt: SynShift Labs → SushiFlux Develop** (Firmenumbenennung) in
+  `NOTICE` und `docs/02-decisions.md`.
 
 ## v2026.8.67
 

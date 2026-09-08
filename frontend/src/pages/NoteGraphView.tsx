@@ -1,12 +1,15 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ApiError } from '../api/client'
-import type { Note } from '../api/types'
+import type { Note, NoteShape } from '../api/types'
+import { NoteNodeVisual } from './notesGraph/NoteNodeShape'
+import NoteAppearanceMenu from './notesGraph/NoteAppearanceMenu'
 
 interface Props {
   notes: Note[]
   onSelectNote: (note: Note) => void
   onCreateNote: (title: string) => Promise<void>
   onConnectNotes: (sourceId: string, targetId: string) => Promise<void>
+  onChangeAppearance: (noteId: string, patch: { color?: string | null; shape?: NoteShape | null }) => Promise<void>
 }
 
 interface Point {
@@ -28,8 +31,12 @@ interface Transform {
   k: number
 }
 
-const REPULSION = 2000
-const LINK_DISTANCE = 90
+// REPULSION/LINK_DISTANCE were tuned for the previous small fixed-radius circle nodes. Node boxes
+// now grow to fit their title text (see notesGraph/NoteNodeShape.tsx's measureNodeBox, up to
+// ~160px wide for a long title, vs. the previous ~9-26px circle diameter) - both are increased so
+// nodes with real text content don't settle overlapping each other.
+const REPULSION = 5500
+const LINK_DISTANCE = 160
 const LINK_STRENGTH = 0.05
 const CENTER_STRENGTH = 0.02
 const VELOCITY_DECAY = 0.35
@@ -129,7 +136,7 @@ function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, widt
   }
 }
 
-export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onConnectNotes }: Props) {
+export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onConnectNotes, onChangeAppearance }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ width: 900, height: 600 })
@@ -151,6 +158,7 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
   const autoFitRef = useRef(true)
 
   const [contextMenu, setContextMenu] = useState<{ screen: Point; world: Point } | null>(null)
+  const [nodeMenu, setNodeMenu] = useState<{ screen: Point; noteId: string } | null>(null)
   const [createNoteAt, setCreateNoteAt] = useState<{ screen: Point; world: Point } | null>(null)
   const [newNodeTitle, setNewNodeTitle] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -274,7 +282,7 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
   }, [idKey])
 
   function handleNodePointerDown(id: string) {
-    return (event: React.PointerEvent<SVGCircleElement>) => {
+    return (event: React.PointerEvent<SVGGElement>) => {
       // Only the primary (left) button drags/selects - a right-click must fall through
       // to the native contextmenu event instead of also registering as a select-click.
       if (event.button !== 0) return
@@ -284,8 +292,38 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     }
   }
 
+  function handleNodeContextMenu(noteId: string) {
+    return (event: React.MouseEvent<SVGGElement>) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setContextMenu(null)
+      const containerRect = containerRef.current?.getBoundingClientRect()
+      if (!containerRect) return
+      setNodeMenu({ screen: { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }, noteId })
+    }
+  }
+
+  async function changeNodeColor(noteId: string, color: string | null) {
+    try {
+      await onChangeAppearance(noteId, { color })
+      setActionError(null)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Farbe konnte nicht geändert werden.')
+    }
+  }
+
+  async function changeNodeShape(noteId: string, shape: NoteShape | null) {
+    try {
+      await onChangeAppearance(noteId, { shape })
+      setActionError(null)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Form konnte nicht geändert werden.')
+    }
+  }
+
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return
+    setNodeMenu(null)
     if (connectMode) {
       setConnectMode(false)
       setConnectFirstId(null)
@@ -307,6 +345,7 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     event.preventDefault()
     setConnectMode(false)
     setConnectFirstId(null)
+    setNodeMenu(null)
     setContextMenu(screenToWorld(event.currentTarget, event.clientX, event.clientY))
   }
 
@@ -364,6 +403,7 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
       setContextMenu(null)
+      setNodeMenu(null)
       setCreateNoteAt(null)
       setConnectMode(false)
       setConnectFirstId(null)
@@ -456,6 +496,8 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     return () => el.removeEventListener('wheel', handleWheel)
   }, [])
 
+  const nodeMenuNote = nodeMenu ? notes.find((n) => n.id === nodeMenu.noteId) ?? null : null
+
   return (
     <div
       ref={containerRef}
@@ -515,6 +557,32 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
             >
               Notizen verbinden
             </button>
+          </div>
+        </>
+      )}
+
+      {nodeMenu && nodeMenuNote && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setNodeMenu(null)} />
+          <div
+            className="absolute z-30 w-56 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
+            style={{ left: nodeMenu.screen.x, top: nodeMenu.screen.y }}
+          >
+            <button
+              onClick={() => {
+                onSelectNote(nodeMenuNote)
+                setNodeMenu(null)
+              }}
+              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              Notiz öffnen
+            </button>
+            <NoteAppearanceMenu
+              color={nodeMenuNote.color}
+              shape={nodeMenuNote.shape}
+              onChangeColor={(color) => changeNodeColor(nodeMenuNote.id, color)}
+              onChangeShape={(shape) => changeNodeShape(nodeMenuNote.id, shape)}
+            />
           </div>
         </>
       )}
@@ -585,37 +653,36 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
               const isNeighbor = neighborIds?.has(note.id) ?? false
               const isConnectSource = note.id === connectFirstId
               const dimmed = hoveredId !== null && !isHovered && !isNeighbor
-              const radius = 4 + Math.min(degree.get(note.id) ?? 0, 10) * 1.3
-              const fillClass = isConnectSource
-                ? 'fill-amber-500'
+              const emphasized = isHovered || isConnectSource || isNeighbor
+              const emphasisClassName = isConnectSource
+                ? 'stroke-amber-500'
                 : isHovered
-                  ? 'fill-brand-primary dark:fill-brand-primary-light'
-                  : isNeighbor
-                    ? 'fill-slate-700 dark:fill-slate-200'
-                    : 'fill-slate-500 dark:fill-slate-400'
+                  ? 'stroke-brand-primary dark:stroke-brand-primary-light'
+                  : 'stroke-slate-700 dark:stroke-slate-200'
+              // Well-connected notes get a slightly larger box, mirroring the previous
+              // degree-scaled circle radius (up to +30% at 10+ connections) instead of a fixed size.
+              const scale = 1 + Math.min(degree.get(note.id) ?? 0, 10) * 0.03
 
               return (
-                <g key={note.id} opacity={dimmed ? 0.25 : 1}>
-                  <circle
-                    cx={pos.x}
-                    cy={pos.y}
-                    r={radius}
-                    className={`cursor-pointer ${fillClass} ${isHovered || isConnectSource ? 'stroke-slate-900 dark:stroke-white' : ''}`}
-                    strokeWidth={isHovered || isConnectSource ? 1.5 : 0}
-                    onPointerDown={handleNodePointerDown(note.id)}
-                    onPointerEnter={() => setHoveredId(note.id)}
-                    onPointerLeave={() => setHoveredId((prev) => (prev === note.id ? null : prev))}
-                  />
-                  <text
+                <g
+                  key={note.id}
+                  className="cursor-pointer"
+                  opacity={dimmed ? 0.25 : 1}
+                  transform={scale !== 1 ? `translate(${pos.x} ${pos.y}) scale(${scale}) translate(${-pos.x} ${-pos.y})` : undefined}
+                  onPointerDown={handleNodePointerDown(note.id)}
+                  onPointerEnter={() => setHoveredId(note.id)}
+                  onPointerLeave={() => setHoveredId((prev) => (prev === note.id ? null : prev))}
+                  onContextMenu={handleNodeContextMenu(note.id)}
+                >
+                  <NoteNodeVisual
                     x={pos.x}
-                    y={pos.y + radius + 12}
-                    textAnchor="middle"
-                    className={`pointer-events-none select-none text-[10px] ${
-                      isHovered || isNeighbor ? 'fill-slate-700 dark:fill-slate-200' : 'fill-slate-500'
-                    }`}
-                  >
-                    {note.title}
-                  </text>
+                    y={pos.y}
+                    title={note.title}
+                    shape={note.shape}
+                    color={note.color}
+                    emphasized={emphasized}
+                    emphasisClassName={emphasisClassName}
+                  />
                 </g>
               )
             })}

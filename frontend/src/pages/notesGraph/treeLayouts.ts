@@ -82,7 +82,11 @@ function buildEdges(shape: TreeShape, positions: Map<string, TreeNode>): TreeEdg
   return edges
 }
 
-const RING_SPACING = 150
+// Spacing constants below were tuned for the previous small fixed-radius circle nodes. Node
+// boxes now grow to fit their title text (see NoteNodeShape.tsx's measureNodeBox, up to ~160px
+// wide for a long title, vs. the previous ~9px circle diameter) - spacing is increased so
+// same-depth/sibling nodes with long titles don't overlap.
+const RING_SPACING = 190
 
 // Classic sunburst/radial-tree layout: each note is placed at (depth * RING_SPACING) from the
 // center, at an angle proportional to its position within the angular slice inherited from its
@@ -122,8 +126,8 @@ export function layoutMindMap(notes: Note[]): TreeLayoutResult {
   return { nodes: positions, edges: buildEdges(shape, positions) }
 }
 
-const DEPTH_SPACING = 220
-const SIBLING_SPACING = 56
+const DEPTH_SPACING = 260
+const SIBLING_SPACING = 88
 
 // Classic left-to-right (or, rotated, top-to-bottom) "logic chart" tree: depth grows along one
 // axis in fixed steps, siblings are stacked along the other axis with even spacing, positioned so
@@ -170,10 +174,10 @@ export function layoutTree(notes: Note[], axis: 'horizontal' | 'vertical'): Tree
   return { nodes: positions, edges: buildEdges(shape, positions) }
 }
 
-const FISHBONE_SPINE_STEP = 260
-const FISHBONE_BRANCH_SPACING = 130
-const FISHBONE_SUB_SPACING = 46
-const FISHBONE_SUB_DEPTH_STEP = 100
+const FISHBONE_SPINE_STEP = 300
+const FISHBONE_BRANCH_SPACING = 160
+const FISHBONE_SUB_SPACING = 72
+const FISHBONE_SUB_DEPTH_STEP = 130
 
 // Fishbone/Ishikawa diagram: a central horizontal spine runs from the project (at the right end)
 // leftward; root notes ("main bones") attach to the spine at alternating steps, tilted up/down

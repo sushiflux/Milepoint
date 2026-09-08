@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -62,12 +63,19 @@ public class NotesController : ControllerBase
             return BadRequest("Übergeordnete Notiz gehört nicht zu diesem Projekt.");
         }
 
+        if (!IsValidColor(request.Color))
+        {
+            return BadRequest("Farbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
+        }
+
         var note = new Note
         {
             ProjectId = projectId,
             Title = request.Title,
             Content = request.Content,
-            ParentNoteId = request.ParentNoteId
+            ParentNoteId = request.ParentNoteId,
+            Color = request.Color,
+            Shape = request.Shape
         };
 
         _db.Notes.Add(note);
@@ -113,6 +121,11 @@ public class NotesController : ControllerBase
             }
         }
 
+        if (!IsValidColor(request.Color))
+        {
+            return BadRequest("Farbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
+        }
+
         note.Title = request.Title;
         note.Content = request.Content;
         // Only touch the hierarchy when the caller explicitly asked to (see SetParentNoteId's doc
@@ -122,6 +135,10 @@ public class NotesController : ControllerBase
         {
             note.ParentNoteId = request.ParentNoteId;
         }
+        // Color/Shape are always applied as given (no tri-state flag needed - see
+        // UpdateNoteRequest's doc comment); null clears back to "use the default".
+        note.Color = request.Color;
+        note.Shape = request.Shape;
         note.UpdatedAt = DateTimeOffset.UtcNow;
 
         await SyncOutgoingLinksAsync(projectId, note);
@@ -234,6 +251,13 @@ public class NotesController : ControllerBase
         return true;
     }
 
+    // Accepts "#rgb" or "#rrggbb" (case-insensitive), the standard short/long CSS hex-color forms
+    // - matches what an <input type="color"> or a frontend palette picker would ever actually
+    // send. Null/empty is valid (means "no color chosen"); anything else must fully match.
+    private static readonly Regex HexColorPattern = new("^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", RegexOptions.Compiled);
+
+    private static bool IsValidColor(string? color) => color is null || HexColorPattern.IsMatch(color);
+
     private static NoteDto ToDto(Note note) => new(
         note.Id,
         note.Title,
@@ -242,6 +266,8 @@ public class NotesController : ControllerBase
         note.ChildNotes.Select(c => c.Id).ToList(),
         note.OutgoingLinks.Select(l => new NoteLinkRefDto(l.TargetNoteId, l.TargetNote.Title)).ToList(),
         note.IncomingLinks.Select(l => new NoteLinkRefDto(l.SourceNoteId, l.SourceNote.Title)).ToList(),
+        note.Color,
+        note.Shape,
         note.CreatedAt,
         note.UpdatedAt);
 }

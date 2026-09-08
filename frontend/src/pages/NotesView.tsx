@@ -166,7 +166,14 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     if (!activeTab || !activeNote) return
     setError(null)
     try {
-      const updated = await updateNote(projectId, activeTab.noteId, activeTab.draftTitle.trim(), activeTab.draftContent)
+      const updated = await updateNote(
+        projectId,
+        activeTab.noteId,
+        activeTab.draftTitle.trim(),
+        activeTab.draftContent,
+        activeNote.color,
+        activeNote.shape,
+      )
       onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
       setTabs((prev) =>
         prev.map((t) => (t.noteId === updated.id ? { ...t, draftTitle: updated.title, draftContent: updated.content, dirty: false } : t)),
@@ -243,7 +250,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
 
     const separator = source.content.trim().length > 0 ? '\n\n' : ''
     const newContent = `${source.content}${separator}[[${target.title}]]`
-    const updated = await updateNote(projectId, source.id, source.title, newContent)
+    const updated = await updateNote(projectId, source.id, source.title, newContent, source.color, source.shape)
     onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
   }
 
@@ -262,7 +269,22 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
   async function handleTreeSetParent(noteId: string, parentNoteId: string | null) {
     const note = notes.find((n) => n.id === noteId)
     if (!note) return
-    const updated = await updateNote(projectId, note.id, note.title, note.content, { setParentNoteId: true, parentNoteId })
+    const updated = await updateNote(projectId, note.id, note.title, note.content, note.color, note.shape, {
+      setParentNoteId: true,
+      parentNoteId,
+    })
+    onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
+  }
+
+  // Shared by both graph views (free + all four tree layouts) - changes only the note's own
+  // color/shape, always re-sending the note's current title/content so neither is accidentally
+  // touched (updateNote always applies title/content as given, same as color/shape).
+  async function handleNoteAppearanceChange(noteId: string, patch: { color?: string | null; shape?: Note['shape'] }) {
+    const note = notes.find((n) => n.id === noteId)
+    if (!note) return
+    const nextColor = 'color' in patch ? patch.color ?? null : note.color
+    const nextShape = 'shape' in patch ? patch.shape ?? null : note.shape
+    const updated = await updateNote(projectId, note.id, note.title, note.content, nextColor, nextShape)
     onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
   }
 
@@ -308,6 +330,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
             onSelectNote={handleGraphSelect}
             onCreateNote={handleGraphCreateNote}
             onConnectNotes={handleGraphConnect}
+            onChangeAppearance={handleNoteAppearanceChange}
           />
         ) : (
           <TreeGraphView
@@ -315,6 +338,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
             notes={notes}
             layout={graphLayout}
             onSelectNote={handleTreeSelect}
+            onChangeAppearance={handleNoteAppearanceChange}
             onCreateRootNote={handleTreeCreateRootNote}
             onSetParent={handleTreeSetParent}
           />

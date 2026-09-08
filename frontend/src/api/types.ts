@@ -123,6 +123,11 @@ export interface NoteLinkRef {
   title: string
 }
 
+// Mirrors backend Models/NoteShape.cs (serialized as a string by the default System.Text.Json
+// enum behavior used across this API). Null means "no explicit shape chosen" - rendered the same
+// as 'Rounded' but distinct so a future default change doesn't silently reinterpret existing data.
+export type NoteShape = 'Rounded' | 'Rectangle' | 'Diamond' | 'Underline' | 'Ellipse'
+
 export interface Note {
   id: string
   title: string
@@ -133,6 +138,11 @@ export interface Note {
   childNoteIds: string[]
   outgoingLinks: NoteLinkRef[]
   incomingLinks: NoteLinkRef[]
+  // Concrete hex color (e.g. "#3b82f6") for this note's node in the graph/tree views, or null to
+  // use the view's default neutral color. Palette/"scheme" selection is a frontend-only concept
+  // (see notesGraph/colorSchemes.ts) - the backend only ever stores/returns the resolved color.
+  color: string | null
+  shape: NoteShape | null
   createdAt: string
   updatedAt: string
 }

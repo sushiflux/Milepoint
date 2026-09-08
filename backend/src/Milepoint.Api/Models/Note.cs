@@ -21,4 +21,13 @@ public class Note
 
     public ICollection<NoteLink> OutgoingLinks { get; set; } = new List<NoteLink>();
     public ICollection<NoteLink> IncomingLinks { get; set; } = new List<NoteLink>();
+
+    // Visual customization for the graph/tree views, set per-note (not per-project/global) so
+    // individual parents or children can be highlighted differently from their siblings. Both are
+    // nullable = "use the view's default" (default color, Rounded shape) - the actual color
+    // palette/scheme picker is a frontend-only concept (like a theme): this column only ever holds
+    // one concrete resolved hex value the frontend already chose, never a scheme name/token, so the
+    // backend never needs to know what schemes exist or how they're applied.
+    public string? Color { get; set; }
+    public NoteShape? Shape { get; set; }
 }
