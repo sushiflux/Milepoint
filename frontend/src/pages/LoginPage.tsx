@@ -23,7 +23,10 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false)
 
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
-  const [checkingUsername, setCheckingUsername] = useState(false)
+  // Which debounced username value usernameAvailable's current result actually belongs to - lets
+  // "still checking" be derived (checkingUsername below) instead of tracked as its own state that
+  // would otherwise need a synchronous setState(true) at the top of the effect below.
+  const [checkedUsername, setCheckedUsername] = useState<string | null>(null)
   const debouncedUsername = useDebouncedValue(username, 400)
 
   const { signIn } = useAuth()
@@ -37,37 +40,46 @@ export default function LoginPage() {
 
   // Username-Verfügbarkeit nur beim Registrieren live prüfen - beim Login wäre das
   // ein Sicherheitsleck (verrät, welche Accounts existieren, ohne das Passwort zu prüfen).
+  // Whether a check even applies right now is purely derived from mode/format/debounced value -
+  // computed during render instead of synced into state via an early-return setState in the
+  // effect below, so the "nothing to check" case never needs its own setState call at all; the
+  // effect itself only ever runs its real async work (and its setState calls stay confined to
+  // the .then()/.catch()/.finally() callbacks, not the effect body).
+  const shouldCheckUsername = mode === 'register' && !usernameFormatError && Boolean(debouncedUsername)
+  // True exactly while a check for the *current* debouncedUsername is in flight - derived from
+  // whether checkedUsername (set once the request settles) already matches it, rather than a
+  // separate piece of state that would need setting to true synchronously at the top of the
+  // effect below.
+  const checkingUsername = shouldCheckUsername && checkedUsername !== debouncedUsername
+
   useEffect(() => {
-    if (mode !== 'register' || usernameFormatError || !debouncedUsername) {
-      setUsernameAvailable(null)
-      setCheckingUsername(false)
-      return
-    }
+    if (!shouldCheckUsername) return
 
     let cancelled = false
-    setCheckingUsername(true)
     checkUsernameAvailable(debouncedUsername)
       .then((result) => {
-        if (!cancelled) setUsernameAvailable(result.available)
+        if (!cancelled) {
+          setUsernameAvailable(result.available)
+          setCheckedUsername(debouncedUsername)
+        }
       })
       .catch(() => {
-        if (!cancelled) setUsernameAvailable(null)
-      })
-      .finally(() => {
-        if (!cancelled) setCheckingUsername(false)
+        if (!cancelled) {
+          setUsernameAvailable(null)
+          setCheckedUsername(debouncedUsername)
+        }
       })
 
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedUsername, mode])
+  }, [shouldCheckUsername, debouncedUsername])
 
   const usernameError = useMemo(() => {
     if (usernameFormatError) return usernameFormatError
-    if (mode === 'register' && usernameAvailable === false) return 'Dieser Benutzername ist bereits vergeben.'
+    if (mode === 'register' && shouldCheckUsername && usernameAvailable === false) return 'Dieser Benutzername ist bereits vergeben.'
     return null
-  }, [usernameFormatError, mode, usernameAvailable])
+  }, [usernameFormatError, mode, shouldCheckUsername, usernameAvailable])
 
   const hasBlockingErrors =
     Boolean(usernameError) || Boolean(passwordError) || (mode === 'register' && (Boolean(displayNameError) || Boolean(emailError)))

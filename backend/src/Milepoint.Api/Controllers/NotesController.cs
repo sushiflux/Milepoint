@@ -152,6 +152,27 @@ public class NotesController : ControllerBase
         return dto is null ? NotFound() : Ok(dto);
     }
 
+    // Lightweight, high-frequency position sync for the free (physics-simulated) graph view -
+    // deliberately separate from the full Update endpoint above (see UpdateNotePositionRequest's
+    // doc comment). A single targeted EF Core update on exactly two columns via ExecuteUpdateAsync
+    // (same pattern already used for the ParentNoteId bulk re-parent in Delete below), so no
+    // tracked entity is loaded/round-tripped just to change a position. No title-uniqueness check,
+    // no content/hierarchy touch, no outgoing-link re-sync - none of that applies to a pure
+    // position write. Rate-limiting/debouncing how often the frontend calls this is out of scope
+    // here (handled client-side).
+    [HttpPut("{noteId}/position")]
+    public async Task<IActionResult> UpdatePosition(string projectId, string noteId, UpdateNotePositionRequest request)
+    {
+        var updated = await _db.Notes
+            .Where(n => n.Id == noteId && n.ProjectId == projectId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(n => n.FreeViewX, request.X)
+                .SetProperty(n => n.FreeViewY, request.Y)
+                .SetProperty(n => n.UpdatedAt, DateTimeOffset.UtcNow));
+
+        return updated == 0 ? NotFound() : NoContent();
+    }
+
     [HttpDelete("{noteId}")]
     public async Task<IActionResult> Delete(string projectId, string noteId)
     {
@@ -274,6 +295,8 @@ public class NotesController : ControllerBase
         note.Shape,
         note.EdgeStyle,
         note.EdgeArrow,
+        note.FreeViewX,
+        note.FreeViewY,
         note.CreatedAt,
         note.UpdatedAt);
 }

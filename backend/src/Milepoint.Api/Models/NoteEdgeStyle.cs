@@ -13,5 +13,13 @@ public enum NoteEdgeStyle
     // Dashed line.
     Dashed,
     // Dotted line.
-    Dotted
+    Dotted,
+    // Continuous line whose opacity fades toward transparent at both endpoints and is fully
+    // opaque at its midpoint (an SVG linearGradient on the stroke) - a softer, more polished look
+    // than a flat-opacity line, applied to the line only, never the arrowhead marker.
+    Gradient,
+    // Continuous line with a soft outer glow (an SVG blur filter behind the stroke) instead of a
+    // flat single-width line - the other "make it look more polished" option offered alongside
+    // Gradient, for the user to pick whichever reads better rather than only building one.
+    Glow
 }

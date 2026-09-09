@@ -12,23 +12,32 @@ interface PreferencesContextValue {
 
 const PreferencesContext = createContext<PreferencesContextValue | undefined>(undefined)
 
-export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const { token } = useAuth()
+// Actual state/fetch logic, split out so it can be remounted (via `key={token}` below) on every
+// token change - this is what resets `preferences`/`loaded` back to their initial values on
+// login/logout without a synchronous setState in an effect: a fresh mount starts fresh state by
+// construction, no explicit reset call needed for the "token disappeared" case.
+function PreferencesStateProvider({ token, children }: { token: string | null; children: ReactNode }) {
   const [preferences, setPreferences] = useState<Record<string, string>>({})
   const [loaded, setLoaded] = useState(false)
 
+  // Synchronizes with an external system (the preferences API) - setState only ever happens
+  // inside the .then()/.catch() callbacks, never synchronously in the effect body itself.
   useEffect(() => {
-    if (!token) {
-      setPreferences({})
-      setLoaded(false)
-      return
-    }
+    if (!token) return
+    let cancelled = false
     getPreferences()
       .then((prefs) => {
-        setPreferences(prefs)
-        setLoaded(true)
+        if (!cancelled) {
+          setPreferences(prefs)
+          setLoaded(true)
+        }
       })
-      .catch(() => setLoaded(true))
+      .catch(() => {
+        if (!cancelled) setLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [token])
 
   function getPreference(key: string, fallback: string) {
@@ -50,6 +59,18 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   )
 }
 
+export function PreferencesProvider({ children }: { children: ReactNode }) {
+  const { token } = useAuth()
+  return (
+    <PreferencesStateProvider key={token ?? 'anonymous'} token={token}>
+      {children}
+    </PreferencesStateProvider>
+  )
+}
+
+// Context-Provider und zugehöriger Hook werden bewusst zusammen in einer Datei gehalten, siehe
+// Projektkonvention (AuthContext/PreferencesContext/ThemeContext folgen alle diesem Muster).
+// eslint-disable-next-line react-refresh/only-export-components
 export function usePreferences() {
   const ctx = useContext(PreferencesContext)
   if (!ctx) {

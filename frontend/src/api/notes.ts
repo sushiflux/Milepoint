@@ -59,3 +59,14 @@ export const updateNote = (
 
 export const deleteNote = (projectId: string, noteId: string) =>
   apiFetch<void>(`/projects/${projectId}/notes/${noteId}`, { method: 'DELETE' })
+
+// Lightweight, high-frequency position sync for the free (physics-simulated) graph view - see the
+// backend's UpdateNotePositionRequest doc comment. Deliberately separate from updateNote() above:
+// this is called once per settled drag, not on every structural note edit, and returns 204 No
+// Content rather than the full updated Note (no client-side state needs to change besides the
+// coordinates the caller already has in hand).
+export const updateNotePosition = (projectId: string, noteId: string, x: number, y: number) =>
+  apiFetch<void>(`/projects/${projectId}/notes/${noteId}/position`, {
+    method: 'PUT',
+    body: JSON.stringify({ x, y }),
+  })

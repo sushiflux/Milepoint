@@ -18,6 +18,98 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.73
+
+✨ New
+
+- **Note hierarchy tree layouts (mind map/tree/org chart/fishbone), a permanent right-side
+  settings panel, gradient/glow edge styles, and a long tail of graph-view bugfixes** - the bulk
+  of this entry is fixes found and verified via live Playwright testing against the running dev
+  stack, not just code review:
+  - `notesGraph/GraphSidePanel.tsx`/`GraphSettingsPanel.tsx` (new): the project-wide layout picker
+    + style presets + root-node appearance block, previously reachable only by clicking
+    `TreeGraphView`'s center node, is extracted into its own component and now ALSO reachable from
+    a standalone "Layout & Stil" button next to the List/Graph toggle in `NotesView.tsx` - working
+    in both the free and tree views (the free view has no center-node concept, so a note click
+    there could never reach it). Both entry points are kept side by side, not one replacing the
+    other. Fixed two real bugs surfaced by testing this live: a `position: fixed` click-outside
+    overlay was painting over the button itself (a fixed/positioned sibling always outranks a
+    `position: static` one regardless of a parent's z-index), silently swallowing the second click
+    meant to close the menu; and `GraphSidePanel` still carried a leftover `position: absolute`
+    from its pre-refactor popup days, making it render outside its intended flex-layout slot.
+  - `edgeStyles.tsx`'s `clipPointToBoxEdge` had its anchor-facing direction inverted since the
+    function was first written - it picked the box anchor whose direction MATCHED the incoming
+    line instead of the one FACING it, i.e. the far side of the box instead of the near side. This
+    was the actual root cause behind three previously-attempted "fixes" that didn't hold
+    (verified live: arrowheads now correctly point at the side of the box the line actually
+    approaches from, on both curved tree edges and straight free-view edges).
+  - `TreeGraphView.tsx`'s edge-anchor box size for the root/center node was still a hardcoded
+    `CENTER_RADIUS*2` (68×68) circle assumption left over from when the root always rendered as a
+    plain `<circle>` - once the root could render as a full `NoteNodeVisual` box (any shape, sized
+    to fit `projectName`, often 130px+ wide), anchors were computed against a box far smaller than
+    what's actually on screen, placing them inside the real rendered edge instead of outside it
+    (the "no gap on the root's anchors" symptom, most visible on its left/right sides). Now uses
+    `measureNodeBox(projectName, rootAppearance.shape)` when the root has an explicit
+    color/shape, matching what it actually renders as.
+  - The root/center node in `TreeGraphView.tsx` had an inconsistent bubble-phase `onPointerDown` +
+    separate `onClick` (no pointer capture taken) for opening the side panel, while
+    `handleBackgroundPointerDown` on the enclosing `<svg>` unconditionally takes pointer capture
+    on every pointerdown - since capture is a native browser routing decision a synthetic
+    `stopPropagation()` call cannot undo, a click on the root could silently be routed to the
+    background pan handler instead, never reaching the panel. Switched to `onPointerDownCapture` +
+    the same click-vs-drag path (`draggingRef`/`handleSvgPointerUp`) every other node already
+    uses, which resolves the race unconditionally rather than relying on handler-ordering luck.
+  - `NoteGraphView.tsx`'s manually-dragged free-view position was only ever persisted once the
+    physics simulation fully settled below `ALPHA_MIN` - dragging several notes in a row (each new
+    drag's `wake(0.4)` keeps alpha above that threshold) could silently drop every save but the
+    last one, and a page reload/navigation before the simulation ever settled dropped it entirely.
+    Confirmed live via a DB query: several notes had `FreeViewX`/`FreeViewY` still `NULL` despite
+    being visibly repositioned, and one had reached a wildly out-of-view coordinate (thousands of
+    px) - traced to a second bug in the same area: the note-add/remove effect was re-fitting the
+    camera transform unconditionally, even while a drag was in progress, so a small mouse movement
+    divided by a suddenly-much-smaller zoom factor translated into a huge world-coordinate jump
+    for that one frame. Positions now save immediately on pointerup (plus an unmount safety net),
+    and the camera re-fit is skipped entirely while `draggingRef.current` is set.
+  - `NotesView.tsx`'s `viewMode`/`graphLayout`/`rootAppearance` were only ever read from
+    `usePreferences()` once, in each `useState` initializer - since `PreferencesContext` loads the
+    real DB values asynchronously, a mount that raced ahead of that fetch froze in the hardcoded
+    fallback forever (React never re-runs a `useState` initializer), which is what caused the
+    reported "view mode randomly flips between list/graph on repeated reloads" and a matching
+    graph-layout version of the same symptom. Fixed with the same `prevLoaded`-comparison-during-
+    render pattern already used in `ThemeContext.tsx`, syncing the real DB values in once `loaded`
+    flips true.
+  - Found and fixed one new bug introduced by the above: `setRootAppearance` called
+    `setPreference()` (which updates a sibling component, `PreferencesStateProvider`) from inside
+    its own `setRootAppearanceState` updater callback - React logs "Cannot update a component
+    while rendering a different component" for that, since an updater function must be a pure
+    `prev -> next` computation and React may invoke it during a render pass, not only after
+    commit. Fixed by computing the merged value directly (the current state is already in scope)
+    instead of relying on the updater form.
+  - Backend: `NoteEdgeStyle` gains two more values, `Gradient` and `Glow` - two alternative,
+    user-selectable ways to make an edge line read as more polished than a flat stroke, offered as
+    siblings rather than picking one for the user (matching the existing per-note edge-styling
+    convention, applied to the LINE only, never the arrowhead marker). No migration needed (the
+    column is a plain nullable `int`), but adding an enum VALUE (not a new property) can't be
+    hot-reloaded by `dotnet watch` - confirmed live, it requires an actual container restart
+    (`ENC0021: Adding enum value requires restarting the application`).
+  - `edgeStyles.tsx`: `Gradient` renders via a per-edge `<linearGradient gradientUnits=
+    "userSpaceOnUse">` using the edge's own real endpoint coordinates - the default
+    `objectBoundingBox` gradient space maps a fixed left-to-right angle onto the referencing
+    element's bounding box, which is only correct for a perfectly horizontal line; any angled edge
+    (most of them, in both layouts) would have its fade-to-transparent points skewed off the
+    line's actual start/end. `Glow` renders as a second, wider, blurred duplicate of the line
+    UNDERNEATH the normal sharp one (its own `<path>`/`<line>`, no markers on it), not a blur
+    filter applied to the real line directly - the first version did exactly that and, confirmed
+    live via screenshot, produced a thick, uniformly-blurred haze with no crisp line surviving at
+    all (`feGaussianBlur` has no "sharp core, blurred edges only" mode - it blurs the whole
+    rendered shape). `NoteAppearanceMenu.tsx` gets matching hand-drawn preview icons for both
+    (each with its own `useId()`-scoped gradient/filter def, distinct from the small fixed set the
+    real edge rendering uses, since a menu preview needs to follow the button's own
+    currentColor/theme rather than the two fixed edge colors).
+  - `edgeStyles.tsx`'s `EDGE_GAP` (line-to-box clearance) raised from 4px to 10px per user
+    feedback that the previous gap read as too tight, especially once arrowhead markers sit right
+    at the line's tip.
+
 ## v2026.9.72
 
 ✨ New
@@ -461,6 +553,110 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.9.73
+
+✨ Neu
+
+- **Baum-Layouts für die Notiz-Hierarchie (Mindmap/Baum/Organigramm/Fischgräten), ein dauerhaftes
+  rechtes Einstellungs-Panel, Verlauf/Leuchten als Linienstile, sowie eine lange Reihe von
+  Bugfixes in den Graph-Ansichten** - der Großteil dieses Eintrags sind Fehler, die durch echtes,
+  live durchgeführtes Playwright-Testen gegen den laufenden Dev-Stack gefunden und verifiziert
+  wurden, nicht nur durch Code-Review:
+  - `notesGraph/GraphSidePanel.tsx`/`GraphSettingsPanel.tsx` (neu): Der projektweite
+    Layout-Auswähler + Stil-Vorlagen + Mittelpunkt-Aussehen-Bereich, bisher nur über einen Klick
+    auf `TreeGraphView`s Mittelpunkt erreichbar, ist in eine eigene Komponente ausgelagert und
+    jetzt ZUSÄTZLICH über einen eigenständigen „Layout & Stil"-Button neben dem Liste/Graph-
+    Umschalter in `NotesView.tsx` erreichbar - funktioniert in beiden Ansichten (die freie Ansicht
+    hat kein Mittelpunkt-Konzept, ein Notiz-Klick konnte diesen Bereich dort also nie erreichen).
+    Beide Zugänge bleiben nebeneinander bestehen, keiner ersetzt den anderen. Dabei zwei echte,
+    live entdeckte Bugs behoben: Ein `position: fixed`-Overlay zum Schließen bei Außenklick legte
+    sich über den Button selbst (ein fixed/positioniertes Geschwisterelement liegt immer über
+    einem `position: static`-Element, unabhängig vom `z-index` des Elternteils), wodurch der
+    zweite Klick zum Schließen des Menüs verschluckt wurde; zudem trug `GraphSidePanel` noch ein
+    übriggebliebenes `position: absolute` aus der Zeit vor dem Umbau zum Popup, wodurch es
+    außerhalb seines vorgesehenen Flex-Layout-Slots rendern konnte.
+  - `edgeStyles.tsx`s `clipPointToBoxEdge` hatte die Anker-Richtung seit der ursprünglichen
+    Implementierung verkehrt herum - es wählte den Box-Anker, dessen Richtung mit der ankommenden
+    Linie ÜBEREINSTIMMTE, statt den, der ihr ZUGEWANDT ist, also die ferne statt die nahe Seite der
+    Box. Das war die eigentliche Ursache hinter drei zuvor versuchten „Fixes", die nicht hielten
+    (live verifiziert: Pfeilspitzen zeigen jetzt korrekt auf die Seite der Box, aus deren Richtung
+    die Linie tatsächlich ankommt, sowohl bei gekrümmten Baum-Kanten als auch bei geraden Kanten
+    in der freien Ansicht).
+  - `TreeGraphView.tsx`s Anker-Boxgröße für den Mittelpunkt-Knoten war noch eine feste
+    `CENTER_RADIUS*2`-(68×68)-Kreis-Annahme aus der Zeit, als der Mittelpunkt immer ein einfacher
+    `<circle>` war - seit der Mittelpunkt als vollständige `NoteNodeVisual`-Box rendern kann (jede
+    Form, passend zu `projectName` skaliert, oft 130px+ breit), wurden Anker gegen eine viel
+    kleinere Box berechnet als tatsächlich sichtbar war, wodurch sie innerhalb statt außerhalb des
+    echten Rands lagen (das „kein Abstand bei den Mittelpunkt-Ankern"-Symptom, am deutlichsten auf
+    der linken/rechten Seite). Nutzt jetzt `measureNodeBox(projectName, rootAppearance.shape)`,
+    sobald der Mittelpunkt eine explizite Farbe/Form hat - passend zu dem, was tatsächlich
+    gerendert wird.
+  - Der Mittelpunkt-Knoten in `TreeGraphView.tsx` hatte einen inkonsistenten Bubble-Phase-
+    `onPointerDown` + separaten `onClick` (ohne Pointer-Capture) zum Öffnen des Seitenpanels,
+    während `handleBackgroundPointerDown` auf dem umschließenden `<svg>` bei jedem Pointerdown
+    bedingungslos die Pointer-Capture übernimmt - da Capture eine native Browser-Routing-
+    Entscheidung ist, die ein synthetisches `stopPropagation()` nicht rückgängig machen kann,
+    konnte ein Klick auf den Mittelpunkt stillschweigend zum Hintergrund-Pan-Handler umgeleitet
+    werden, statt das Panel zu öffnen. Umgestellt auf `onPointerDownCapture` + denselben
+    Klick-vs-Zieh-Pfad (`draggingRef`/`handleSvgPointerUp`), den jede andere Notiz bereits nutzt -
+    das löst das Rennen unbedingt, statt sich auf zufällige Handler-Reihenfolge zu verlassen.
+  - `NoteGraphView.tsx`s manuell gezogene Position in der freien Ansicht wurde erst gespeichert,
+    wenn die Physik-Simulation vollständig unter `ALPHA_MIN` zur Ruhe kam - mehrere Notizen
+    hintereinander zu ziehen (jedes neue `wake(0.4)` hält Alpha über dieser Schwelle) konnte
+    stillschweigend jede Speicherung bis auf die letzte verwerfen, und ein Neuladen/Navigieren vor
+    dem Zur-Ruhe-Kommen verwarf sie komplett. Live per DB-Abfrage bestätigt: mehrere Notizen hatten
+    weiterhin `FreeViewX`/`FreeViewY` als `NULL`, obwohl sie sichtbar verschoben wurden, eine hatte
+    eine völlig aus dem Sichtbereich liegende Koordinate (mehrere Tausend px) erreicht -
+    zurückgeführt auf einen zweiten Bug im selben Bereich: Der Notiz-Hinzufügen/Entfernen-Effekt
+    hat die Kamera-Transformation bedingungslos neu gefittet, auch während ein Zieh-Vorgang aktiv
+    war, wodurch eine kleine Mausbewegung geteilt durch einen plötzlich viel kleineren Zoomfaktor
+    für diesen einen Frame zu einem riesigen Weltkoordinaten-Sprung wurde. Positionen werden jetzt
+    sofort bei Loslassen gespeichert (plus ein Sicherheitsnetz beim Unmount), und das Kamera-Refit
+    wird komplett übersprungen, solange `draggingRef.current` gesetzt ist.
+  - `NotesView.tsx`s `viewMode`/`graphLayout`/`rootAppearance` wurden nur einmalig aus
+    `usePreferences()` gelesen, jeweils im `useState`-Initializer - da `PreferencesContext` die
+    echten DB-Werte asynchron nachlädt, blieb ein Mount, der schneller war als dieser Abruf, für
+    immer beim hartcodierten Fallback hängen (React führt einen `useState`-Initializer nie erneut
+    aus), was genau das gemeldete „Ansicht springt bei wiederholtem Neuladen zwischen Liste/Graph
+    hin und her" sowie ein entsprechendes Pendant beim Graph-Layout verursachte. Behoben mit
+    demselben `prevLoaded`-Vergleich-während-des-Renderns-Muster, das bereits in
+    `ThemeContext.tsx` verwendet wird - synchronisiert die echten DB-Werte, sobald `loaded` auf
+    `true` wechselt.
+  - Dabei einen neuen, durch die obige Änderung eingeführten Bug gefunden und behoben:
+    `setRootAppearance` rief `setPreference()` (das eine andere Komponente, `PreferencesStateProvider`,
+    aktualisiert) innerhalb seines eigenen `setRootAppearanceState`-Updater-Callbacks auf - React
+    meldet dafür „Cannot update a component while rendering a different component", da eine
+    Updater-Funktion eine reine `prev -> next`-Berechnung sein muss und React sie während eines
+    Render-Durchlaufs aufrufen kann, nicht nur nach dem Commit. Behoben, indem der zusammengeführte
+    Wert direkt berechnet wird (der aktuelle State liegt bereits im Scope), statt die
+    Updater-Form zu nutzen.
+  - Backend: `NoteEdgeStyle` erhält zwei weitere Werte, `Gradient` und `Glow` - zwei alternative,
+    vom Nutzer wählbare Wege, eine Kantenlinie eleganter als einen flachen Strich wirken zu lassen,
+    als gleichwertige Optionen angeboten statt eine Vorauswahl zu treffen (passend zur bestehenden
+    Pro-Notiz-Linienstil-Konvention, wirkt nur auf die LINIE, nie auf die Pfeilspitze). Keine
+    Migration nötig (die Spalte ist ein einfacher nullable `int`), aber das Hinzufügen eines
+    Enum-WERTS (keine neue Property) kann von `dotnet watch` nicht per Hot-Reload eingespielt
+    werden - live bestätigt, es braucht einen echten Container-Neustart
+    (`ENC0021: Adding enum value requires restarting the application`).
+  - `edgeStyles.tsx`: `Verlauf` (Gradient) rendert über ein Pro-Kante-`<linearGradient
+    gradientUnits="userSpaceOnUse">` mit den echten Endpunkt-Koordinaten der jeweiligen Kante - der
+    Standard-`objectBoundingBox`-Gradient-Raum bildet einen festen Links-nach-rechts-Winkel auf die
+    Bounding-Box des referenzierenden Elements ab, was nur bei einer exakt horizontalen Linie
+    korrekt ist; jede schräge Kante (die meisten, in beiden Layouts) hätte ihre
+    Transparenz-Übergänge sonst versetzt zu den tatsächlichen Linien-Endpunkten. „Leuchten" (Glow)
+    rendert als eine zweite, breitere, weichgezeichnete Kopie der Linie UNTER der normalen scharfen
+    Linie (eigenes `<path>`/`<line>`, ohne Pfeilspitzen darauf), nicht als Blur-Filter direkt auf
+    der echten Linie - die erste Version machte genau das und erzeugte, per Screenshot live
+    bestätigt, einen dicken, gleichmäßig verwaschenen Fleck ohne übrig gebliebene scharfe Linie
+    (`feGaussianBlur` kennt keinen „scharfer Kern, nur die Ränder weich"-Modus - es verwischt die
+    gesamte gerenderte Form). `NoteAppearanceMenu.tsx` erhält passende handgezeichnete
+    Vorschau-Icons für beide (jeweils mit eigenem `useId()`-skopiertem Gradient-/Filter-Def, anders
+    als das kleine feste Set, das die echte Kanten-Darstellung nutzt, da eine Menü-Vorschau der
+    eigenen currentColor/dem Theme des Buttons folgen muss statt der zwei festen Kantenfarben).
+  - `edgeStyles.tsx`s `EDGE_GAP` (Abstand Linie-zu-Box) von 4px auf 10px erhöht, nach Nutzer-
+    Feedback, dass der vorherige Abstand zu knapp wirkte, besonders sobald Pfeilspitzen direkt an
+    der Linienspitze sitzen.
 
 ## v2026.9.72
 

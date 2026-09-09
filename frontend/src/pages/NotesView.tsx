@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createNote, deleteNote, updateNote } from '../api/notes'
 import { ApiError } from '../api/client'
-import type { Note } from '../api/types'
+import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types'
 import NoteGraphView from './NoteGraphView'
-import TreeGraphView from './notesGraph/TreeGraphView'
-import type { TreeLayoutId } from './notesGraph/treeLayouts'
+import TreeGraphView, { type RootAppearance } from './notesGraph/TreeGraphView'
+import GraphSettingsPanel from './notesGraph/GraphSettingsPanel'
+import { STYLE_PRESETS, type GraphLayoutId } from './notesGraph/stylePresets'
+import { assignSchemeColors, colorForIndex } from './notesGraph/colorSchemes'
 import AddButton from '../components/AddButton'
 import DictationButton from '../components/DictationButton'
 import { usePreferences } from '../context/PreferencesContext'
@@ -27,19 +29,22 @@ type ViewMode = 'list' | 'graph'
 // 'free' is the physics-simulated force graph (NoteGraphView, based on the free cross-links);
 // the other four are static tree layouts sharing TreeGraphView, based on the parent/child
 // hierarchy - see notesGraph/treeLayouts.ts for how each one computes node positions.
-type GraphLayout = 'free' | TreeLayoutId
+type GraphLayout = GraphLayoutId
 
 const VIEW_MODE_PREFERENCE_KEY = 'notesViewMode'
 const GRAPH_LAYOUT_PREFERENCE_KEY = 'notesGraphLayout'
-const LINK_PATTERN = /\[\[([^[\]]+)]]/g
+// Frontend-only appearance for the virtual project-center node in TreeGraphView (no backing Note
+// object exists for it - see TreeGraphView's RootAppearance type / GraphSidePanel's "kind: 'root'"
+// case). Persisted the same way as notesGraphLayout, JSON-serialized since it's a small object,
+// not a single scalar.
+const ROOT_APPEARANCE_PREFERENCE_KEY = 'notesGraphRootAppearance'
+// Kein modul-globales RegExp mit 'g'-Flag (dessen lastIndex müsste zwischen Aufrufen mutiert
+// werden, was react-hooks/immutability zurecht als Render-unsichere Mutation eines außerhalb der
+// Komponente definierten Werts ablehnt) - stattdessen die reine Pattern-Quelle halten und in
+// renderContent() pro Aufruf ein frisches RegExp-Objekt erzeugen.
+const LINK_PATTERN_SOURCE = '\\[\\[([^[\\]]+)]]'
 
-const GRAPH_LAYOUT_LABELS: Record<GraphLayout, string> = {
-  free: 'Frei',
-  mindmap: 'Mind Map',
-  'tree-horizontal': 'Baum (links → rechts)',
-  'tree-vertical': 'Organigramm (oben → unten)',
-  fishbone: 'Fischgräten',
-}
+const DEFAULT_ROOT_APPEARANCE: RootAppearance = { color: null, shape: null, edgeStyle: null, edgeArrow: null }
 
 function isViewMode(value: string): value is ViewMode {
   return value === 'list' || value === 'graph'
@@ -49,12 +54,78 @@ function isGraphLayout(value: string): value is GraphLayout {
   return value === 'free' || value === 'mindmap' || value === 'tree-horizontal' || value === 'tree-vertical' || value === 'fishbone'
 }
 
+// Der Root-Knoten (virtueller Projekt-Mittelpunkt) hat keine eigene Notiz-ID und wird daher nicht
+// von assignSchemeColors' reihum-Verteilung erfasst - er erhält stattdessen die erste Farbe des
+// gewählten Schemas, damit er farblich sichtbar zur selben Vorlage gehört, ohne mit der ersten
+// echten Notiz zu kollidieren wäre (unterschiedliche Knotenform/-größe macht das ohnehin klar).
+function colorForRootPreset(schemeId: string): string {
+  return colorForIndex(schemeId, 0)
+}
+
+function parseRootAppearance(raw: string): RootAppearance {
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      return {
+        color: typeof parsed.color === 'string' ? parsed.color : null,
+        shape: typeof parsed.shape === 'string' ? (parsed.shape as NoteShape) : null,
+        edgeStyle: typeof parsed.edgeStyle === 'string' ? (parsed.edgeStyle as NoteEdgeStyle) : null,
+        edgeArrow: typeof parsed.edgeArrow === 'string' ? (parsed.edgeArrow as NoteEdgeArrow) : null,
+      }
+    }
+  } catch {
+    // Kein gültiges JSON (z.B. noch nie gesetzt) - Standardwert verwenden.
+  }
+  return DEFAULT_ROOT_APPEARANCE
+}
+
 export default function NotesView({ projectId, projectName, notes, onNotesChange }: Props) {
-  const { getPreference, setPreference } = usePreferences()
+  const { loaded: preferencesLoaded, getPreference, setPreference } = usePreferences()
   const storedViewMode = getPreference(VIEW_MODE_PREFERENCE_KEY, 'list')
   const [viewMode, setViewModeState] = useState<ViewMode>(isViewMode(storedViewMode) ? storedViewMode : 'list')
   const storedGraphLayout = getPreference(GRAPH_LAYOUT_PREFERENCE_KEY, 'free')
   const [graphLayout, setGraphLayoutState] = useState<GraphLayout>(isGraphLayout(storedGraphLayout) ? storedGraphLayout : 'free')
+  const storedRootAppearance = getPreference(ROOT_APPEARANCE_PREFERENCE_KEY, '')
+  const [rootAppearance, setRootAppearanceState] = useState<RootAppearance>(
+    storedRootAppearance ? parseRootAppearance(storedRootAppearance) : DEFAULT_ROOT_APPEARANCE,
+  )
+  const [applyingPreset, setApplyingPreset] = useState(false)
+  const [presetError, setPresetError] = useState<string | null>(null)
+
+  // useState's initializer above only ever runs once, on this component's very first mount - but
+  // PreferencesContext loads the real DB values asynchronously (see PreferencesContext.tsx), so if
+  // NotesView happens to mount before that fetch resolves, `storedViewMode`/`storedGraphLayout`/
+  // `storedRootAppearance` above all read as their hardcoded fallback ('list'/'free'/default) at
+  // that first render and then stay frozen at that wrong value forever, since useState never
+  // re-runs its initializer on its own. This is exactly the "view mode randomly flips between
+  // list/graph on repeated reloads" bug: which value gets frozen in depends on a race between this
+  // mount and the preferences fetch, not on anything the user did. Once `loaded` flips true, the
+  // DB values are authoritative and get synced in here - same prevLoaded-comparison-during-render
+  // pattern as ThemeContext.tsx (a ref-based comparison would hit the same react-hooks/refs
+  // restriction that react-hooks/set-state-in-effect exists to avoid in the first place), so this
+  // only reacts to the one loaded: false -> true transition, never re-fires on every render.
+  const [prevPreferencesLoaded, setPrevPreferencesLoaded] = useState(preferencesLoaded)
+  if (preferencesLoaded !== prevPreferencesLoaded) {
+    setPrevPreferencesLoaded(preferencesLoaded)
+    if (preferencesLoaded) {
+      const dbViewMode = getPreference(VIEW_MODE_PREFERENCE_KEY, viewMode)
+      if (isViewMode(dbViewMode) && dbViewMode !== viewMode) setViewModeState(dbViewMode)
+      const dbGraphLayout = getPreference(GRAPH_LAYOUT_PREFERENCE_KEY, graphLayout)
+      if (isGraphLayout(dbGraphLayout) && dbGraphLayout !== graphLayout) setGraphLayoutState(dbGraphLayout)
+      const dbRootAppearanceRaw = getPreference(ROOT_APPEARANCE_PREFERENCE_KEY, '')
+      if (dbRootAppearanceRaw) {
+        const dbRootAppearance = parseRootAppearance(dbRootAppearanceRaw)
+        setRootAppearanceState((prev) =>
+          dbRootAppearance.color !== prev.color ||
+          dbRootAppearance.shape !== prev.shape ||
+          dbRootAppearance.edgeStyle !== prev.edgeStyle ||
+          dbRootAppearance.edgeArrow !== prev.edgeArrow
+            ? dbRootAppearance
+            : prev,
+        )
+      }
+    }
+  }
 
   function setViewMode(mode: ViewMode) {
     setViewModeState(mode)
@@ -65,6 +136,31 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     setGraphLayoutState(layout)
     setPreference(GRAPH_LAYOUT_PREFERENCE_KEY, layout)
   }
+
+  function setRootAppearance(patch: Partial<RootAppearance>) {
+    // setPreference() (which updates PreferencesStateProvider's own state - a DIFFERENT component)
+    // must not run inside the setRootAppearanceState updater callback below - React logs "Cannot
+    // update a component while rendering a different component" when an updater function (which
+    // must be a pure computation of prev -> next) has a side effect like that, since React can
+    // invoke updater functions during a render pass (e.g. replaying them to reconcile a batch),
+    // not only after commit. `rootAppearance` is already the current value here (this function
+    // closes over the same render's state, no stale-closure risk since it's only ever called from
+    // an event handler, never from inside another updater), so the merge can happen directly
+    // instead of needing the updater form at all.
+    const next = { ...rootAppearance, ...patch }
+    setRootAppearanceState(next)
+    setPreference(ROOT_APPEARANCE_PREFERENCE_KEY, JSON.stringify(next))
+  }
+
+  // Standalone layout-picker popover, next to the List/Graph toggle - reaches the exact same
+  // GraphSettingsPanel content (layout + style presets + root appearance) that TreeGraphView's
+  // center-node click already opens, but from a fixed spot that works in BOTH the free and tree
+  // views. The free view (NoteGraphView) has no root/center-node concept at all, so a note click
+  // there could never reach this menu - and even in the tree views, a user might not think to
+  // click the center node specifically to find layout options. Kept alongside the existing
+  // center-node entry point rather than replacing it (the user asked for both to coexist).
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
+
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
   const [newTitle, setNewTitle] = useState('')
@@ -84,7 +180,13 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
   // Keep non-dirty open tabs in sync if their note changes via another path (e.g. a graph
   // "Notizen verbinden" edit while the target note is already open here) - tabs with
   // unsaved edits are left untouched so in-progress work is never silently overwritten.
-  useEffect(() => {
+  // Applied directly during render (comparing the `notes` prop against its own value from the
+  // previous render, React's documented "adjusting state when a prop changes" pattern) rather
+  // than a synchronous setState inside an effect - a ref-based comparison would hit the same
+  // react-hooks/refs restriction that set-state-in-effect exists to avoid in the first place.
+  const [prevNotes, setPrevNotes] = useState(notes)
+  if (notes !== prevNotes) {
+    setPrevNotes(notes)
     setTabs((prev) =>
       prev.map((t) => {
         if (t.dirty) return t
@@ -93,7 +195,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
         return { ...t, draftTitle: note.title, draftContent: note.content }
       }),
     )
-  }, [notes])
+  }
 
   function openNote(note: Note) {
     setTabs((prev) => (prev.some((t) => t.noteId === note.id) ? prev : [...prev, { noteId: note.id, draftTitle: note.title, draftContent: note.content, dirty: false }]))
@@ -197,9 +299,10 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     const parts: ReactNode[] = []
     let lastIndex = 0
     let match: RegExpExecArray | null
-    LINK_PATTERN.lastIndex = 0
+    // Frisches RegExp pro Aufruf statt ein geteiltes lastIndex zu mutieren (siehe LINK_PATTERN_SOURCE).
+    const linkPattern = new RegExp(LINK_PATTERN_SOURCE, 'g')
 
-    while ((match = LINK_PATTERN.exec(content))) {
+    while ((match = linkPattern.exec(content))) {
       if (match.index > lastIndex) {
         parts.push(content.slice(lastIndex, match.index))
       }
@@ -296,6 +399,39 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
   }
 
+  // Wendet eine vordefinierte Stil-Vorlage (stylePresets.ts) auf ALLE Notizen im Projekt an: wechselt
+  // das Layout und aktualisiert Farbe (via assignSchemeColors reihum aus dem Schema)/Form/Linienstil/
+  // Pfeilspitzen jeder einzelnen Notiz sowie des Root-Knotens. Läuft sequenziell statt Promise.all,
+  // damit ein einzelner Fehlschlag mitten im Durchlauf nicht dutzende parallele Requests im
+  // unbestimmten Zustand hinterlässt und der Nutzer eine konkrete Fehlermeldung sieht.
+  async function handleApplyPreset(presetId: string) {
+    const preset = STYLE_PRESETS.find((p) => p.id === presetId)
+    if (!preset) return
+    setApplyingPreset(true)
+    setPresetError(null)
+    try {
+      const colorByNoteId = assignSchemeColors(notes.map((n) => n.id), preset.colorSchemeId)
+      const updatedNotes: Note[] = []
+      for (const note of notes) {
+        const color = colorByNoteId.get(note.id) ?? null
+        const updated = await updateNote(projectId, note.id, note.title, note.content, color, preset.shape, preset.edgeStyle, preset.edgeArrow)
+        updatedNotes.push(updated)
+      }
+      onNotesChange(notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n))
+      setRootAppearance({
+        color: colorForRootPreset(preset.colorSchemeId),
+        shape: preset.shape,
+        edgeStyle: preset.edgeStyle,
+        edgeArrow: preset.edgeArrow,
+      })
+      setGraphLayout(preset.layout)
+    } catch (err) {
+      setPresetError(err instanceof ApiError ? err.message : 'Stil-Vorlage konnte nicht vollständig angewendet werden.')
+    } finally {
+      setApplyingPreset(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -315,30 +451,67 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
         </div>
 
         {viewMode === 'graph' && (
-          <select
-            value={graphLayout}
-            onChange={(e) => isGraphLayout(e.target.value) && setGraphLayout(e.target.value)}
-            className="rounded-lg border border-slate-200/80 bg-white/70 px-2.5 py-1.5 text-xs font-medium text-slate-600 outline-none transition-colors focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300"
-          >
-            {(Object.keys(GRAPH_LAYOUT_LABELS) as GraphLayout[]).map((layout) => (
-              <option key={layout} value={layout}>
-                {GRAPH_LAYOUT_LABELS[layout]}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <button
+              onClick={() => setLayoutMenuOpen((prev) => !prev)}
+              // relative + z-30, matching (and beating) the fixed inset-0 z-20 overlay below - a
+              // CSS z-index only has any effect on a positioned element (position !== static), so
+              // giving only the *container* div a z-index did nothing for this static <button>: a
+              // position:fixed sibling with an explicit z-index always paints above a position:
+              // static sibling regardless of DOM order or the container's own z-index, since that
+              // internal comparison is unrelated to how the container stacks against elements
+              // OUTSIDE it. Without this, the overlay - needed to cover the full viewport for the
+              // click-outside-closes behavior - visually sat on top of the button itself once the
+              // menu was open, silently swallowing every click on it (including the one meant to
+              // close the menu again). Confirmed live via Playwright: a second click on "Layout &
+              // Stil" hit the overlay div instead and timed out retrying.
+              className={`relative z-30 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                layoutMenuOpen
+                  ? 'border-brand-primary/50 bg-brand-primary/10 text-brand-primary dark:text-brand-primary-light'
+                  : 'border-slate-200/50 glass text-slate-600 hover:bg-slate-100/50 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50'
+              }`}
+            >
+              Layout &amp; Stil
+            </button>
+            {layoutMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setLayoutMenuOpen(false)} />
+                <div className="absolute left-0 top-full z-30 mt-1.5 max-h-[70vh] w-72 overflow-y-auto rounded-xl border border-slate-200/50 glass-panel shadow-xl dark:border-slate-700/50">
+                  <GraphSettingsPanel
+                    currentLayout={graphLayout}
+                    onChangeLayout={setGraphLayout}
+                    onApplyPreset={handleApplyPreset}
+                    applyingPreset={applyingPreset}
+                    rootAppearance={rootAppearance}
+                    onChangeRootAppearance={setRootAppearance}
+                    // The root/center node only exists visually in the tree layouts - in the free
+                    // view (graphLayout === 'free') there is nothing on screen for these settings
+                    // to style, so they're hidden here rather than shown for a node that isn't
+                    // rendered anywhere.
+                    showRootAppearance={graphLayout !== 'free'}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
+      {presetError && <p className="text-sm text-red-400">{presetError}</p>}
 
       {viewMode === 'graph' ? (
         graphLayout === 'free' ? (
           <NoteGraphView
+            projectId={projectId}
             notes={notes}
             onSelectNote={handleGraphSelect}
             onCreateNote={handleGraphCreateNote}
             onConnectNotes={handleGraphConnect}
             onChangeAppearance={handleNoteAppearanceChange}
+            onChangeLayout={setGraphLayout}
+            onApplyPreset={handleApplyPreset}
+            applyingPreset={applyingPreset}
           />
         ) : (
           <TreeGraphView
@@ -349,6 +522,11 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
             onChangeAppearance={handleNoteAppearanceChange}
             onCreateRootNote={handleTreeCreateRootNote}
             onSetParent={handleTreeSetParent}
+            onChangeLayout={setGraphLayout}
+            onApplyPreset={handleApplyPreset}
+            applyingPreset={applyingPreset}
+            rootAppearance={rootAppearance}
+            onChangeRootAppearance={setRootAppearance}
           />
         )
       ) : (

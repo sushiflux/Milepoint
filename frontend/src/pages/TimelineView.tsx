@@ -271,6 +271,128 @@ function toggleInSet<T>(set: Set<T>, value: T) {
   return next
 }
 
+// Pulled out to module level (was previously declared inside TimelineView's function body) so it
+// isn't recreated as a new component identity on every render - react-hooks/static-components
+// flags nested component declarations because React would otherwise remount (and reset the state
+// of) every <LabelRow> instance on each parent render. rowHeight is the one value it used to read
+// via closure from the outer scope, now passed explicitly as a prop.
+function LabelRow({
+  rowHeight,
+  children,
+  style,
+  onContextMenu,
+}: {
+  rowHeight: number
+  children: React.ReactNode
+  style?: React.CSSProperties
+  onContextMenu?: (event: React.MouseEvent) => void
+}) {
+  return (
+    <div
+      onContextMenu={onContextMenu}
+      className="flex items-center border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
+      style={{ height: rowHeight, ...style }}
+    >
+      {children}
+    </div>
+  )
+}
+
+// Same reasoning as LabelRow above. Everything it previously read via closure from TimelineView's
+// body (depMenuRow/depMenuRef/depMenuSelection/setDepMenuSelection, and the
+// toggleDepMenu/currentBlockers/blockerOptions/handleAddBlocker/handleRemoveBlocker helpers, all
+// of which themselves close over further outer state like workItemById/milestoneById/workItems/
+// milestones/depMenuSelection/projectId) is now passed explicitly as props instead.
+function DependencyButton({
+  row,
+  depMenuRow,
+  depMenuRef,
+  depMenuSelection,
+  setDepMenuSelection,
+  toggleDepMenu,
+  currentBlockers,
+  blockerOptions,
+  handleAddBlocker,
+  handleRemoveBlocker,
+}: {
+  row: Row
+  depMenuRow: string | null
+  depMenuRef: React.RefObject<HTMLDivElement | null>
+  depMenuSelection: string
+  setDepMenuSelection: (value: string) => void
+  toggleDepMenu: (rowKey: string) => void
+  currentBlockers: (row: Row) => { kind: 'task' | 'milestone'; id: string; label: string }[]
+  blockerOptions: (row: Row) => { value: string; label: string }[]
+  handleAddBlocker: (row: Row) => void
+  handleRemoveBlocker: (row: Row, blocker: { kind: 'task' | 'milestone'; id: string }) => void
+}) {
+  const open = depMenuRow === row.key
+  const blockers = currentBlockers(row)
+  const options = blockerOptions(row)
+  return (
+    <div ref={open ? depMenuRef : undefined} className="relative inline-flex shrink-0">
+      <button
+        onClick={() => toggleDepMenu(row.key)}
+        title="Abhängigkeiten"
+        aria-label="Abhängigkeiten"
+        className={`flex h-3 w-3 items-center justify-center ${
+          blockers.length > 0
+            ? 'text-amber-500 dark:text-amber-400'
+            : 'text-slate-400 hover:text-indigo-500 dark:text-slate-600 dark:hover:text-indigo-400'
+        }`}
+      >
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+          <path d="M7.5 9.5 5.6 11.4a2.2 2.2 0 1 0 3.1 3.1L10.6 12.6M12.5 10.5l1.9-1.9a2.2 2.2 0 1 0-3.1-3.1L9.4 7.4" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-40 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-3 text-left shadow-lg dark:border-slate-800 dark:bg-slate-900">
+          <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Blockiert durch</p>
+          {blockers.length === 0 && <p className="mb-2 text-xs text-slate-500">Keine Abhängigkeiten</p>}
+          {blockers.length > 0 && (
+            <ul className="mb-2 space-y-1">
+              {blockers.map((b) => (
+                <li key={`${b.kind}-${b.id}`} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate">{b.label}</span>
+                  <button
+                    onClick={() => handleRemoveBlocker(row, b)}
+                    className="shrink-0 text-slate-400 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
+                  >
+                    ✕
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex gap-1 border-t border-slate-200 pt-2 dark:border-slate-800">
+            <select
+              value={depMenuSelection}
+              onChange={(e) => setDepMenuSelection(e.target.value)}
+              className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
+            >
+              <option value="">Blocker wählen…</option>
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => handleAddBlocker(row)}
+              disabled={!depMenuSelection}
+              className="shrink-0 rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 type DragMode = 'move' | 'resize-start' | 'resize-end'
 
 interface DragState {
@@ -1352,94 +1474,6 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
     closeEdit()
   }
 
-  function LabelRow({
-    children,
-    style,
-    onContextMenu,
-  }: {
-    children: React.ReactNode
-    style?: React.CSSProperties
-    onContextMenu?: (event: React.MouseEvent) => void
-  }) {
-    return (
-      <div
-        onContextMenu={onContextMenu}
-        className="flex items-center border-b border-slate-100 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/20"
-        style={{ height: rowHeight, ...style }}
-      >
-        {children}
-      </div>
-    )
-  }
-
-  function DependencyButton({ row }: { row: Row }) {
-    const open = depMenuRow === row.key
-    const blockers = currentBlockers(row)
-    const options = blockerOptions(row)
-    return (
-      <div ref={open ? depMenuRef : undefined} className="relative inline-flex shrink-0">
-        <button
-          onClick={() => toggleDepMenu(row.key)}
-          title="Abhängigkeiten"
-          aria-label="Abhängigkeiten"
-          className={`flex h-3 w-3 items-center justify-center ${
-            blockers.length > 0
-              ? 'text-amber-500 dark:text-amber-400'
-              : 'text-slate-400 hover:text-indigo-500 dark:text-slate-600 dark:hover:text-indigo-400'
-          }`}
-        >
-          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-            <path d="M7.5 9.5 5.6 11.4a2.2 2.2 0 1 0 3.1 3.1L10.6 12.6M12.5 10.5l1.9-1.9a2.2 2.2 0 1 0-3.1-3.1L9.4 7.4" />
-          </svg>
-        </button>
-
-        {open && (
-          <div className="absolute left-0 top-full z-40 mt-1 w-64 rounded-lg border border-slate-200 bg-white p-3 text-left shadow-lg dark:border-slate-800 dark:bg-slate-900">
-            <p className="mb-1.5 text-[10px] font-medium uppercase text-slate-500">Blockiert durch</p>
-            {blockers.length === 0 && <p className="mb-2 text-xs text-slate-500">Keine Abhängigkeiten</p>}
-            {blockers.length > 0 && (
-              <ul className="mb-2 space-y-1">
-                {blockers.map((b) => (
-                  <li key={`${b.kind}-${b.id}`} className="flex items-center justify-between gap-2 text-xs">
-                    <span className="truncate">{b.label}</span>
-                    <button
-                      onClick={() => handleRemoveBlocker(row, b)}
-                      className="shrink-0 text-slate-400 hover:text-red-500 dark:text-slate-600 dark:hover:text-red-400"
-                    >
-                      ✕
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="flex gap-1 border-t border-slate-200 pt-2 dark:border-slate-800">
-              <select
-                value={depMenuSelection}
-                onChange={(e) => setDepMenuSelection(e.target.value)}
-                className="min-w-0 flex-1 rounded border border-slate-300 bg-white px-1.5 py-1 text-xs dark:border-slate-700 dark:bg-slate-900"
-              >
-                <option value="">Blocker wählen…</option>
-                {options.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => handleAddBlocker(row)}
-                disabled={!depMenuSelection}
-                className="shrink-0 rounded bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                +
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    )
-  }
-
   return (
     <div
       className="min-h-[calc(100vh-7rem)] space-y-6"
@@ -1808,7 +1842,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
           </div>
 
           {rows.length === 0 && (
-            <LabelRow style={{ paddingLeft: 8, height: 200 }} onContextMenu={(e) => openEmptyContextMenu(e, null)}>
+            <LabelRow rowHeight={rowHeight} style={{ paddingLeft: 8, height: 200 }} onContextMenu={(e) => openEmptyContextMenu(e, null)}>
               <span className="text-sm font-medium text-slate-500 dark:text-slate-400">Noch keine Aufgaben oder Meilensteine mit Termin.</span>
             </LabelRow>
           )}
@@ -1819,6 +1853,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
               return (
                 <LabelRow
                   key={row.key}
+                  rowHeight={rowHeight}
                   onContextMenu={(e) => {
                     e.preventDefault()
                     setContextMenu({ kind: 'milestone', milestone: m, x: e.clientX, y: e.clientY })
@@ -1829,7 +1864,18 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                   <span className="flex flex-1 items-center gap-1.5 truncate px-2 text-sm font-bold text-purple-700 dark:text-purple-300" style={{ paddingLeft: row.depth * 16 }}>
                     <span className="text-xs">◆</span>
                     <span className="truncate">{m.name}</span>
-                    <DependencyButton row={row} />
+                    <DependencyButton
+                      row={row}
+                      depMenuRow={depMenuRow}
+                      depMenuRef={depMenuRef}
+                      depMenuSelection={depMenuSelection}
+                      setDepMenuSelection={setDepMenuSelection}
+                      toggleDepMenu={toggleDepMenu}
+                      currentBlockers={currentBlockers}
+                      blockerOptions={blockerOptions}
+                      handleAddBlocker={handleAddBlocker}
+                      handleRemoveBlocker={handleRemoveBlocker}
+                    />
                     <button
                       onClick={() => handleDeleteMilestone(m)}
                       className="text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400 ml-1"
@@ -1850,6 +1896,7 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
             return (
               <LabelRow
                 key={row.key}
+                rowHeight={rowHeight}
                 onContextMenu={(e) => openRowContextMenu(e, row)}
               >
                 <span style={{ width: COL_NUMBER }} className="truncate px-2 font-mono text-xs font-semibold text-slate-500 dark:text-slate-400">
@@ -1871,7 +1918,20 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
                     </button>
                   )}
                   <span className="truncate">{item.title}</span>
-                  {item.type !== 'Phase' && <DependencyButton row={row} />}
+                  {item.type !== 'Phase' && (
+                    <DependencyButton
+                      row={row}
+                      depMenuRow={depMenuRow}
+                      depMenuRef={depMenuRef}
+                      depMenuSelection={depMenuSelection}
+                      setDepMenuSelection={setDepMenuSelection}
+                      toggleDepMenu={toggleDepMenu}
+                      currentBlockers={currentBlockers}
+                      blockerOptions={blockerOptions}
+                      handleAddBlocker={handleAddBlocker}
+                      handleRemoveBlocker={handleRemoveBlocker}
+                    />
+                  )}
                   <button
                     onClick={() => openChildForm(item.id)}
                     title="Unteraufgabe hinzufügen"

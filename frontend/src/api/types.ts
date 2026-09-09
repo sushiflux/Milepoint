@@ -133,7 +133,7 @@ export type NoteShape = 'Rounded' | 'Rectangle' | 'Diamond' | 'Underline' | 'Ell
 // layouts) and its outgoing free cross-links (NoteGraphView) - never a per-connection setting.
 // Null means "no explicit choice" - rendered the same as 'Solid'/'None' but distinct, same
 // reasoning as NoteShape's null.
-export type NoteEdgeStyle = 'Solid' | 'Dashed' | 'Dotted'
+export type NoteEdgeStyle = 'Solid' | 'Dashed' | 'Dotted' | 'Gradient' | 'Glow'
 export type NoteEdgeArrow = 'None' | 'End' | 'Start' | 'Both'
 
 export interface Note {
@@ -155,6 +155,12 @@ export interface Note {
   // above. Null = use the view's default (solid, no arrowhead).
   edgeStyle: NoteEdgeStyle | null
   edgeArrow: NoteEdgeArrow | null
+  // Last manually-saved position in the free (physics-simulated) graph view (NoteGraphView), or
+  // null if the note has never been dragged there yet - see the backend's dedicated
+  // PUT .../position endpoint. Independent of any tree-layout position, which is always
+  // recomputed from the parent/child hierarchy and never persisted.
+  freeViewX: number | null
+  freeViewY: number | null
   createdAt: string
   updatedAt: string
 }

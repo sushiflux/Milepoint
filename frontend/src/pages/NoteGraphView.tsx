@@ -1,11 +1,23 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ApiError } from '../api/client'
+import { updateNotePosition } from '../api/notes'
 import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types'
-import { NoteNodeVisual } from './notesGraph/NoteNodeShape'
-import NoteAppearanceMenu from './notesGraph/NoteAppearanceMenu'
-import { EdgeMarkerDefs, edgeMarkerRefs, edgeStrokeDasharray } from './notesGraph/edgeStyles'
+import { NoteNodeVisual, measureNodeBox } from './notesGraph/NoteNodeShape'
+import {
+  EdgeMarkerDefs,
+  EdgeGlowFilterDefs,
+  edgeMarkerRefs,
+  edgeStrokeDasharray,
+  edgeGradientStroke,
+  edgeGradientDefFor,
+  edgeGlowFilter,
+  clipPointToBoxEdge,
+} from './notesGraph/edgeStyles'
+import GraphSidePanel from './notesGraph/GraphSidePanel'
+import type { GraphLayoutId } from './notesGraph/stylePresets'
 
 interface Props {
+  projectId: string
   notes: Note[]
   onSelectNote: (note: Note) => void
   onCreateNote: (title: string) => Promise<void>
@@ -14,6 +26,9 @@ interface Props {
     noteId: string,
     patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
   ) => Promise<void>
+  onChangeLayout: (layout: GraphLayoutId) => void
+  onApplyPreset: (presetId: string) => Promise<void>
+  applyingPreset: boolean
 }
 
 interface Point {
@@ -38,7 +53,9 @@ interface Transform {
 // REPULSION/LINK_DISTANCE were tuned for the previous small fixed-radius circle nodes. Node boxes
 // now grow to fit their title text (see notesGraph/NoteNodeShape.tsx's measureNodeBox, up to
 // ~160px wide for a long title, vs. the previous ~9-26px circle diameter) - both are increased so
-// nodes with real text content don't settle overlapping each other.
+// nodes with real text content don't settle overlapping each other. Still a good fit alongside the
+// spiral spawn placement below (SPAWN_RADIUS_STEP): the spiral gives new nodes a reasonable
+// starting spread, REPULSION only needs to fine-tune from there instead of untangling a stack.
 const REPULSION = 5500
 const LINK_DISTANCE = 160
 const LINK_STRENGTH = 0.05
@@ -48,6 +65,25 @@ const ALPHA_DECAY = 0.02
 const ALPHA_MIN = 0.001
 const MIN_ZOOM = 0.15
 const MAX_ZOOM = 5
+
+// Golden-angle spiral placement (same idea as sunflower-seed/phyllotaxis layouts) for
+// newly-appeared nodes with no known spawn point (no freeViewX/Y ever saved, and not the target of
+// this view's own "create at click position" flow - see pendingSpawnRef). Spreads multiple
+// simultaneously-new nodes around a much larger area than a single small random jitter would,
+// so they don't spawn stacked on top of each other and force the physics simulation to slowly
+// untangle a pile - each new node gets a deterministic point on the spiral based on its own index
+// among "nodes needing a spawn position this pass", rather than a random point in a small radius.
+// Pulled out to a module-level function (rather than inlined in the idKey effect below) so it sits
+// in a plain, non-component function the react-hooks/purity rule doesn't need to reason about as
+// "possibly called during render" - it's still only ever invoked from inside an effect.
+const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5))
+const SPAWN_RADIUS_STEP = 70
+
+function spiralSpawnPosition(width: number, height: number, index: number): Point {
+  const angle = index * GOLDEN_ANGLE
+  const radius = SPAWN_RADIUS_STEP * Math.sqrt(index + 1)
+  return { x: width / 2 + Math.cos(angle) * radius, y: height / 2 + Math.sin(angle) * radius }
+}
 
 function buildEdges(notes: Note[]): [string, string][] {
   const seen = new Set<string>()
@@ -140,12 +176,28 @@ function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, widt
   }
 }
 
-export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onConnectNotes, onChangeAppearance }: Props) {
+export default function NoteGraphView({
+  projectId,
+  notes,
+  onSelectNote,
+  onCreateNote,
+  onConnectNotes,
+  onChangeAppearance,
+  onChangeLayout,
+  onApplyPreset,
+  applyingPreset,
+}: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ width: 900, height: 600 })
   const sizeRef = useRef(size)
-  sizeRef.current = size
+  // Mirrors `size` into a ref so the RAF physics loop (step(), which runs outside React's render
+  // cycle) and pointer-event handlers can read the latest size synchronously without depending on
+  // a fresh closure - written in an effect (runs after commit, never during render) rather than
+  // directly in the component body, which react-hooks/refs disallows.
+  useEffect(() => {
+    sizeRef.current = size
+  }, [size])
 
   const positionsRef = useRef<Map<string, GraphNode>>(new Map())
   const alphaRef = useRef(0)
@@ -153,16 +205,44 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
   const draggingRef = useRef<{ id: string; moved: boolean } | null>(null)
   const panRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
   const pendingSpawnRef = useRef<Point | null>(null)
+  // Note IDs that were manually dragged and still need to be persisted. Saved as soon as possible
+  // (see savePendingPositions() below, called from handleSvgPointerUp right on release AND as a
+  // safety net on unmount) rather than waiting for the physics simulation to fully settle below
+  // ALPHA_MIN - the previous settle-only approach lost saves entirely whenever the user tidied up
+  // several notes in a row (each new drag's wake(0.4) keeps alpha above ALPHA_MIN, so the RAF loop
+  // - and therefore the save - might not fire again for a long time) or navigated/reloaded before
+  // the simulation ever settled, which is exactly the "I moved several notes and most of them
+  // reset to a random spiral spot after reload" bug: only whichever note happened to be dragged
+  // last before an accidental settle got saved, and even that used the position at settle time,
+  // not at release time (the physics simulation was still moving a "released" node afterward via
+  // its own repulsion/spring forces, which combined with a page reload mid-oscillation is also how
+  // a node could end up saved at a wildly out-of-view coordinate - see FreeViewX/Y in the DB
+  // reaching into the thousands for a note that visually never left the visible canvas area).
+  // Still a Set, not a single ID, so multiple notes dragged in the same short window are all
+  // tracked, even though each is now saved immediately rather than batched until settle:
+  // "I moved several notes and now one is far away again" bug) now just adds another entry
+  // instead of clobbering the previous one. Cleared entry-by-entry right after each save fires so
+  // a settle-detection re-trigger (e.g. alpha dipping under ALPHA_MIN more than once before the
+  // RAF loop fully stops) can't queue a duplicate request for the same drag.
+  const pendingPositionSaveRef = useRef<Set<string>>(new Set())
 
   const [, forceRender] = useReducer((c: number) => c + 1, 0)
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, k: 1 })
   const transformRef = useRef(transform)
-  transformRef.current = transform
+  // Same reasoning as sizeRef above - screenToWorld()/step() read this synchronously from pointer
+  // handlers and the physics loop, both of which run outside React's render cycle.
+  useEffect(() => {
+    transformRef.current = transform
+  }, [transform])
   const autoFitRef = useRef(true)
 
   const [contextMenu, setContextMenu] = useState<{ screen: Point; world: Point } | null>(null)
-  const [nodeMenu, setNodeMenu] = useState<{ screen: Point; noteId: string } | null>(null)
+  // Rechtes Seitenpanel statt Popup-Kontextmenü - siehe TreeGraphView.tsx für dasselbe Muster.
+  // Kein Root-Knoten in dieser freien Ansicht, daher ist selectedNoteId immer eine echte Notiz-ID
+  // oder null (globale Einstellungen).
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [createNoteAt, setCreateNoteAt] = useState<{ screen: Point; world: Point } | null>(null)
   const [newNodeTitle, setNewNodeTitle] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -171,7 +251,11 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
 
   const edges = useMemo(() => buildEdges(notes), [notes])
   const edgesRef = useRef(edges)
-  edgesRef.current = edges
+  // Same reasoning as sizeRef above - step() reads this synchronously from the physics loop,
+  // which runs outside React's render cycle (requestAnimationFrame).
+  useEffect(() => {
+    edgesRef.current = edges
+  }, [edges])
   // Lookup for edge styling: each edge is styled by its SOURCE note (the first tuple element from
   // buildEdges, i.e. the note whose outgoingLinks produced it) - see edgeStyles.tsx's doc comment.
   const notesById = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
@@ -223,6 +307,25 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     setTransform(fitted)
   }, [size.width, size.height])
 
+  // Persists every note ID currently marked pending, at its CURRENT positionsRef coordinate at
+  // call time - called both right on pointerup (see handleSvgPointerUp) and as an unmount safety
+  // net (see the cleanup effect below), not just from inside the RAF loop, so a save is never
+  // dependent on the simulation actually reaching ALPHA_MIN (see pendingPositionSaveRef's doc
+  // comment for why that dependency was the actual bug).
+  function savePendingPositions() {
+    if (pendingPositionSaveRef.current.size === 0) return
+    const draggedIds = pendingPositionSaveRef.current
+    pendingPositionSaveRef.current = new Set()
+    for (const draggedId of draggedIds) {
+      const node = positionsRef.current.get(draggedId)
+      if (node) {
+        updateNotePosition(projectId, draggedId, node.x, node.y).catch((err) => {
+          setActionError(err instanceof ApiError ? err.message : 'Position konnte nicht gespeichert werden.')
+        })
+      }
+    }
+  }
+
   function step() {
     const nodes = Array.from(positionsRef.current.values())
     const { width, height } = sizeRef.current
@@ -238,7 +341,13 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     }
 
     forceRender()
-    rafRef.current = alphaRef.current > ALPHA_MIN ? requestAnimationFrame(step) : null
+
+    if (alphaRef.current > ALPHA_MIN) {
+      rafRef.current = requestAnimationFrame(step)
+      return
+    }
+
+    rafRef.current = null
   }
 
   function wake(amount: number) {
@@ -251,7 +360,12 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
   useEffect(() => {
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      // Safety net, not the primary save path (handleSvgPointerUp saves immediately on release
+      // now) - covers the edge case of navigating away/unmounting mid-drag before pointerup ever
+      // fires (e.g. switching the List/Graph tab or graph layout while a node is still held down).
+      savePendingPositions()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const idKey = notes.map((n) => n.id).join(',')
@@ -262,27 +376,50 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     for (const id of Array.from(known.keys())) {
       if (!notes.some((n) => n.id === id)) known.delete(id)
     }
+    // Nodes with no saved position and no explicit spawn click each get their own point on the
+    // golden-angle spiral (see spiralSpawnPosition above) - indexed by how many such nodes have
+    // been placed so far this pass, not by their position in `notes`, so a mix of already-placed
+    // and newly-appearing notes doesn't leave gaps/collisions in the spiral sequence.
+    let spiralIndex = 0
     for (const note of notes) {
-      if (!known.has(note.id)) {
+      if (known.has(note.id)) continue
+      if (pendingSpawnRef.current) {
+        // Explicit "create at right-click position" spawn - always takes priority and is
+        // consumed immediately after use (cleared below) so it never leaks into the next note.
         const spawn = pendingSpawnRef.current
-        known.set(note.id, {
-          id: note.id,
-          x: spawn ? spawn.x : width / 2 + (Math.random() - 0.5) * 120,
-          y: spawn ? spawn.y : height / 2 + (Math.random() - 0.5) * 120,
-          vx: 0,
-          vy: 0,
-        })
+        known.set(note.id, { id: note.id, x: spawn.x, y: spawn.y, vx: 0, vy: 0 })
+      } else if (note.freeViewX !== null && note.freeViewY !== null) {
+        // A position was manually dragged and saved before (possibly in an earlier session) -
+        // use it exactly, never the random/spiral fallback.
+        known.set(note.id, { id: note.id, x: note.freeViewX, y: note.freeViewY, vx: 0, vy: 0 })
+      } else {
+        const spawn = spiralSpawnPosition(width, height, spiralIndex)
+        spiralIndex += 1
+        known.set(note.id, { id: note.id, x: spawn.x, y: spawn.y, vx: 0, vy: 0 })
       }
     }
     pendingSpawnRef.current = null
 
     // A structural change (note added/removed) re-enables auto-fit even if the user had
     // previously zoomed/panned manually, and frames the new set of nodes immediately so
-    // there's no flash at the stale zoom level before the physics loop's first tick.
-    autoFitRef.current = true
-    const fitted = computeFitTransform(Array.from(known.values()), width, height)
-    transformRef.current = fitted
-    setTransform(fitted)
+    // there's no flash at the stale zoom level before the physics loop's first tick - UNLESS a
+    // drag is currently in progress. Re-fitting the camera mid-drag was the actual cause of notes
+    // ending up saved at wildly out-of-view coordinates (FreeViewX/Y in the thousands): this
+    // effect re-runs whenever `notes` changes identity (e.g. right after creating a new note via
+    // the right-click menu), and previously called setTransform() here completely unconditionally
+    // - if that happened to land between two handleSvgPointerMove calls of an in-progress drag,
+    // `transformRef.current` (which the next move event divides screen coordinates by, see
+    // handleSvgPointerMove's node.x = (screenX - t.x) / t.k) could suddenly jump to a very
+    // different zoom level than the one the drag had been tracking, and a small mouse movement
+    // divided by a much smaller k than before translates into a huge world-coordinate jump for
+    // that one frame - exactly the kind of one-frame spike this dragged node's position would
+    // then get saved at on release.
+    if (!draggingRef.current) {
+      autoFitRef.current = true
+      const fitted = computeFitTransform(Array.from(known.values()), width, height)
+      transformRef.current = fitted
+      setTransform(fitted)
+    }
 
     wake(1)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -299,56 +436,40 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     }
   }
 
+  // Rechtsklick auf einen Knoten bleibt als Schnellzugriff bestehen: öffnet das Panel direkt mit
+  // diesem Knoten ausgewählt, statt (wie zuvor) ein eigenes Popup an der Klickposition zu zeigen.
   function handleNodeContextMenu(noteId: string) {
     return (event: React.MouseEvent<SVGGElement>) => {
       event.preventDefault()
       event.stopPropagation()
       setContextMenu(null)
-      const containerRect = containerRef.current?.getBoundingClientRect()
-      if (!containerRect) return
-      setNodeMenu({ screen: { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }, noteId })
+      selectNote(noteId)
     }
   }
 
-  async function changeNodeColor(noteId: string, color: string | null) {
-    try {
-      await onChangeAppearance(noteId, { color })
-      setActionError(null)
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Farbe konnte nicht geändert werden.')
-    }
+  function selectNote(noteId: string) {
+    setSelectedNoteId(noteId)
+    setPanelOpen(true)
   }
 
-  async function changeNodeShape(noteId: string, shape: NoteShape | null) {
+  async function changeNodeAppearance(
+    noteId: string,
+    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+  ) {
     try {
-      await onChangeAppearance(noteId, { shape })
+      await onChangeAppearance(noteId, patch)
       setActionError(null)
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Form konnte nicht geändert werden.')
-    }
-  }
-
-  async function changeNodeEdgeStyle(noteId: string, edgeStyle: NoteEdgeStyle | null) {
-    try {
-      await onChangeAppearance(noteId, { edgeStyle })
-      setActionError(null)
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Linienstil konnte nicht geändert werden.')
-    }
-  }
-
-  async function changeNodeEdgeArrow(noteId: string, edgeArrow: NoteEdgeArrow | null) {
-    try {
-      await onChangeAppearance(noteId, { edgeArrow })
-      setActionError(null)
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Pfeilspitzen konnten nicht geändert werden.')
+      setActionError(err instanceof ApiError ? err.message : 'Aussehen konnte nicht geändert werden.')
     }
   }
 
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return
-    setNodeMenu(null)
+    // Klick auf leere Canvas-Fläche schließt das Panel komplett (siehe TreeGraphView.tsx für
+    // dasselbe Muster) - es gibt keinen permanent sichtbaren "globalen" Panel-Zustand mehr.
+    setPanelOpen(false)
+    setSelectedNoteId(null)
     if (connectMode) {
       setConnectMode(false)
       setConnectFirstId(null)
@@ -370,7 +491,6 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     event.preventDefault()
     setConnectMode(false)
     setConnectFirstId(null)
-    setNodeMenu(null)
     setContextMenu(screenToWorld(event.currentTarget, event.clientX, event.clientY))
   }
 
@@ -428,7 +548,6 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
       setContextMenu(null)
-      setNodeMenu(null)
       setCreateNoteAt(null)
       setConnectMode(false)
       setConnectFirstId(null)
@@ -484,19 +603,23 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
         handleConnectClick(drag.id)
         return
       }
-      // A plain click (no drag, not in connect mode) opens the same appearance/actions menu the
-      // right-click context menu shows - previously this jumped straight to opening the note,
-      // which made a quick color/shape change require a right-click every time. "Notiz öffnen" is
-      // the menu's first entry, so opening the note is still one click away.
-      const node = positionsRef.current.get(drag.id)
-      if (node) {
-        const t = transformRef.current
-        setContextMenu(null)
-        setNodeMenu({ screen: { x: node.x * t.k + t.x, y: node.y * t.k + t.y }, noteId: drag.id })
-      }
+      // A plain click (no drag, not in connect mode) opens the right side panel with this node
+      // selected - previously this jumped straight to opening the note, which made a quick
+      // color/shape change require a right-click every time. "Notiz öffnen" is still one click
+      // away as the panel's first entry.
+      setContextMenu(null)
+      selectNote(drag.id)
       return
     }
 
+    // The node was actually dragged - save its current position right now, at release, rather
+    // than waiting for the physics simulation to settle (see pendingPositionSaveRef's doc comment
+    // above for why the settle-only approach silently lost most of a multi-note tidy-up). The
+    // repulsion/spring forces wake(0.4) keeps running for a few more frames after release will
+    // still nudge the node slightly further - that's a few pixels of drift the physics simulation
+    // itself considers acceptable resting jitter, not a save worth blocking on.
+    pendingPositionSaveRef.current.add(drag.id)
+    savePendingPositions()
     wake(0.4)
   }
 
@@ -529,140 +652,141 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     return () => el.removeEventListener('wheel', handleWheel)
   }, [])
 
-  const nodeMenuNote = nodeMenu ? notes.find((n) => n.id === nodeMenu.noteId) ?? null : null
-
   return (
-    <div
-      ref={containerRef}
-      onContextMenu={handleContextMenu}
-      className="relative h-[75vh] min-h-[480px] w-full overflow-hidden rounded-xl border border-slate-200/50 glass-panel shadow-sm dark:border-slate-700/50"
-    >
-      <button
-        onClick={() => {
-          autoFitRef.current = true
-          const fitted = computeFitTransform(Array.from(positionsRef.current.values()), sizeRef.current.width, sizeRef.current.height)
-          transformRef.current = fitted
-          setTransform(fitted)
-        }}
-        className="absolute right-4 top-4 z-10 rounded-lg border border-slate-200/50 glass px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100/50 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50"
+    <div className="flex h-[75vh] min-h-[480px] w-full overflow-hidden rounded-xl border border-slate-200/50 glass-panel shadow-sm dark:border-slate-700/50">
+      <div
+        ref={containerRef}
+        onContextMenu={handleContextMenu}
+        className="relative min-w-0 flex-1 overflow-hidden"
       >
-        Ansicht anpassen
-      </button>
+        <button
+          onClick={() => {
+            autoFitRef.current = true
+            const fitted = computeFitTransform(Array.from(positionsRef.current.values()), sizeRef.current.width, sizeRef.current.height)
+            transformRef.current = fitted
+            setTransform(fitted)
+          }}
+          className="absolute right-4 top-4 z-10 rounded-lg border border-slate-200/50 glass px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100/50 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50"
+        >
+          Ansicht anpassen
+        </button>
 
-      {connectMode && (
-        <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded border border-amber-500/50 bg-white/90 px-3 py-1.5 text-xs text-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
-          {connectFirstId ? 'Ziel-Notiz anklicken, um zu verbinden…' : 'Erste Notiz anklicken…'}
-          <button
-            onClick={() => {
-              setConnectMode(false)
-              setConnectFirstId(null)
-            }}
-            className="text-slate-500 hover:text-red-500 dark:text-slate-400 dark:hover:text-red-400"
-          >
-            Abbrechen
-          </button>
-        </div>
-      )}
-
-      {actionError && (
-        <div className="absolute bottom-3 left-3 z-10 rounded border border-red-500/50 bg-white/90 px-3 py-1.5 text-xs text-red-500 dark:bg-slate-900/90 dark:text-red-400">
-          {actionError}
-        </div>
-      )}
-
-      {contextMenu && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setContextMenu(null)} />
-          <div
-            className="absolute z-30 w-48 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
-            style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
-          >
-            <button
-              onClick={openCreateNoteInput}
-              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              Neue Notiz erstellen
-            </button>
-            <button
-              onClick={startConnectMode}
-              disabled={notes.length < 2}
-              className="block w-full px-4 py-2 text-left font-medium text-slate-700 transition-colors hover:bg-slate-100/50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800/50"
-            >
-              Notizen verbinden
-            </button>
-          </div>
-        </>
-      )}
-
-      {nodeMenu && nodeMenuNote && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setNodeMenu(null)} />
-          <div
-            className="absolute z-30 w-56 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
-            style={{ left: nodeMenu.screen.x, top: nodeMenu.screen.y }}
-          >
+        {connectMode && (
+          <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded border border-amber-500/50 bg-white/90 px-3 py-1.5 text-xs text-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
+            {connectFirstId ? 'Ziel-Notiz anklicken, um zu verbinden…' : 'Erste Notiz anklicken…'}
             <button
               onClick={() => {
-                onSelectNote(nodeMenuNote)
-                setNodeMenu(null)
+                setConnectMode(false)
+                setConnectFirstId(null)
               }}
-              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="text-slate-500 hover:text-red-500 dark:text-slate-400 dark:hover:text-red-400"
             >
-              Notiz öffnen
+              Abbrechen
             </button>
-            <NoteAppearanceMenu
-              color={nodeMenuNote.color}
-              shape={nodeMenuNote.shape}
-              edgeStyle={nodeMenuNote.edgeStyle}
-              edgeArrow={nodeMenuNote.edgeArrow}
-              onChangeColor={(color) => changeNodeColor(nodeMenuNote.id, color)}
-              onChangeShape={(shape) => changeNodeShape(nodeMenuNote.id, shape)}
-              onChangeEdgeStyle={(edgeStyle) => changeNodeEdgeStyle(nodeMenuNote.id, edgeStyle)}
-              onChangeEdgeArrow={(edgeArrow) => changeNodeEdgeArrow(nodeMenuNote.id, edgeArrow)}
-            />
           </div>
-        </>
-      )}
+        )}
 
-      {createNoteAt && (
-        <form
-          onSubmit={submitCreateNote}
-          className="absolute z-30 flex items-center gap-2 rounded-xl border border-slate-200/50 glass p-2 shadow-xl dark:border-slate-700/50"
-          style={{ left: createNoteAt.screen.x, top: createNoteAt.screen.y }}
-        >
-          <input
-            autoFocus
-            value={newNodeTitle}
-            onChange={(e) => setNewNodeTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setCreateNoteAt(null)
-                setNewNodeTitle('')
-              }
-            }}
-            placeholder="Titel der Notiz"
-            className="w-48 rounded-lg border border-slate-300 bg-transparent px-3 py-1.5 text-xs outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
-          />
-          <button type="submit" className="rounded-lg bg-brand-accent px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-accent-light">
-            Anlegen
-          </button>
-        </form>
-      )}
+        {actionError && (
+          <div className="absolute bottom-3 left-3 z-10 rounded border border-red-500/50 bg-white/90 px-3 py-1.5 text-xs text-red-500 dark:bg-slate-900/90 dark:text-red-400">
+            {actionError}
+          </div>
+        )}
 
-      {notes.length === 0 ? (
-        <p className="p-6 text-sm text-slate-500">Noch keine Notizen. Rechtsklick, um eine anzulegen.</p>
-      ) : (
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${size.width} ${size.height}`}
-          preserveAspectRatio="none"
-          className={`h-full w-full touch-none ${connectMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
-          onPointerDown={handleBackgroundPointerDown}
-          onPointerMove={handleSvgPointerMove}
-          onPointerUp={handleSvgPointerUp}
-        >
+        {contextMenu && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setContextMenu(null)} />
+            <div
+              className="absolute z-30 w-48 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
+              style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
+            >
+              <button
+                onClick={openCreateNoteInput}
+                className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Neue Notiz erstellen
+              </button>
+              <button
+                onClick={startConnectMode}
+                disabled={notes.length < 2}
+                className="block w-full px-4 py-2 text-left font-medium text-slate-700 transition-colors hover:bg-slate-100/50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800/50"
+              >
+                Notizen verbinden
+              </button>
+            </div>
+          </>
+        )}
+
+        {createNoteAt && (
+          <form
+            onSubmit={submitCreateNote}
+            className="absolute z-30 flex items-center gap-2 rounded-xl border border-slate-200/50 glass p-2 shadow-xl dark:border-slate-700/50"
+            style={{ left: createNoteAt.screen.x, top: createNoteAt.screen.y }}
+          >
+            <input
+              autoFocus
+              value={newNodeTitle}
+              onChange={(e) => setNewNodeTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setCreateNoteAt(null)
+                  setNewNodeTitle('')
+                }
+              }}
+              placeholder="Titel der Notiz"
+              className="w-48 rounded-lg border border-slate-300 bg-transparent px-3 py-1.5 text-xs outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
+            />
+            <button type="submit" className="rounded-lg bg-brand-accent px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-accent-light">
+              Anlegen
+            </button>
+          </form>
+        )}
+
+        {notes.length === 0 ? (
+          <p className="p-6 text-sm text-slate-500">Noch keine Notizen. Rechtsklick, um eine anzulegen.</p>
+        ) : (
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${size.width} ${size.height}`}
+            preserveAspectRatio="none"
+            className={`h-full w-full touch-none ${connectMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
+            onPointerDown={handleBackgroundPointerDown}
+            onPointerMove={handleSvgPointerMove}
+            onPointerUp={handleSvgPointerUp}
+          >
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
             <EdgeMarkerDefs />
+            <EdgeGlowFilterDefs />
+            {/* Per-edge Gradient <linearGradient> defs, collected in one place - see
+                edgeGradientDefFor's doc comment for why each Gradient-styled edge needs its own
+                geometry-specific def rather than a small fixed set like EdgeGlowFilterDefs. Same
+                ref-read exception as the edges.map() block below - see its comment. */}
+            <defs>
+              {/* eslint-disable-next-line react-hooks/refs */}
+              {edges.map(([a, b]) => {
+                const na = positionsRef.current.get(a)
+                const nb = positionsRef.current.get(b)
+                if (!na || !nb) return null
+                const sourceNote = notesById.get(a)
+                if (sourceNote?.edgeStyle !== 'Gradient') return null
+                const boxA = measureNodeBox(notesById.get(a)?.title ?? '', notesById.get(a)?.shape ?? null)
+                const boxB = measureNodeBox(notesById.get(b)?.title ?? '', notesById.get(b)?.shape ?? null)
+                const p1 = clipPointToBoxEdge(nb, na, boxA.width, boxA.height)
+                const p2 = clipPointToBoxEdge(na, nb, boxB.width, boxB.height)
+                const highlighted = hoveredId !== null && (a === hoveredId || b === hoveredId)
+                return (
+                  <g key={`${a}-${b}`}>{edgeGradientDefFor(sourceNote.edgeStyle, p1.x, p1.y, p2.x, p2.y, highlighted)}</g>
+                )
+              })}
+            </defs>
+            {/* positionsRef intentionally holds the live physics-simulation state outside of
+                useState - the RAF loop (step(), see above) mutates node coordinates up to 60x/s,
+                and forceRender() alone (not a real state update per node) is what triggers React
+                to re-read them here. Moving positions into useState would mean a real state
+                update + reconciliation per simulation tick, which would noticeably hurt the
+                drag/physics performance this view depends on - so these ref reads during render
+                are a deliberate, understood exception, not an oversight the rule is correctly
+                catching elsewhere. */}
+            {/* eslint-disable-next-line react-hooks/refs */}
             {edges.map(([a, b]) => {
               const na = positionsRef.current.get(a)
               const nb = positionsRef.current.get(b)
@@ -673,23 +797,49 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
               // Styled by the source note (a) - see the notesById comment above.
               const sourceNote = notesById.get(a)
               const { markerStart, markerEnd } = edgeMarkerRefs(sourceNote?.edgeArrow, highlighted)
+              // Pull both endpoints back from the node centers to the actual box edges - nodes
+              // render as text-sized boxes now (see NoteNodeShape.tsx), not small fixed dots, so a
+              // line (and any arrowhead marker on it) drawn to the raw center coordinate would run
+              // into the box and end up hidden underneath it instead of visible at its rim.
+              const boxA = measureNodeBox(notesById.get(a)?.title ?? '', notesById.get(a)?.shape ?? null)
+              const boxB = measureNodeBox(notesById.get(b)?.title ?? '', notesById.get(b)?.shape ?? null)
+              const p1 = clipPointToBoxEdge(nb, na, boxA.width, boxA.height)
+              const p2 = clipPointToBoxEdge(na, nb, boxB.width, boxB.height)
+              // Gradient overrides the plain stroke-slate-400/stroke-brand-primary class with an
+              // inline url() stroke (see edgeGradientStroke's doc comment) - only the className is
+              // dropped when active, everything else (width/dasharray/markers/opacity) stays the
+              // same.
+              const gradientStroke = edgeGradientStroke(sourceNote?.edgeStyle, p1.x, p1.y, p2.x, p2.y, highlighted)
+              const glowFilter = edgeGlowFilter(sourceNote?.edgeStyle, highlighted)
+              const opacity = dimmed ? 0.12 : highlighted ? 0.9 : 0.35
               return (
-                <line
-                  key={`${a}-${b}`}
-                  x1={na.x}
-                  y1={na.y}
-                  x2={nb.x}
-                  y2={nb.y}
-                  className={strokeClass}
-                  strokeWidth={highlighted ? 1.5 : 1}
-                  strokeDasharray={edgeStrokeDasharray(sourceNote?.edgeStyle)}
-                  markerStart={markerStart}
-                  markerEnd={markerEnd}
-                  opacity={dimmed ? 0.12 : highlighted ? 0.9 : 0.35}
-                />
+                <g key={`${a}-${b}`}>
+                  {/* Glow renders as a SEPARATE wider/blurred duplicate line UNDERNEATH the normal
+                      sharp one - see TreeGraphView.tsx's matching comment for why applying the
+                      blur filter directly to the real line (the previous, buggy version) produces
+                      a thick diffuse haze with no crisp line left, not an elegant glow. */}
+                  {glowFilter && (
+                    <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} className={strokeClass} filter={glowFilter} strokeWidth={(highlighted ? 1.5 : 1) + 1.5} opacity={opacity * 0.8} />
+                  )}
+                  <line
+                    x1={p1.x}
+                    y1={p1.y}
+                    x2={p2.x}
+                    y2={p2.y}
+                    className={gradientStroke ? undefined : strokeClass}
+                    style={gradientStroke ? { stroke: gradientStroke } : undefined}
+                    strokeWidth={highlighted ? 1.5 : 1}
+                    strokeDasharray={edgeStrokeDasharray(sourceNote?.edgeStyle)}
+                    markerStart={markerStart}
+                    markerEnd={markerEnd}
+                    opacity={opacity}
+                  />
+                </g>
               )
             })}
 
+            {/* Same deliberate exception as the edges.map() block above - see its comment. */}
+            {/* eslint-disable-next-line react-hooks/refs */}
             {notes.map((note) => {
               const pos = positionsRef.current.get(note.id)
               if (!pos) return null
@@ -731,8 +881,33 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
               )
             })}
           </g>
-        </svg>
-      )}
+          </svg>
+        )}
+      </div>
+
+      {/* Flex sibling with an animated width, not absolutely positioned over the canvas - see
+          TreeGraphView's matching comment for why this is what makes the canvas visibly
+          shrink/grow alongside the panel instead of the panel just appearing on top. */}
+      <div className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${panelOpen ? 'w-72' : 'w-0'}`}>
+        <div className="h-full w-72">
+          {panelOpen && (
+            <GraphSidePanel
+              selected={selectedNoteId ? { kind: 'note', note: notes.find((n) => n.id === selectedNoteId) } : null}
+              onClose={() => {
+                setPanelOpen(false)
+                setSelectedNoteId(null)
+              }}
+              currentLayout="free"
+              onChangeLayout={onChangeLayout}
+              onApplyPreset={onApplyPreset}
+              applyingPreset={applyingPreset}
+              onOpenNote={onSelectNote}
+              showDetachParent={false}
+              onChangeNoteAppearance={changeNodeAppearance}
+            />
+          )}
+        </div>
+      </div>
     </div>
   )
 }

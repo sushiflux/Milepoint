@@ -66,5 +66,21 @@ public record NoteDto(
     // arrowhead) - see Note.EdgeStyle/EdgeArrow's doc comments.
     NoteEdgeStyle? EdgeStyle,
     NoteEdgeArrow? EdgeArrow,
+    // Persisted position in the free (physics-simulated) graph view - see Note.FreeViewX/Y's doc
+    // comment. Both null = no saved position yet, frontend should pick its usual randomized/
+    // simulated starting position. Not touched by Create/Update above - see
+    // UpdateNotePositionRequest/NotesController's dedicated position endpoint.
+    double? FreeViewX,
+    double? FreeViewY,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+// Dedicated, minimal request for the free-graph-view position sync endpoint
+// (PUT /api/projects/{projectId}/notes/{noteId}/position). Deliberately separate from
+// UpdateNoteRequest: this gets called very frequently and automatically (every drag, potentially
+// every simulation step) and must stay cheap - no title-uniqueness check, no content/hierarchy
+// touch, no outgoing-link re-sync. X/Y are non-nullable here (unlike Note.FreeViewX/Y) because
+// this endpoint only ever sets a concrete position; there is no "clear the saved position back to
+// null" use case from the frontend's physics view, which always has real coordinates once a node
+// exists on screen.
+public record UpdateNotePositionRequest(double X, double Y);

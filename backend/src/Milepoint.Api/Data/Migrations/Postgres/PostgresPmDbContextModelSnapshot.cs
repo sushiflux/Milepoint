@@ -407,6 +407,12 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Property<int?>("EdgeStyle")
                         .HasColumnType("integer");
 
+                    b.Property<double?>("FreeViewX")
+                        .HasColumnType("double precision");
+
+                    b.Property<double?>("FreeViewY")
+                        .HasColumnType("double precision");
+
                     b.Property<string>("ParentNoteId")
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");

@@ -87,6 +87,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// Context-Provider und zugehöriger Hook werden bewusst zusammen in einer Datei gehalten, siehe
+// Projektkonvention (AuthContext/PreferencesContext/ThemeContext folgen alle diesem Muster) -
+// eine künstliche Aufspaltung nur für Fast Refresh würde dieser Konvention widersprechen.
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext)
   if (!ctx) {

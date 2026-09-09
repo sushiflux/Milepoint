@@ -26,15 +26,23 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(readInitialTheme)
 
   // Once the DB preference has loaded, it's authoritative - e.g. the user switched theme on
-  // another device since this browser last saw it.
-  useEffect(() => {
-    if (!loaded) return
-    const dbTheme = getPreference(PREFERENCE_KEY, theme)
-    if (dbTheme === 'dark' || dbTheme === 'light') {
-      setTheme((prev) => (dbTheme !== prev ? dbTheme : prev))
+  // another device since this browser last saw it. `loaded` flips false -> true exactly once per
+  // mount (PreferencesProvider remounts wholesale on login/logout - see PreferencesContext.tsx),
+  // so this only needs to react to that one transition, not run on every render. Applied directly
+  // during render (comparing against the previous render's `loaded` value via its own bit of
+  // state, React's documented "storing information from previous renders" pattern) rather than a
+  // synchronous setState inside an effect - a ref-based comparison would hit the same
+  // react-hooks/refs restriction that set-state-in-effect exists to avoid in the first place.
+  const [prevLoaded, setPrevLoaded] = useState(loaded)
+  if (loaded !== prevLoaded) {
+    setPrevLoaded(loaded)
+    if (loaded) {
+      const dbTheme = getPreference(PREFERENCE_KEY, theme)
+      if ((dbTheme === 'dark' || dbTheme === 'light') && dbTheme !== theme) {
+        setTheme(dbTheme)
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loaded])
+  }
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark')
@@ -52,6 +60,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>
 }
 
+// Context-Provider und zugehöriger Hook werden bewusst zusammen in einer Datei gehalten, siehe
+// Projektkonvention (AuthContext/PreferencesContext/ThemeContext folgen alle diesem Muster).
+// eslint-disable-next-line react-refresh/only-export-components
 export function useTheme() {
   const ctx = useContext(ThemeContext)
   if (!ctx) {

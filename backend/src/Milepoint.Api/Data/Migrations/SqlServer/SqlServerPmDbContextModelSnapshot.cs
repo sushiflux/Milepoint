@@ -409,6 +409,12 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Property<int?>("EdgeStyle")
                         .HasColumnType("int");
 
+                    b.Property<double?>("FreeViewX")
+                        .HasColumnType("float");
+
+                    b.Property<double?>("FreeViewY")
+                        .HasColumnType("float");
+
                     b.Property<string>("ParentNoteId")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");

@@ -10,7 +10,12 @@ import { getReadableTextColor } from './colorSchemes'
 const FONT_SIZE = 11
 const TEXT_PADDING_X = 14
 const TEXT_PADDING_Y = 10
-const MIN_WIDTH = 56
+// MIN_WIDTH must leave enough room along a box's long side for the 9 evenly-spaced edge anchor
+// points that side gets (see edgeStyles.tsx's ANCHORS_LONG_SIDE) to actually read as 9 distinct,
+// clickable-looking spots rather than a cramped cluster - at the old 56px minimum, 9 anchors would
+// sit only ~5.6px apart, tighter than a single arrowhead marker (7px wide). ~14px of spacing per
+// anchor is a reasonable lower bound for them to stay visually distinguishable.
+const MIN_WIDTH = 130
 const MIN_HEIGHT = 30
 
 // Fixed default fill (no note.color set) used identically in both themes, chosen so the paired
@@ -34,6 +39,12 @@ export interface NodeBoxSize {
 
 /** Box size a node needs to comfortably fit its title, given its shape. Used both for rendering
  *  and (by callers that need it) for layout spacing decisions. */
+// measureNodeBox is exported alongside NoteNodeVisual because it's the layout half of the same
+// shape-rendering logic this file owns (used both internally by NoteNodeVisual below and by
+// NoteGraphView.tsx/edgeStyles.tsx, which need to know a node's box size without duplicating the
+// sizing rules) - splitting it into its own file would separate "how a shape is sized" from "how
+// it's drawn" for no real benefit, so a targeted disable is more pragmatic than a structural split.
+// eslint-disable-next-line react-refresh/only-export-components
 export function measureNodeBox(title: string, shape: NoteShape | null): NodeBoxSize {
   const textWidth = estimateTextWidth(title, FONT_SIZE)
   const width = Math.max(MIN_WIDTH, textWidth + TEXT_PADDING_X * 2)
@@ -77,12 +88,17 @@ export function NoteNodeVisual({ x, y, title, shape, color, emphasized, emphasis
   const strokeClassName = emphasized ? emphasisClassName ?? 'stroke-slate-900 dark:stroke-white' : ''
   const strokeWidth = emphasized ? 1.5 : 0
 
-  // Underline: no box at all, just text + a rule beneath it - the one shape that intentionally
+  // Underline: no visible box, just text + a rule beneath it - the one shape that intentionally
   // uses note.color (if set) as the text/underline color instead of a fill, since a background
-  // fill wouldn't make sense without a border either.
+  // fill wouldn't make sense without a border either. Still needs an invisible hit-area rect the
+  // size of the full measured box, though - without one, the only clickable pixels are the few
+  // that happen to sit exactly on the thin rule/text glyphs, making the node nearly impossible to
+  // click/select (and, for the root node specifically, silently locking the user out of the side
+  // panel entirely once Underline is chosen for it, since that's the only way to reach it again).
   if (shape === 'Underline') {
     return (
       <g opacity={opacity}>
+        <rect x={x - halfW} y={y - halfH} width={box.width} height={box.height} fill="transparent" />
         <text
           x={x}
           y={y}
@@ -100,7 +116,7 @@ export function NoteNodeVisual({ x, y, title, shape, color, emphasized, emphasis
           y1={y + FONT_SIZE / 2 + 3}
           x2={x + halfW}
           y2={y + FONT_SIZE / 2 + 3}
-          className={color ? '' : emphasized ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'}
+          className={`pointer-events-none ${color ? '' : emphasized ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'}`}
           style={color ? { stroke: color } : undefined}
           strokeWidth={emphasized ? 1.5 : 1}
         />

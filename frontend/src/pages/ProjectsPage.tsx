@@ -143,8 +143,17 @@ export default function ProjectsPage() {
   }
 
   useEffect(() => {
-    loadProjects().catch(() => setError('Projekte konnten nicht geladen werden.'))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false
+    getProjects()
+      .then((result) => {
+        if (!cancelled) setProjects(result)
+      })
+      .catch(() => {
+        if (!cancelled) setError('Projekte konnten nicht geladen werden.')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [authVersion])
 
   async function handleCreateProject(event: FormEvent) {

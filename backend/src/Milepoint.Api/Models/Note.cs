@@ -38,4 +38,16 @@ public class Note
     // Color/Shape above.
     public NoteEdgeStyle? EdgeStyle { get; set; }
     public NoteEdgeArrow? EdgeArrow { get; set; }
+
+    // Persisted node position for the free (physics-simulated) graph view (NoteGraphView.tsx on
+    // the frontend), NOT used by the tree/hierarchy views (those compute static layouts from
+    // ParentNoteId on every render). Both null = "no saved position yet", telling the frontend to
+    // fall back to its usual randomized/simulated starting position (unchanged first-run
+    // behavior for brand-new notes). Updated very frequently and automatically (on every drag,
+    // and potentially after each simulation step) - deliberately NOT part of
+    // CreateNoteRequest/UpdateNoteRequest, which also carry Title/Content and run a title-
+    // uniqueness check; see NotesController's dedicated position endpoint instead, which touches
+    // only these two columns.
+    public double? FreeViewX { get; set; }
+    public double? FreeViewY { get; set; }
 }

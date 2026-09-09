@@ -1,10 +1,27 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
 import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../../api/types'
-import { computeTreeLayout, type Point, type TreeLayoutId } from './treeLayouts'
-import { NoteNodeVisual } from './NoteNodeShape'
-import NoteAppearanceMenu from './NoteAppearanceMenu'
-import { EdgeMarkerDefs, edgeMarkerRefs, edgeStrokeDasharray } from './edgeStyles'
+import { computeTreeLayout, type Point, type TreeEdge, type TreeLayoutId } from './treeLayouts'
+import { NoteNodeVisual, measureNodeBox } from './NoteNodeShape'
+import {
+  EdgeMarkerDefs,
+  EdgeGlowFilterDefs,
+  edgeMarkerRefs,
+  edgeStrokeDasharray,
+  edgeGradientStroke,
+  edgeGradientDefFor,
+  edgeGlowFilter,
+  clipPointToBoxEdge,
+} from './edgeStyles'
+import GraphSidePanel from './GraphSidePanel'
+import type { GraphLayoutId } from './stylePresets'
+
+export interface RootAppearance {
+  color: string | null
+  shape: NoteShape | null
+  edgeStyle: NoteEdgeStyle | null
+  edgeArrow: NoteEdgeArrow | null
+}
 
 interface Props {
   projectName: string
@@ -17,6 +34,11 @@ interface Props {
     noteId: string,
     patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
   ) => Promise<void>
+  onChangeLayout: (layout: GraphLayoutId) => void
+  onApplyPreset: (presetId: string) => Promise<void>
+  applyingPreset: boolean
+  rootAppearance: RootAppearance
+  onChangeRootAppearance: (patch: Partial<RootAppearance>) => void
 }
 
 interface Transform {
@@ -71,6 +93,11 @@ export default function TreeGraphView({
   onCreateRootNote,
   onSetParent,
   onChangeAppearance,
+  onChangeLayout,
+  onApplyPreset,
+  applyingPreset,
+  rootAppearance,
+  onChangeRootAppearance,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -86,7 +113,13 @@ export default function TreeGraphView({
 
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ screen: Point; world: Point } | null>(null)
-  const [nodeMenu, setNodeMenu] = useState<{ screen: Point; noteId: string } | null>(null)
+  // Rechtes Seitenpanel: panelOpen steuert Sichtbarkeit, selectedNodeId die kontextabhängige
+  // Auswahl innerhalb des offenen Panels ('__root__' = virtueller Projekt-Mittelpunkt, sonst eine
+  // Notiz-ID). Ein Klick auf einen Knoten öffnet das Panel UND wählt ihn aus; ein Klick auf leere
+  // Canvas-Fläche schließt das Panel komplett (siehe handleBackgroundPointerDown) - es gibt keinen
+  // permanent sichtbaren "globalen" Panel-Zustand.
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [createNoteAt, setCreateNoteAt] = useState<Point | null>(null)
   const [newNodeTitle, setNewNodeTitle] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -100,7 +133,8 @@ export default function TreeGraphView({
   const nodes = useMemo(() => Array.from(layout.values()), [layout])
   // Lookup for edge styling: each edge is styled by its SOURCE (parent) note's edgeStyle/edgeArrow
   // - see edgeStyles.tsx's doc comment. Root-level edges (edge.parentId === null, from the virtual
-  // project center) have no source note and always render as the plain default (solid, no arrow).
+  // project center) have no source note, so they're styled from the rootAppearance prop instead
+  // (see the edges.map block below).
   const notesById = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
 
   useLayoutEffect(() => {
@@ -151,7 +185,6 @@ export default function TreeGraphView({
 
   function handleContextMenu(event: React.MouseEvent<HTMLDivElement>) {
     event.preventDefault()
-    setNodeMenu(null)
     const { screen, world } = screenToWorld(event.currentTarget, event.clientX, event.clientY)
     setContextMenu({ screen, world })
   }
@@ -177,19 +210,25 @@ export default function TreeGraphView({
     }
   }
 
+  // Rechtsklick auf einen Knoten bleibt als Schnellzugriff bestehen: öffnet das Panel direkt mit
+  // diesem Knoten ausgewählt, statt (wie zuvor) ein eigenes Popup an der Klickposition zu zeigen.
   function handleNodeContextMenu(noteId: string) {
     return (event: React.MouseEvent<SVGGElement>) => {
       event.preventDefault()
       event.stopPropagation()
       setContextMenu(null)
-      const containerRect = containerRef.current?.getBoundingClientRect()
-      if (!containerRect) return
-      setNodeMenu({ screen: { x: event.clientX - containerRect.left, y: event.clientY - containerRect.top }, noteId })
+      selectNode(noteId)
     }
   }
 
+  // Also used for the virtual project center via drag.id === '__root__' (see its onPointerDown
+  // below) - setSelectedNodeId('__root__') is exactly what a dedicated selectRoot() used to do.
+  function selectNode(noteId: string) {
+    setSelectedNodeId(noteId)
+    setPanelOpen(true)
+  }
+
   async function detachFromParent(noteId: string) {
-    setNodeMenu(null)
     const note = notes.find((n) => n.id === noteId)
     if (!note) return
     try {
@@ -200,39 +239,15 @@ export default function TreeGraphView({
     }
   }
 
-  async function changeNodeColor(noteId: string, color: string | null) {
+  async function changeNodeAppearance(
+    noteId: string,
+    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+  ) {
     try {
-      await onChangeAppearance(noteId, { color })
+      await onChangeAppearance(noteId, patch)
       setActionError(null)
     } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Farbe konnte nicht geändert werden.')
-    }
-  }
-
-  async function changeNodeShape(noteId: string, shape: NoteShape | null) {
-    try {
-      await onChangeAppearance(noteId, { shape })
-      setActionError(null)
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Form konnte nicht geändert werden.')
-    }
-  }
-
-  async function changeNodeEdgeStyle(noteId: string, edgeStyle: NoteEdgeStyle | null) {
-    try {
-      await onChangeAppearance(noteId, { edgeStyle })
-      setActionError(null)
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Linienstil konnte nicht geändert werden.')
-    }
-  }
-
-  async function changeNodeEdgeArrow(noteId: string, edgeArrow: NoteEdgeArrow | null) {
-    try {
-      await onChangeAppearance(noteId, { edgeArrow })
-      setActionError(null)
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Pfeilspitzen konnten nicht geändert werden.')
+      setActionError(err instanceof ApiError ? err.message : 'Aussehen konnte nicht geändert werden.')
     }
   }
 
@@ -248,7 +263,11 @@ export default function TreeGraphView({
 
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return
-    setNodeMenu(null)
+    // Klick auf leere Canvas-Fläche schließt das Panel komplett - es gibt keinen permanent
+    // sichtbaren "globalen" Panel-Zustand mehr, das Panel erscheint nur bei einer echten Auswahl
+    // (ein Knoten oder der Mittelpunkt).
+    setPanelOpen(false)
+    setSelectedNodeId(null)
     event.currentTarget.setPointerCapture(event.pointerId)
     autoFitRef.current = false
     panRef.current = { startX: event.clientX, startY: event.clientY, originX: transform.x, originY: transform.y }
@@ -309,19 +328,22 @@ export default function TreeGraphView({
     if (!drag) return
 
     if (!drag.moved) {
-      // A plain click (no drag) opens the same appearance/actions menu the right-click context
-      // menu shows - previously this jumped straight to opening the note, which made a quick
-      // color/shape change require a right-click every time. "Notiz öffnen" is the menu's first
-      // entry, so opening the note is still one click away, just not the only thing a click does.
-      const node = nodes.find((n) => n.id === drag.id)
-      if (node) {
-        const t = transformRef.current
-        setContextMenu(null)
-        setNodeMenu({ screen: { x: node.x * t.k + t.x, y: node.y * t.k + t.y }, noteId: drag.id })
-      }
+      // A plain click (no drag) opens the right side panel with this node selected - previously
+      // this jumped straight to opening the note, which made a quick color/shape change require a
+      // right-click every time. "Notiz öffnen" is still one click away as the panel's first entry.
+      // '__root__' (the virtual project center, see its onPointerDown above) is handled by the
+      // same selectNode() call - it just sets selectedNodeId to '__root__', identical to what the
+      // old dedicated selectRoot() did, so GraphSidePanel's kind: 'root' branch below still picks
+      // it up correctly.
+      setContextMenu(null)
+      selectNode(drag.id)
       return
     }
 
+    // The root has no backing Note to reparent - dragging it onto another node (or it being the
+    // drop target for another drag, already excluded by CENTER_RADIUS's own '__center__' id) is a
+    // no-op, not a reparent call.
+    if (drag.id === '__root__') return
     if (!dropTarget) return
 
     const newParentId = dropTarget === '__center__' ? null : dropTarget
@@ -365,124 +387,121 @@ export default function TreeGraphView({
     return () => el.removeEventListener('wheel', handleWheel)
   }, [])
 
-  const nodeMenuNote = nodeMenu ? notes.find((n) => n.id === nodeMenu.noteId) ?? null : null
+  // Shared by both the per-edge Gradient <defs> loop and the main edges.map() render loop below,
+  // so the exact same start/end anchor points feed both - a Gradient def computed from slightly
+  // different geometry than the line it's supposed to color would visibly misalign.
+  function computeEdgeAnchors(edge: TreeEdge) {
+    const childNote = notesById.get(edge.childId)
+    const parentNote = edge.parentId ? notesById.get(edge.parentId) : null
+    const endBox = measureNodeBox(childNote?.title ?? '', childNote?.shape ?? null)
+    const startBox = edge.parentId
+      ? measureNodeBox(parentNote?.title ?? '', parentNote?.shape ?? null)
+      : rootAppearance.color || rootAppearance.shape
+        ? measureNodeBox(projectName, rootAppearance.shape)
+        : { width: CENTER_RADIUS * 2, height: CENTER_RADIUS * 2 }
+    const start = clipPointToBoxEdge(edge.to, edge.from, startBox.width, startBox.height)
+    const end = clipPointToBoxEdge(edge.from, edge.to, endBox.width, endBox.height)
+    const sourceEdgeStyle = edge.parentId ? parentNote?.edgeStyle : rootAppearance.edgeStyle
+    const sourceEdgeArrow = edge.parentId ? parentNote?.edgeArrow : rootAppearance.edgeArrow
+    return { start, end, sourceEdgeStyle, sourceEdgeArrow }
+  }
 
   return (
-    <div
-      ref={containerRef}
-      onContextMenu={handleContextMenu}
-      className="relative h-[75vh] min-h-[480px] w-full overflow-hidden rounded-xl border border-slate-200/50 glass-panel shadow-sm dark:border-slate-700/50"
-    >
-      <button
-        onClick={resetFit}
-        className="absolute right-4 top-4 z-10 rounded-lg border border-slate-200/50 glass px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100/50 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50"
+    <div className="flex h-[75vh] min-h-[480px] w-full overflow-hidden rounded-xl border border-slate-200/50 glass-panel shadow-sm dark:border-slate-700/50">
+      <div
+        ref={containerRef}
+        onContextMenu={handleContextMenu}
+        className="relative min-w-0 flex-1 overflow-hidden"
       >
-        Ansicht anpassen
-      </button>
+        <button
+          onClick={resetFit}
+          className="absolute right-4 top-4 z-10 rounded-lg border border-slate-200/50 glass px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100/50 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50"
+        >
+          Ansicht anpassen
+        </button>
 
-      <div className="absolute left-3 top-3 z-10 rounded border border-slate-200/50 bg-white/90 px-3 py-1.5 text-xs text-slate-600 dark:border-slate-700/50 dark:bg-slate-900/90 dark:text-slate-300">
-        Knoten ziehen &amp; auf Ziel ablegen, um zuzuordnen
-      </div>
-
-      {actionError && (
-        <div className="absolute bottom-3 left-3 z-10 rounded border border-red-500/50 bg-white/90 px-3 py-1.5 text-xs text-red-500 dark:bg-slate-900/90 dark:text-red-400">
-          {actionError}
+        <div className="absolute left-3 top-3 z-10 rounded border border-slate-200/50 bg-white/90 px-3 py-1.5 text-xs text-slate-600 dark:border-slate-700/50 dark:bg-slate-900/90 dark:text-slate-300">
+          Knoten ziehen &amp; auf Ziel ablegen, um zuzuordnen
         </div>
-      )}
 
-      {contextMenu && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setContextMenu(null)} />
-          <div
-            className="absolute z-30 w-48 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
-            style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
-          >
-            <button
-              onClick={openCreateNoteInput}
-              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              Neue Hauptnotiz erstellen
-            </button>
+        {actionError && (
+          <div className="absolute bottom-3 left-3 z-10 rounded border border-red-500/50 bg-white/90 px-3 py-1.5 text-xs text-red-500 dark:bg-slate-900/90 dark:text-red-400">
+            {actionError}
           </div>
-        </>
-      )}
+        )}
 
-      {nodeMenu && nodeMenuNote && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setNodeMenu(null)} />
-          <div
-            className="absolute z-30 w-56 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
-            style={{ left: nodeMenu.screen.x, top: nodeMenu.screen.y }}
+        {contextMenu && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setContextMenu(null)} />
+            <div
+              className="absolute z-30 w-48 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
+              style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
+            >
+              <button
+                onClick={openCreateNoteInput}
+                className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Neue Hauptnotiz erstellen
+              </button>
+            </div>
+          </>
+        )}
+
+        {createNoteAt && (
+          <form
+            onSubmit={submitCreateNote}
+            className="absolute z-30 flex items-center gap-2 rounded-xl border border-slate-200/50 glass p-2 shadow-xl dark:border-slate-700/50"
+            style={{ left: createNoteAt.x, top: createNoteAt.y }}
           >
-            <button
-              onClick={() => {
-                onSelectNote(nodeMenuNote)
-                setNodeMenu(null)
+            <input
+              autoFocus
+              value={newNodeTitle}
+              onChange={(e) => setNewNodeTitle(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  setCreateNoteAt(null)
+                  setNewNodeTitle('')
+                }
               }}
-              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              Notiz öffnen
-            </button>
-            <button
-              onClick={() => detachFromParent(nodeMenuNote.id)}
-              disabled={!nodeMenuNote.parentNoteId}
-              className="block w-full px-3 py-1.5 text-left text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-            >
-              Elternzuordnung entfernen
-            </button>
-            <NoteAppearanceMenu
-              color={nodeMenuNote.color}
-              shape={nodeMenuNote.shape}
-              edgeStyle={nodeMenuNote.edgeStyle}
-              edgeArrow={nodeMenuNote.edgeArrow}
-              onChangeColor={(color) => changeNodeColor(nodeMenuNote.id, color)}
-              onChangeShape={(shape) => changeNodeShape(nodeMenuNote.id, shape)}
-              onChangeEdgeStyle={(edgeStyle) => changeNodeEdgeStyle(nodeMenuNote.id, edgeStyle)}
-              onChangeEdgeArrow={(edgeArrow) => changeNodeEdgeArrow(nodeMenuNote.id, edgeArrow)}
+              placeholder="Titel der Notiz"
+              className="w-48 rounded-lg border border-slate-300 bg-transparent px-3 py-1.5 text-xs outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
             />
-          </div>
-        </>
-      )}
+            <button type="submit" className="rounded-lg bg-brand-accent px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-accent-light">
+              Anlegen
+            </button>
+          </form>
+        )}
 
-      {createNoteAt && (
-        <form
-          onSubmit={submitCreateNote}
-          className="absolute z-30 flex items-center gap-2 rounded-xl border border-slate-200/50 glass p-2 shadow-xl dark:border-slate-700/50"
-          style={{ left: createNoteAt.x, top: createNoteAt.y }}
-        >
-          <input
-            autoFocus
-            value={newNodeTitle}
-            onChange={(e) => setNewNodeTitle(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setCreateNoteAt(null)
-                setNewNodeTitle('')
-              }
-            }}
-            placeholder="Titel der Notiz"
-            className="w-48 rounded-lg border border-slate-300 bg-transparent px-3 py-1.5 text-xs outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
-          />
-          <button type="submit" className="rounded-lg bg-brand-accent px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-all hover:bg-brand-accent-light">
-            Anlegen
-          </button>
-        </form>
-      )}
-
-      {notes.length === 0 ? (
-        <p className="p-6 text-sm text-slate-500">Noch keine Notizen. Rechtsklick, um eine Hauptnotiz anzulegen.</p>
-      ) : (
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${size.width} ${size.height}`}
-          preserveAspectRatio="none"
-          className="h-full w-full touch-none cursor-grab active:cursor-grabbing"
-          onPointerDown={handleBackgroundPointerDown}
-          onPointerMove={handleSvgPointerMove}
-          onPointerUp={handleSvgPointerUp}
-        >
+        {notes.length === 0 ? (
+          <p className="p-6 text-sm text-slate-500">Noch keine Notizen. Rechtsklick, um eine Hauptnotiz anzulegen.</p>
+        ) : (
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${size.width} ${size.height}`}
+            preserveAspectRatio="none"
+            className="h-full w-full touch-none cursor-grab active:cursor-grabbing"
+            onPointerDown={handleBackgroundPointerDown}
+            onPointerMove={handleSvgPointerMove}
+            onPointerUp={handleSvgPointerUp}
+          >
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
             <EdgeMarkerDefs />
+            <EdgeGlowFilterDefs />
+            {/* Per-edge Gradient <linearGradient> defs, collected in one place - see
+                edgeGradientDefFor's doc comment for why each Gradient-styled edge needs its own
+                geometry-specific def rather than a small fixed set like EdgeGlowFilterDefs. */}
+            <defs>
+              {edges.map((edge) => {
+                const { start, end, sourceEdgeStyle } = computeEdgeAnchors(edge)
+                if (sourceEdgeStyle !== 'Gradient') return null
+                const highlighted = hoveredId !== null && (edge.childId === hoveredId || edge.parentId === hoveredId)
+                return (
+                  <g key={edge.childId}>
+                    {edgeGradientDefFor(sourceEdgeStyle, start.x, start.y, end.x, end.y, highlighted)}
+                  </g>
+                )
+              })}
+            </defs>
             {/* Edges: a straight line is misleading for the mind-map layout since both endpoints
                 move along different rings - a slight quadratic curve through the midpoint reads
                 as "flowing outward from parent to child". The other (tree-shaped) layouts read
@@ -492,44 +511,114 @@ export default function TreeGraphView({
                 the project-to-main-note connection was missing entirely.
                 Style/arrowheads come from the edge's SOURCE (parent) note - edge.parentId is null
                 for a root-level edge from the virtual center, which has no note to style from, so
-                those always render as the plain default. The curve runs parent -> child, so
-                marker-start sits at the parent end, marker-end at the child end. */}
+                those use the frontend-only rootAppearance preference (see TreeGraphView's Props
+                doc / NotesView's notesGraphRootAppearance preference) instead. The curve runs
+                parent -> child, so marker-start sits at the parent end, marker-end at the child
+                end. */}
             {edges.map((edge) => {
-              const { from: start, to: end } = edge
+              // Anchor computation (box sizing including the root's own box - see
+              // computeEdgeAnchors' doc comment - and the independent-clip-against-the-other-
+              // end's-raw-center approach that fixed the "arrives at the wrong edge"/"no gap on
+              // the root's side" bugs) is shared with the Gradient <defs> loop above, so both use
+              // identical geometry.
+              const { start, end, sourceEdgeStyle, sourceEdgeArrow } = computeEdgeAnchors(edge)
               const midX = (start.x + end.x) / 2
               const midY = (start.y + end.y) / 2
               const highlighted = hoveredId !== null && (edge.childId === hoveredId || edge.parentId === hoveredId)
               const dimmed = hoveredId !== null && !highlighted
               const strokeClass = highlighted ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'
-              const sourceNote = edge.parentId ? notesById.get(edge.parentId) : null
-              const { markerStart, markerEnd } = edgeMarkerRefs(sourceNote?.edgeArrow, highlighted)
+              const { markerStart, markerEnd } = edgeMarkerRefs(sourceEdgeArrow, highlighted)
+              // Gradient overrides the plain stroke-slate-400/stroke-brand-primary class with an
+              // inline url() stroke (see edgeGradientStroke's doc comment) - only the className is
+              // dropped when active, everything else (width/dasharray/markers/opacity) stays the
+              // same.
+              const gradientStroke = edgeGradientStroke(sourceEdgeStyle, start.x, start.y, end.x, end.y, highlighted)
+              const glowFilter = edgeGlowFilter(sourceEdgeStyle, highlighted)
+              const d = `M ${start.x} ${start.y} Q ${midX} ${midY} ${end.x} ${end.y}`
+              const opacity = dimmed ? 0.12 : highlighted ? 0.9 : 0.35
               return (
-                <path
-                  key={edge.childId}
-                  d={`M ${start.x} ${start.y} Q ${midX} ${midY} ${end.x} ${end.y}`}
-                  fill="none"
-                  className={strokeClass}
-                  strokeWidth={highlighted ? 1.5 : 1}
-                  strokeDasharray={edgeStrokeDasharray(sourceNote?.edgeStyle)}
-                  markerStart={markerStart}
-                  markerEnd={markerEnd}
-                  opacity={dimmed ? 0.12 : highlighted ? 0.9 : 0.35}
-                />
+                <g key={edge.childId}>
+                  {/* Glow renders as a SEPARATE wider/blurred duplicate of the line UNDERNEATH the
+                      normal sharp one, not a filter applied to the line itself - applying the blur
+                      filter directly to the real line (the previous, buggy version) blurs the
+                      entire visible stroke into a diffuse haze with no crisp line left at all
+                      (confirmed live: exactly the "thick and blurry, not elegant" look reported),
+                      since feGaussianBlur has no concept of "keep a sharp core, only blur the
+                      edges" - it blurs the whole rendered shape uniformly. No markers on this
+                      duplicate (they'd double up with the real line's arrowheads below), and it's
+                      excluded from hover hit-testing by being purely decorative underneath. */}
+                  {glowFilter && (
+                    <path d={d} fill="none" className={strokeClass} filter={glowFilter} strokeWidth={(highlighted ? 1.5 : 1) + 1.5} opacity={opacity * 0.8} />
+                  )}
+                  <path
+                    d={d}
+                    fill="none"
+                    className={gradientStroke ? undefined : strokeClass}
+                    style={gradientStroke ? { stroke: gradientStroke } : undefined}
+                    strokeWidth={highlighted ? 1.5 : 1}
+                    strokeDasharray={edgeStrokeDasharray(sourceEdgeStyle)}
+                    markerStart={markerStart}
+                    markerEnd={markerEnd}
+                    opacity={opacity}
+                  />
+                </g>
               )
             })}
 
-            {/* Center node: the project itself. */}
-            <g>
-              <circle
-                cx={0}
-                cy={0}
-                r={CENTER_RADIUS}
-                className={`fill-brand-accent ${dragOverId === '__center__' ? 'stroke-amber-500' : 'stroke-white dark:stroke-slate-900'}`}
-                strokeWidth={dragOverId === '__center__' ? 3 : 2}
-              />
-              <text x={0} y={0} textAnchor="middle" dominantBaseline="middle" className="pointer-events-none select-none fill-white text-[11px] font-semibold">
-                {projectName.length > 16 ? `${projectName.slice(0, 15)}…` : projectName}
-              </text>
+            {/* Center node: the project itself - now clickable to open the side panel with its own
+                (frontend-only) appearance settings, see rootAppearance/onChangeRootAppearance.
+                Rendered via the same NoteNodeVisual every note node uses (rather than a fixed
+                <circle>) so a chosen root shape actually has a visible effect, matching how a
+                real note's shape choice behaves. When no explicit shape/color is set, it falls
+                back to the previous plain accent-colored circle look via the two overrides below. */}
+            <g
+              className="cursor-pointer"
+              // Capture phase, not bubble (onPointerDownCapture, not onPointerDown) - React fires
+              // capture handlers on inner elements BEFORE the outer <svg>'s onPointerDown
+              // (handleBackgroundPointerDown) runs at all, which is what actually guarantees this
+              // wins the race, not stopPropagation() alone. The previous bubble-phase version
+              // (event.stopPropagation() in a regular onPointerDown) relied on React not having
+              // already invoked handleBackgroundPointerDown by the time this ran - but React
+              // resolves ALL bubble-phase handlers for a given phase together, so there was no
+              // hard guarantee this inner handler's stopPropagation() would be seen before the
+              // outer one's own pointerdown logic (setPointerCapture + panRef.current = {...})
+              // already executed; once panRef.current is set, handleSvgPointerUp's very first
+              // check (`if (panRef.current) { panRef.current = null; return }`) bails out before
+              // ever looking at draggingRef, silently swallowing the click on PrimeSource. Capture
+              // phase removes the ambiguity entirely: this always runs first.
+              onPointerDownCapture={(event) => {
+                if (event.button !== 0) return
+                event.stopPropagation()
+                event.currentTarget.setPointerCapture(event.pointerId)
+                draggingRef.current = { id: '__root__', moved: false }
+              }}
+              onPointerEnter={() => setHoveredId('__root__')}
+              onPointerLeave={() => setHoveredId((prev) => (prev === '__root__' ? null : prev))}
+            >
+              {rootAppearance.color || rootAppearance.shape ? (
+                <NoteNodeVisual
+                  x={0}
+                  y={0}
+                  title={projectName.length > 16 ? `${projectName.slice(0, 15)}…` : projectName}
+                  shape={rootAppearance.shape}
+                  color={rootAppearance.color}
+                  emphasized={dragOverId === '__center__'}
+                  emphasisClassName="stroke-amber-500"
+                />
+              ) : (
+                <>
+                  <circle
+                    cx={0}
+                    cy={0}
+                    r={CENTER_RADIUS}
+                    className={`fill-brand-accent ${dragOverId === '__center__' ? 'stroke-amber-500' : 'stroke-white dark:stroke-slate-900'}`}
+                    strokeWidth={dragOverId === '__center__' ? 3 : 2}
+                  />
+                  <text x={0} y={0} textAnchor="middle" dominantBaseline="middle" className="pointer-events-none select-none fill-white text-[11px] font-semibold">
+                    {projectName.length > 16 ? `${projectName.slice(0, 15)}…` : projectName}
+                  </text>
+                </>
+              )}
             </g>
 
             {nodes.map((n) => {
@@ -562,8 +651,45 @@ export default function TreeGraphView({
               )
             })}
           </g>
-        </svg>
-      )}
+          </svg>
+        )}
+      </div>
+
+      {/* The panel is a flex sibling with an animated width (not absolutely positioned over the
+          canvas) so opening/closing it actually shrinks/grows the canvas area next to it - the
+          ResizeObserver on containerRef above picks up the resulting size change and recomputes
+          the SVG viewBox, which is what makes the graph itself visibly slide/resize alongside the
+          panel instead of the panel just appearing on top of a static canvas. w-0 with
+          overflow-hidden keeps the closed panel from taking any layout space or being focusable. */}
+      <div className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${panelOpen ? 'w-72' : 'w-0'}`}>
+        <div className="h-full w-72">
+          {panelOpen && (
+            <GraphSidePanel
+              selected={
+                selectedNodeId === '__root__'
+                  ? { kind: 'root' }
+                  : selectedNodeId
+                    ? { kind: 'note', note: notes.find((n) => n.id === selectedNodeId) }
+                    : null
+              }
+              onClose={() => {
+                setPanelOpen(false)
+                setSelectedNodeId(null)
+              }}
+              currentLayout={layoutId}
+              onChangeLayout={onChangeLayout}
+              onApplyPreset={onApplyPreset}
+              applyingPreset={applyingPreset}
+              onOpenNote={onSelectNote}
+              onDetachParent={detachFromParent}
+              showDetachParent
+              onChangeNoteAppearance={changeNodeAppearance}
+              rootAppearance={rootAppearance}
+              onChangeRootAppearance={onChangeRootAppearance}
+            />
+          )}
+        </div>
+      </div>
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import type { NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../../api/types'
 import { COLOR_SCHEMES } from './colorSchemes'
 
@@ -22,6 +23,8 @@ const EDGE_STYLE_OPTIONS: { value: NoteEdgeStyle; label: string }[] = [
   { value: 'Solid', label: 'Durchgezogen' },
   { value: 'Dashed', label: 'Gestrichelt' },
   { value: 'Dotted', label: 'Gepunktet' },
+  { value: 'Gradient', label: 'Verlauf' },
+  { value: 'Glow', label: 'Leuchten' },
 ]
 
 const EDGE_ARROW_OPTIONS: { value: NoteEdgeArrow; label: string }[] = [
@@ -81,11 +84,50 @@ function ShapePreviewIcon({ shape }: { shape: NoteShape }) {
   }
 }
 
+// Stable per-icon-instance gradient/filter ids - unlike the real edge rendering (edgeStyles.tsx),
+// which only ever needs a small fixed set since every edge uses one of two fixed colors, each
+// preview icon renders in the menu's own text color (currentColor, so it matches light/dark theme
+// and the active/inactive button state) and needs its own gradient/filter def referencing that
+// instance specifically. useId gives a stable, unique-per-mount id so multiple menus open at once
+// (or duplicate NoteAppearanceMenu instances) never collide on the same <linearGradient>/<filter> id.
 function EdgeStylePreviewIcon({ edgeStyle }: { edgeStyle: NoteEdgeStyle }) {
   // Same handwritten-SVG convention as ShapePreviewIcon above - a short horizontal line rendered
-  // with the actual strokeDasharray each style maps to in the real edge rendering (see
-  // TreeGraphView.tsx/NoteGraphView.tsx's edgeStrokeDasharray), so the preview matches reality.
+  // with the actual strokeDasharray/gradient/glow each style maps to in the real edge rendering
+  // (see TreeGraphView.tsx/NoteGraphView.tsx's edgeStrokeDasharray/edgeGradientStroke/
+  // edgeGlowFilter), so the preview matches reality.
+  const gradientId = useId()
+  const filterId = useId()
   const dasharray = edgeStyle === 'Dashed' ? '4,2.5' : edgeStyle === 'Dotted' ? '1,2' : undefined
+
+  if (edgeStyle === 'Gradient') {
+    return (
+      <svg viewBox="0 0 20 14" className="h-3.5 w-5">
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0" />
+            <stop offset="50%" stopColor="currentColor" stopOpacity="1" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <line x1="1" y1="7" x2="19" y2="7" stroke={`url(#${gradientId})`} strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    )
+  }
+
+  if (edgeStyle === 'Glow') {
+    return (
+      <svg viewBox="0 0 20 14" className="h-3.5 w-5">
+        <defs>
+          <filter id={filterId} x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="1.2" />
+          </filter>
+        </defs>
+        <line x1="1" y1="7" x2="19" y2="7" className="stroke-current" strokeWidth="1.5" strokeLinecap="round" filter={`url(#${filterId})`} />
+        <line x1="1" y1="7" x2="19" y2="7" className="stroke-current" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    )
+  }
+
   return (
     <svg viewBox="0 0 20 14" className="h-3.5 w-5">
       <line x1="1" y1="7" x2="19" y2="7" className="stroke-current" strokeWidth="1.5" strokeDasharray={dasharray} strokeLinecap="round" />
@@ -199,7 +241,7 @@ export default function NoteAppearanceMenu({
             </button>
           )}
         </div>
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-5 gap-1">
           {EDGE_STYLE_OPTIONS.map((opt) => {
             const isActive = edgeStyle === opt.value || (!edgeStyle && opt.value === 'Solid')
             return (
