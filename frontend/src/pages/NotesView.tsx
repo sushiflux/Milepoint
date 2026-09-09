@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { createNote, deleteNote, updateNote } from '../api/notes'
+import { createNote, deleteNote, updateNote, setNoteEdgeOverride, getNotes, type NoteAppearanceFields } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types'
 import NoteGraphView from './NoteGraphView'
@@ -78,6 +78,23 @@ function parseRootAppearance(raw: string): RootAppearance {
   }
   return DEFAULT_ROOT_APPEARANCE
 }
+
+// Pulls the appearance fields updateNote()/createNote() always need re-sent (see
+// NoteAppearanceFields' doc comment on why there's no tri-state flag for these) out of an existing
+// Note - avoids repeating all six field names at every call site that just wants "this note's
+// current appearance, unchanged".
+function appearanceOf(note: Note): NoteAppearanceFields {
+  return {
+    color: note.color,
+    shape: note.shape,
+    edgeStyle: note.edgeStyle,
+    edgeArrow: note.edgeArrow,
+    edgeWidth: note.edgeWidth,
+    edgeColor: note.edgeColor,
+  }
+}
+
+const DEFAULT_APPEARANCE: NoteAppearanceFields = { color: null, shape: null, edgeStyle: null, edgeArrow: null, edgeWidth: null, edgeColor: null }
 
 export default function NotesView({ projectId, projectName, notes, onNotesChange }: Props) {
   const { loaded: preferencesLoaded, getPreference, setPreference } = usePreferences()
@@ -254,7 +271,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     if (!title) return
 
     try {
-      const created = await createNote(projectId, title, '')
+      const created = await createNote(projectId, title, '', null, DEFAULT_APPEARANCE)
       onNotesChange([...notes, created])
       setNewTitle('')
       setShowCreateForm(false)
@@ -273,10 +290,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
         activeTab.noteId,
         activeTab.draftTitle.trim(),
         activeTab.draftContent,
-        activeNote.color,
-        activeNote.shape,
-        activeNote.edgeStyle,
-        activeNote.edgeArrow,
+        appearanceOf(activeNote),
       )
       onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
       setTabs((prev) =>
@@ -343,7 +357,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
   }
 
   async function handleGraphCreateNote(title: string) {
-    const created = await createNote(projectId, title, '')
+    const created = await createNote(projectId, title, '', null, DEFAULT_APPEARANCE)
     onNotesChange([...notes, created])
   }
 
@@ -355,7 +369,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
 
     const separator = source.content.trim().length > 0 ? '\n\n' : ''
     const newContent = `${source.content}${separator}[[${target.title}]]`
-    const updated = await updateNote(projectId, source.id, source.title, newContent, source.color, source.shape, source.edgeStyle, source.edgeArrow)
+    const updated = await updateNote(projectId, source.id, source.title, newContent, appearanceOf(source))
     onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
   }
 
@@ -367,14 +381,14 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
   }
 
   async function handleTreeCreateRootNote(title: string) {
-    const created = await createNote(projectId, title, '', null)
+    const created = await createNote(projectId, title, '', null, DEFAULT_APPEARANCE)
     onNotesChange([...notes, created])
   }
 
   async function handleTreeSetParent(noteId: string, parentNoteId: string | null) {
     const note = notes.find((n) => n.id === noteId)
     if (!note) return
-    const updated = await updateNote(projectId, note.id, note.title, note.content, note.color, note.shape, note.edgeStyle, note.edgeArrow, {
+    const updated = await updateNote(projectId, note.id, note.title, note.content, appearanceOf(note), {
       setParentNoteId: true,
       parentNoteId,
     })
@@ -382,21 +396,44 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
   }
 
   // Shared by both graph views (free + all four tree layouts) - changes only the note's own
-  // color/shape/edgeStyle/edgeArrow, always re-sending the note's current title/content so
-  // neither is accidentally touched (updateNote always applies title/content as given, same as
-  // color/shape/edgeStyle/edgeArrow).
+  // appearance fields, always re-sending the note's current title/content so neither is
+  // accidentally touched (updateNote always applies title/content as given, same as the
+  // appearance fields themselves).
   async function handleNoteAppearanceChange(
     noteId: string,
-    patch: { color?: string | null; shape?: Note['shape']; edgeStyle?: Note['edgeStyle']; edgeArrow?: Note['edgeArrow'] },
+    patch: {
+      color?: string | null
+      shape?: Note['shape']
+      edgeStyle?: Note['edgeStyle']
+      edgeArrow?: Note['edgeArrow']
+      edgeWidth?: number | null
+      edgeColor?: string | null
+    },
   ) {
     const note = notes.find((n) => n.id === noteId)
     if (!note) return
-    const nextColor = 'color' in patch ? patch.color ?? null : note.color
-    const nextShape = 'shape' in patch ? patch.shape ?? null : note.shape
-    const nextEdgeStyle = 'edgeStyle' in patch ? patch.edgeStyle ?? null : note.edgeStyle
-    const nextEdgeArrow = 'edgeArrow' in patch ? patch.edgeArrow ?? null : note.edgeArrow
-    const updated = await updateNote(projectId, note.id, note.title, note.content, nextColor, nextShape, nextEdgeStyle, nextEdgeArrow)
+    const nextAppearance: NoteAppearanceFields = {
+      color: 'color' in patch ? patch.color ?? null : note.color,
+      shape: 'shape' in patch ? patch.shape ?? null : note.shape,
+      edgeStyle: 'edgeStyle' in patch ? patch.edgeStyle ?? null : note.edgeStyle,
+      edgeArrow: 'edgeArrow' in patch ? patch.edgeArrow ?? null : note.edgeArrow,
+      edgeWidth: 'edgeWidth' in patch ? patch.edgeWidth ?? null : note.edgeWidth,
+      edgeColor: 'edgeColor' in patch ? patch.edgeColor ?? null : note.edgeColor,
+    }
+    const updated = await updateNote(projectId, note.id, note.title, note.content, nextAppearance)
     onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
+  }
+
+  // Sets or clears (width/color both null) the style override for ONE connection FROM sourceNoteId
+  // TO targetNoteId - distinct from handleNoteAppearanceChange above, which restyles every
+  // connection a note draws outward. See setNoteEdgeOverride's/NoteEdgeOverride's doc comments.
+  // Refetches the source note afterward (rather than optimistically patching edgeOverrides
+  // client-side) since the endpoint returns 204 No Content, not the updated note - simplest way to
+  // stay in sync with the server's actual state (delete-vs-upsert decision, existing-row update).
+  async function handleEdgeOverrideChange(sourceNoteId: string, targetNoteId: string, width: number | null, color: string | null) {
+    await setNoteEdgeOverride(projectId, sourceNoteId, targetNoteId, width, color)
+    const refreshed = await getNotes(projectId)
+    onNotesChange(refreshed)
   }
 
   // Wendet eine vordefinierte Stil-Vorlage (stylePresets.ts) auf ALLE Notizen im Projekt an: wechselt
@@ -414,7 +451,19 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
       const updatedNotes: Note[] = []
       for (const note of notes) {
         const color = colorByNoteId.get(note.id) ?? null
-        const updated = await updateNote(projectId, note.id, note.title, note.content, color, preset.shape, preset.edgeStyle, preset.edgeArrow)
+        // edgeWidth/edgeColor deliberately carried over from the note's current value, not reset
+        // by the preset - a preset controls layout/palette/shape/line-style/arrowheads, but a
+        // line's thickness/explicit color is a finer per-note choice the user makes separately
+        // (see NoteAppearanceMenu's "Liniendicke"/"Linienfarbe" controls) and shouldn't be
+        // silently wiped out just because a different overall preset was applied.
+        const updated = await updateNote(projectId, note.id, note.title, note.content, {
+          color,
+          shape: preset.shape,
+          edgeStyle: preset.edgeStyle,
+          edgeArrow: preset.edgeArrow,
+          edgeWidth: note.edgeWidth,
+          edgeColor: note.edgeColor,
+        })
         updatedNotes.push(updated)
       }
       onNotesChange(notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n))
@@ -512,6 +561,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
             onChangeLayout={setGraphLayout}
             onApplyPreset={handleApplyPreset}
             applyingPreset={applyingPreset}
+            onChangeEdgeOverride={handleEdgeOverrideChange}
           />
         ) : (
           <TreeGraphView
@@ -527,6 +577,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
             applyingPreset={applyingPreset}
             rootAppearance={rootAppearance}
             onChangeRootAppearance={setRootAppearance}
+            onChangeEdgeOverride={handleEdgeOverrideChange}
           />
         )
       ) : (

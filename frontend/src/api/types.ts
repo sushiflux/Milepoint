@@ -133,8 +133,18 @@ export type NoteShape = 'Rounded' | 'Rectangle' | 'Diamond' | 'Underline' | 'Ell
 // layouts) and its outgoing free cross-links (NoteGraphView) - never a per-connection setting.
 // Null means "no explicit choice" - rendered the same as 'Solid'/'None' but distinct, same
 // reasoning as NoteShape's null.
-export type NoteEdgeStyle = 'Solid' | 'Dashed' | 'Dotted' | 'Gradient' | 'Glow'
+export type NoteEdgeStyle = 'Solid' | 'Dashed' | 'Dotted' | 'Gradient'
 export type NoteEdgeArrow = 'None' | 'End' | 'Start' | 'Both'
+
+// Mirrors backend Dtos/Notes/NoteDtos.cs's NoteEdgeOverrideDto - a style override for ONE specific
+// connection from this note (a tree edge to a ChildNote, or a free-view OutgoingLink), distinct
+// from the note-wide edgeWidth/edgeColor below which apply to every outgoing connection. See
+// backend's NoteEdgeOverride model doc comment for why this is a separate concept.
+export interface NoteEdgeOverride {
+  targetNoteId: string
+  width: number | null
+  color: string | null
+}
 
 export interface Note {
   id: string
@@ -155,6 +165,15 @@ export interface Note {
   // above. Null = use the view's default (solid, no arrowhead).
   edgeStyle: NoteEdgeStyle | null
   edgeArrow: NoteEdgeArrow | null
+  // Stroke width (px)/color for every edge drawn FROM this note - null = use the view's default
+  // (1px, normal/highlighted gray-or-brand-accent). A specific connection's own entry in
+  // edgeOverrides below takes priority over these for that one connection only.
+  edgeWidth: number | null
+  edgeColor: string | null
+  // Per-connection overrides for this note's own outgoing connections - see NoteEdgeOverride's
+  // doc comment. Empty when none of this note's outgoing connections have been individually
+  // restyled.
+  edgeOverrides: NoteEdgeOverride[]
   // Last manually-saved position in the free (physics-simulated) graph view (NoteGraphView), or
   // null if the note has never been dragged there yet - see the backend's dedicated
   // PUT .../position endpoint. Independent of any tree-layout position, which is always

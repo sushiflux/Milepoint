@@ -33,11 +33,30 @@ public class Note
 
     // Line styling for every edge drawn FROM this note - both to its own ChildNotes (hierarchy)
     // and along its OutgoingLinks (free cross-links). A per-note setting, not per-connection: there
-    // is exactly one styling choice per note, applied uniformly to everything that note points to.
-    // Both nullable = "use the view's default" (Solid line, no arrowhead), same reasoning as
+    // is exactly one styling choice per note, applied uniformly to everything that note points to
+    // - UNLESS a specific connection has its own NoteEdgeOverride (see that class's doc comment),
+    // which wins over these note-wide defaults for that one connection only. All nullable = "use
+    // the view's default" (Solid line, no arrowhead, default gray, 1px), same reasoning as
     // Color/Shape above.
     public NoteEdgeStyle? EdgeStyle { get; set; }
     public NoteEdgeArrow? EdgeArrow { get; set; }
+    // Stroke width in px for every edge drawn from this note - a plain positive double (not an
+    // enum like EdgeStyle/EdgeArrow, since there's no fixed set of valid widths to validate
+    // against, just a sensible clamped range enforced at the API boundary - see
+    // UpdateNoteRequest's doc comment).
+    public double? EdgeWidth { get; set; }
+    // Stroke color (hex, same validation as Note.Color) for every edge drawn from this note -
+    // deliberately separate from Note.Color (the node's own fill/text color) since the user asked
+    // for the line color to be independently choosable from the node it originates at, not tied
+    // to it.
+    public string? EdgeColor { get; set; }
+
+    // Per-connection style overrides for this note's own outgoing connections - see
+    // NoteEdgeOverride's doc comment. Only the "this note as source" direction is exposed here;
+    // there's no corresponding IncomingEdgeOverrides, since an override is only ever relevant to
+    // the note whose outgoing connections it's styling (the same asymmetry OutgoingLinks/
+    // IncomingLinks above already has for a different reason).
+    public ICollection<NoteEdgeOverride> OutgoingEdgeOverrides { get; set; } = new List<NoteEdgeOverride>();
 
     // Persisted node position for the free (physics-simulated) graph view (NoteGraphView.tsx on
     // the frontend), NOT used by the tree/hierarchy views (those compute static layouts from

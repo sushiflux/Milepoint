@@ -83,6 +83,13 @@ If test volumes hold an older schema and a fresh migration conflicts ("relation 
 `docker compose -p milepoint down -v && .\start.ps1` wipes and recreates (dev data only — never do
 this against real data without a backup first).
 
+**Adding a new *value* to an existing enum needs a real backend container restart, not just
+`dotnet watch`'s hot reload.** Confirmed live: `dotnet watch` throws `ENC0021: Adding enum value
+requires restarting the application` and keeps serving the old assembly, so a request using the new
+value 400s with a JSON-deserialization error until the container is actually restarted
+(`docker restart milepoint-backend-1` is enough — no migration needed if the backing column is
+already a plain nullable `int`, as every enum column in this project is).
+
 ## Architecture
 
 ### Dual EF Core provider setup
@@ -147,9 +154,44 @@ cross-links — a hand-rolled simulation, not d3-force, to keep the bundle small
 `notesGraph/TreeGraphView.tsx` (a shared canvas for four static tree layouts computed by
 `notesGraph/treeLayouts.ts` from the parent/child hierarchy: mind map/radial, left-to-right tree,
 top-to-bottom org chart, fishbone — one shared node-position algorithm module, one shared
-zoom/pan/drag-to-reparent canvas). `Note.Color`/`Note.Shape` (hex color, `NoteShape` enum) control
-per-node appearance across both graph views; color palettes/schemes are frontend-only concept, the
-backend only ever stores a resolved hex value.
+zoom/pan/drag-to-reparent canvas). The layout picker itself lives in two places at once by design
+(a standalone "Layout & Stil" button next to the List/Graph toggle in `NotesView.tsx`, AND a click
+on `TreeGraphView`'s center node) — the free view has no center-node concept at all, so only the
+standalone button reaches it there.
+
+`Note.Color`/`Note.Shape` (hex color, `NoteShape` enum) control per-node appearance across both
+graph views; color palettes/schemes are frontend-only concept, the backend only ever stores a
+resolved hex value. `Note.EdgeStyle`/`Note.EdgeArrow`/`Note.EdgeWidth`/`Note.EdgeColor` style every
+line an edge draws *from* that note (never the target's) — dash pattern, arrowheads, stroke width
+(px), and stroke color, independent of the node's own `Color`. A specific connection can further
+override just its own width/color via `NoteEdgeOverride` (composite-keyed on
+`SourceNoteId`+`TargetNoteId`, covering both a tree edge to a `ChildNote` and a free-view
+`NoteLink` uniformly) — reachable by clicking the line itself directly in either graph view (a
+wide invisible hit-area path/line sits under every rendered edge), opening `EdgeOverridePanel`
+instead of the usual node panel. `edgeStyles.tsx` centralizes all of this shared rendering logic
+(anchor-point box-edge clipping, marker/gradient defs, width/color resolution) for both graph
+views — `resolveEdgeWidth`/`resolveEdgeColor` implement the override-beats-note-default priority.
+
+Both graph views share a permanent right-side panel (`notesGraph/GraphSidePanel.tsx`, flex sibling
+with an animated width, not absolutely positioned — this is what makes the canvas visibly shrink
+alongside it) that swaps content based on what's selected: a note node → `NoteAppearanceMenu.tsx`
+(color/shape/edge style/arrowheads/width/color); the tree view's virtual center node →
+`GraphSettingsPanel.tsx` (layout picker + style presets + center-node appearance — the same
+component the standalone "Layout & Stil" button also opens); a clicked edge →
+`EdgeOverridePanel.tsx`. Selection state (`selectedNodeId`/`selectedEdge`, mutually exclusive) and
+panel open/close both live in each view's own component, not lifted up — `NotesView.tsx` only
+supplies the data callbacks (`onChangeAppearance`, `onChangeEdgeOverride`, etc.).
+
+A "Glow" edge style (blurred halo behind the line) was tried and removed again after live user
+feedback rejected the visual outright — don't reintroduce it without being asked. Its replacement,
+"Gradient" (fades opacity toward transparent at both endpoints), needed a per-edge
+`gradientUnits="userSpaceOnUse"` `<linearGradient>` (not a small fixed set) since the default
+`objectBoundingBox` gradient space assumes a fixed horizontal angle, which visibly skews on any
+angled edge — see `edgeGradientDefFor`'s doc comment. Building an SVG opacity fade with a `<mask>`
+has its own sharp edges: a `<mask>` defaults to *luminance* masking (white = visible, black =
+invisible, not simply "opacity") and its own region defaults to `objectBoundingBox`, which
+degenerates to zero on a perfectly horizontal/vertical line's zero-height/-width bounding box —
+both bit the small gradient preview icon in `NoteAppearanceMenu.tsx` before being fixed.
 
 ### Update requests use two different "don't touch this field" conventions — know which applies
 
@@ -157,13 +199,18 @@ backend only ever stores a resolved hex value.
   (default `false` = hierarchy untouched) — because `null` is *also* the field's valid "no parent"
   value, so a request that simply omits the field can't otherwise be told apart from one explicitly
   clearing it.
-- `Color`/`Shape` on the same request have **no** such flag — every `PUT` applies them exactly as
-  given (`null` = revert to default). This means every caller of `updateNote()` on the frontend,
-  including plain title/content-only saves, must always pass the note's *current* color/shape
-  through, or it gets silently reset. This asymmetry is intentional (see the doc comments on
-  `UpdateNoteRequest`/`NoteDtos.cs`) — the parent hierarchy is often edited in isolation (e.g.
-  drag-and-drop in the tree view) while color/shape are always in hand whenever a note is saved at
-  all, the same way `Title`/`Content` already are.
+- `Color`/`Shape`/`EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor` on the same request have **no**
+  such flag — every `PUT` applies them exactly as given (`null` = revert to default). This means
+  every caller of `updateNote()` on the frontend, including plain title/content-only saves, must
+  always pass the note's *current* appearance fields through (see `NoteAppearanceFields`/
+  `appearanceOf()` in `NotesView.tsx`), or they get silently reset. This asymmetry is intentional
+  (see the doc comments on `UpdateNoteRequest`/`NoteDtos.cs`) — the parent hierarchy is often
+  edited in isolation (e.g. drag-and-drop in the tree view) while the appearance fields are always
+  in hand whenever a note is saved at all, the same way `Title`/`Content` already are.
+- `NoteEdgeOverride` rows use a *third* convention: `PUT .../edge-overrides/{targetNoteId}` with
+  both `Width` and `Color` null **deletes** the row (falls back to the source note's own
+  `EdgeWidth`/`EdgeColor`) rather than storing a no-op override — there's no separate delete
+  endpoint, a caller resets by sending both fields null.
 
 ### Voice dictation: three transcription providers behind one interface
 
@@ -185,7 +232,7 @@ Kanban board state syncs live across open tabs/users via SignalR (`Hubs/`), not 
 
 ### Versioning
 
-`Year.Month.CommitOfTheYear` (e.g. `v2026.9.70`), computed fresh on every request by `GET
+`Year.Month.CommitOfTheYear` (e.g. `v2026.9.73`), computed fresh on every request by `GET
 /api/version` reading `backend/src/Milepoint.Api/version.txt` — never cached, no restart needed to
 pick up a new value. A tracked `post-commit` git hook (`scripts/git-hooks/post-commit`, wired up
 automatically by `start.ps1` via `core.hooksPath`) rewrites that file after every commit:

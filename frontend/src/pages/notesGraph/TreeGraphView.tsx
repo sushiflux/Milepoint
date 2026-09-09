@@ -5,15 +5,19 @@ import { computeTreeLayout, type Point, type TreeEdge, type TreeLayoutId } from 
 import { NoteNodeVisual, measureNodeBox } from './NoteNodeShape'
 import {
   EdgeMarkerDefs,
-  EdgeGlowFilterDefs,
   edgeMarkerRefs,
   edgeStrokeDasharray,
   edgeGradientStroke,
   edgeGradientDefFor,
-  edgeGlowFilter,
   clipPointToBoxEdge,
+  resolveEdgeWidth,
+  resolveEdgeColor,
+  EDGE_COLOR_NORMAL,
+  EDGE_COLOR_HIGHLIGHT,
+  DEFAULT_EDGE_WIDTH,
 } from './edgeStyles'
 import GraphSidePanel from './GraphSidePanel'
+import EdgeOverridePanel from './EdgeOverridePanel'
 import type { GraphLayoutId } from './stylePresets'
 
 export interface RootAppearance {
@@ -32,13 +36,23 @@ interface Props {
   onSetParent: (noteId: string, parentNoteId: string | null) => Promise<void>
   onChangeAppearance: (
     noteId: string,
-    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+    patch: {
+      color?: string | null
+      shape?: NoteShape | null
+      edgeStyle?: NoteEdgeStyle | null
+      edgeArrow?: NoteEdgeArrow | null
+      edgeWidth?: number | null
+      edgeColor?: string | null
+    },
   ) => Promise<void>
   onChangeLayout: (layout: GraphLayoutId) => void
   onApplyPreset: (presetId: string) => Promise<void>
   applyingPreset: boolean
   rootAppearance: RootAppearance
   onChangeRootAppearance: (patch: Partial<RootAppearance>) => void
+  // Per-connection style override (see NoteEdgeOverride's backend doc comment) - width/color of
+  // ONE specific line, restyled independently of its source note's own edgeWidth/edgeColor.
+  onChangeEdgeOverride: (sourceNoteId: string, targetNoteId: string, width: number | null, color: string | null) => Promise<void>
 }
 
 interface Transform {
@@ -98,6 +112,7 @@ export default function TreeGraphView({
   applyingPreset,
   rootAppearance,
   onChangeRootAppearance,
+  onChangeEdgeOverride,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -120,6 +135,10 @@ export default function TreeGraphView({
   // permanent sichtbaren "globalen" Panel-Zustand.
   const [panelOpen, setPanelOpen] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  // A clicked EDGE (not node) opens EdgeOverridePanel instead of GraphSidePanel - mutually
+  // exclusive with selectedNodeId (selecting an edge clears the node selection and vice versa,
+  // see selectEdge/selectNode below), sharing the same panelOpen/animated-width slot.
+  const [selectedEdge, setSelectedEdge] = useState<{ sourceNoteId: string; targetNoteId: string } | null>(null)
   const [createNoteAt, setCreateNoteAt] = useState<Point | null>(null)
   const [newNodeTitle, setNewNodeTitle] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -224,7 +243,14 @@ export default function TreeGraphView({
   // Also used for the virtual project center via drag.id === '__root__' (see its onPointerDown
   // below) - setSelectedNodeId('__root__') is exactly what a dedicated selectRoot() used to do.
   function selectNode(noteId: string) {
+    setSelectedEdge(null)
     setSelectedNodeId(noteId)
+    setPanelOpen(true)
+  }
+
+  function selectEdge(sourceNoteId: string, targetNoteId: string) {
+    setSelectedNodeId(null)
+    setSelectedEdge({ sourceNoteId, targetNoteId })
     setPanelOpen(true)
   }
 
@@ -241,7 +267,14 @@ export default function TreeGraphView({
 
   async function changeNodeAppearance(
     noteId: string,
-    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+    patch: {
+      color?: string | null
+      shape?: NoteShape | null
+      edgeStyle?: NoteEdgeStyle | null
+      edgeArrow?: NoteEdgeArrow | null
+      edgeWidth?: number | null
+      edgeColor?: string | null
+    },
   ) {
     try {
       await onChangeAppearance(noteId, patch)
@@ -265,9 +298,10 @@ export default function TreeGraphView({
     if (event.button !== 0) return
     // Klick auf leere Canvas-Fläche schließt das Panel komplett - es gibt keinen permanent
     // sichtbaren "globalen" Panel-Zustand mehr, das Panel erscheint nur bei einer echten Auswahl
-    // (ein Knoten oder der Mittelpunkt).
+    // (ein Knoten, eine Kante oder der Mittelpunkt).
     setPanelOpen(false)
     setSelectedNodeId(null)
+    setSelectedEdge(null)
     event.currentTarget.setPointerCapture(event.pointerId)
     autoFitRef.current = false
     panRef.current = { startX: event.clientX, startY: event.clientY, originX: transform.x, originY: transform.y }
@@ -403,7 +437,15 @@ export default function TreeGraphView({
     const end = clipPointToBoxEdge(edge.from, edge.to, endBox.width, endBox.height)
     const sourceEdgeStyle = edge.parentId ? parentNote?.edgeStyle : rootAppearance.edgeStyle
     const sourceEdgeArrow = edge.parentId ? parentNote?.edgeArrow : rootAppearance.edgeArrow
-    return { start, end, sourceEdgeStyle, sourceEdgeArrow }
+    // Root-level edges (edge.parentId === null, from the virtual project center) have no source
+    // Note to carry a width/color/override - the center has no backing Note row at all (it's a
+    // frontend-only preference, see RootAppearance), so per-connection overrides (which are keyed
+    // by two real Note ids) can't apply there either. Those edges always render at the plain
+    // default width/color.
+    const sourceEdgeWidth = edge.parentId ? parentNote?.edgeWidth : null
+    const sourceEdgeColor = edge.parentId ? parentNote?.edgeColor : null
+    const override = edge.parentId ? parentNote?.edgeOverrides.find((o) => o.targetNoteId === edge.childId) : undefined
+    return { start, end, sourceEdgeStyle, sourceEdgeArrow, sourceEdgeWidth, sourceEdgeColor, override }
   }
 
   return (
@@ -486,20 +528,16 @@ export default function TreeGraphView({
           >
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
             <EdgeMarkerDefs />
-            <EdgeGlowFilterDefs />
             {/* Per-edge Gradient <linearGradient> defs, collected in one place - see
                 edgeGradientDefFor's doc comment for why each Gradient-styled edge needs its own
-                geometry-specific def rather than a small fixed set like EdgeGlowFilterDefs. */}
+                geometry+color-specific def rather than a small fixed set like EdgeMarkerDefs. */}
             <defs>
               {edges.map((edge) => {
-                const { start, end, sourceEdgeStyle } = computeEdgeAnchors(edge)
+                const { start, end, sourceEdgeStyle, sourceEdgeColor, override } = computeEdgeAnchors(edge)
                 if (sourceEdgeStyle !== 'Gradient') return null
                 const highlighted = hoveredId !== null && (edge.childId === hoveredId || edge.parentId === hoveredId)
-                return (
-                  <g key={edge.childId}>
-                    {edgeGradientDefFor(sourceEdgeStyle, start.x, start.y, end.x, end.y, highlighted)}
-                  </g>
-                )
+                const resolvedColor = resolveEdgeColor(sourceEdgeColor, override) ?? (highlighted ? EDGE_COLOR_HIGHLIGHT : EDGE_COLOR_NORMAL)
+                return <g key={edge.childId}>{edgeGradientDefFor(sourceEdgeStyle, start.x, start.y, end.x, end.y, resolvedColor)}</g>
               })}
             </defs>
             {/* Edges: a straight line is misleading for the mind-map layout since both endpoints
@@ -514,53 +552,62 @@ export default function TreeGraphView({
                 those use the frontend-only rootAppearance preference (see TreeGraphView's Props
                 doc / NotesView's notesGraphRootAppearance preference) instead. The curve runs
                 parent -> child, so marker-start sits at the parent end, marker-end at the child
-                end. */}
+                end. Each edge is wrapped in an invisible wider hit-area path + a click handler
+                (root-level edges excluded - no source Note to attach an override to, see
+                computeEdgeAnchors' doc comment) so a single line can be clicked to open
+                EdgeOverridePanel, independent of clicking either endpoint's node. */}
             {edges.map((edge) => {
               // Anchor computation (box sizing including the root's own box - see
               // computeEdgeAnchors' doc comment - and the independent-clip-against-the-other-
               // end's-raw-center approach that fixed the "arrives at the wrong edge"/"no gap on
               // the root's side" bugs) is shared with the Gradient <defs> loop above, so both use
               // identical geometry.
-              const { start, end, sourceEdgeStyle, sourceEdgeArrow } = computeEdgeAnchors(edge)
+              const { start, end, sourceEdgeStyle, sourceEdgeArrow, sourceEdgeWidth, sourceEdgeColor, override } = computeEdgeAnchors(edge)
               const midX = (start.x + end.x) / 2
               const midY = (start.y + end.y) / 2
               const highlighted = hoveredId !== null && (edge.childId === hoveredId || edge.parentId === hoveredId)
               const dimmed = hoveredId !== null && !highlighted
               const strokeClass = highlighted ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'
               const { markerStart, markerEnd } = edgeMarkerRefs(sourceEdgeArrow, highlighted)
-              // Gradient overrides the plain stroke-slate-400/stroke-brand-primary class with an
-              // inline url() stroke (see edgeGradientStroke's doc comment) - only the className is
-              // dropped when active, everything else (width/dasharray/markers/opacity) stays the
-              // same.
-              const gradientStroke = edgeGradientStroke(sourceEdgeStyle, start.x, start.y, end.x, end.y, highlighted)
-              const glowFilter = edgeGlowFilter(sourceEdgeStyle, highlighted)
+              const resolvedWidth = resolveEdgeWidth(sourceEdgeWidth, override, highlighted)
+              const resolvedColor = resolveEdgeColor(sourceEdgeColor, override)
+              // Gradient overrides the plain stroke-slate-400/stroke-brand-primary class (or a
+              // resolved custom color) with an inline url() stroke (see edgeGradientStroke's doc
+              // comment) - only the className/color is affected, width/dasharray/markers/opacity
+              // stay the same either way.
+              const gradientStroke = edgeGradientStroke(sourceEdgeStyle, start.x, start.y, end.x, end.y, resolvedColor ?? (highlighted ? EDGE_COLOR_HIGHLIGHT : EDGE_COLOR_NORMAL))
               const d = `M ${start.x} ${start.y} Q ${midX} ${midY} ${end.x} ${end.y}`
               const opacity = dimmed ? 0.12 : highlighted ? 0.9 : 0.35
+              const isSelected = selectedEdge?.sourceNoteId === edge.parentId && selectedEdge.targetNoteId === edge.childId
               return (
                 <g key={edge.childId}>
-                  {/* Glow renders as a SEPARATE wider/blurred duplicate of the line UNDERNEATH the
-                      normal sharp one, not a filter applied to the line itself - applying the blur
-                      filter directly to the real line (the previous, buggy version) blurs the
-                      entire visible stroke into a diffuse haze with no crisp line left at all
-                      (confirmed live: exactly the "thick and blurry, not elegant" look reported),
-                      since feGaussianBlur has no concept of "keep a sharp core, only blur the
-                      edges" - it blurs the whole rendered shape uniformly. No markers on this
-                      duplicate (they'd double up with the real line's arrowheads below), and it's
-                      excluded from hover hit-testing by being purely decorative underneath. */}
-                  {glowFilter && (
-                    <path d={d} fill="none" className={strokeClass} filter={glowFilter} strokeWidth={(highlighted ? 1.5 : 1) + 1.5} opacity={opacity * 0.8} />
-                  )}
                   <path
                     d={d}
                     fill="none"
-                    className={gradientStroke ? undefined : strokeClass}
-                    style={gradientStroke ? { stroke: gradientStroke } : undefined}
-                    strokeWidth={highlighted ? 1.5 : 1}
+                    className={`${gradientStroke ? '' : strokeClass} ${isSelected ? 'drop-shadow-[0_0_2px_rgba(99,102,241,0.6)]' : ''}`}
+                    style={gradientStroke ? { stroke: gradientStroke } : resolvedColor ? { stroke: resolvedColor } : undefined}
+                    strokeWidth={resolvedWidth}
                     strokeDasharray={edgeStrokeDasharray(sourceEdgeStyle)}
                     markerStart={markerStart}
                     markerEnd={markerEnd}
                     opacity={opacity}
                   />
+                  {edge.parentId && (
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke="transparent"
+                      strokeWidth={Math.max(resolvedWidth + 10, 14)}
+                      className="cursor-pointer"
+                      onPointerDown={(event) => {
+                        event.stopPropagation()
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        selectEdge(edge.parentId!, edge.childId)
+                      }}
+                    />
+                  )}
                 </g>
               )
             })}
@@ -663,7 +710,30 @@ export default function TreeGraphView({
           overflow-hidden keeps the closed panel from taking any layout space or being focusable. */}
       <div className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${panelOpen ? 'w-72' : 'w-0'}`}>
         <div className="h-full w-72">
-          {panelOpen && (
+          {panelOpen && selectedEdge ? (
+            (() => {
+              const sourceNote = notesById.get(selectedEdge.sourceNoteId)
+              const targetNote = notesById.get(selectedEdge.targetNoteId)
+              const override = sourceNote?.edgeOverrides.find((o) => o.targetNoteId === selectedEdge.targetNoteId) ?? null
+              if (!sourceNote || !targetNote) return null
+              return (
+                <EdgeOverridePanel
+                  sourceTitle={sourceNote.title}
+                  targetTitle={targetNote.title}
+                  width={override?.width ?? null}
+                  color={override?.color ?? null}
+                  fallbackWidth={sourceNote.edgeWidth ?? DEFAULT_EDGE_WIDTH}
+                  fallbackColor={sourceNote.edgeColor ?? EDGE_COLOR_NORMAL}
+                  onChangeWidth={(width) => onChangeEdgeOverride(selectedEdge.sourceNoteId, selectedEdge.targetNoteId, width, override?.color ?? null)}
+                  onChangeColor={(color) => onChangeEdgeOverride(selectedEdge.sourceNoteId, selectedEdge.targetNoteId, override?.width ?? null, color)}
+                  onClose={() => {
+                    setPanelOpen(false)
+                    setSelectedEdge(null)
+                  }}
+                />
+              )
+            })()
+          ) : panelOpen ? (
             <GraphSidePanel
               selected={
                 selectedNodeId === '__root__'
@@ -687,7 +757,7 @@ export default function TreeGraphView({
               rootAppearance={rootAppearance}
               onChangeRootAppearance={onChangeRootAppearance}
             />
-          )}
+          ) : null}
         </div>
       </div>
     </div>

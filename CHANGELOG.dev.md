@@ -18,6 +18,59 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.74
+
+✨ New
+
+- **Per-note edge width/color, plus per-connection style overrides** - after direct live user
+  feedback on v2026.9.73's Glow edge style ("thick and blurry, not elegant"):
+  - **Removed the Glow edge style entirely** (backend enum value retired, not reused; frontend
+    option, rendering, and defs removed) rather than kept around disabled - the user rejected the
+    visual outright, not just declined to use it.
+  - Backend: `Note` gains `EdgeWidth` (double?, clamped 0.5-12px server-side) and `EdgeColor`
+    (hex string, same validation as `Color`) - note-wide stroke width/color for every edge drawn
+    FROM that note, independent of the node's own fill `Color` (explicit user request: line color
+    separately choosable from the node it originates at).
+  - New `NoteEdgeOverride` model/table (composite key `SourceNoteId`+`TargetNoteId`, scoped to
+    `ProjectId`) - a style override for ONE specific connection's width/color only, on top of
+    (not instead of) the note-wide fields above. Covers both a tree edge to a `ChildNote` and a
+    free-view `NoteLink` uniformly, since both are just a (source, target) note pair. New endpoint
+    `PUT /api/projects/{projectId}/notes/{noteId}/edge-overrides/{targetNoteId}`
+    (`UpdateNoteEdgeOverrideRequest`) - both fields null deletes the row instead of storing a
+    no-op override. `NotesController.Delete` explicitly clears rows where the deleted note is
+    either the source or target (NoAction FKs on both sides, same reasoning as `NoteLink`).
+    Migration `AddNoteEdgeWidthColorAndOverrides` for both providers, verified live.
+  - Every edge in both graph views is now individually clickable (a wide invisible hit-area
+    path/line sits under each rendered edge, root-level tree edges excluded since the virtual
+    center has no backing Note) - opens the new `EdgeOverridePanel.tsx` instead of the usual node
+    panel, restyling just that one connection. `NoteAppearanceMenu.tsx` gets matching "Liniendicke"
+    (range slider, 0.5-12px)/"Linienfarbe" (palette picker, reused from the node-color section)
+    controls for the note-wide fields - both made optional props so the root/center node (which
+    has no backing Note and therefore no edgeWidth/edgeColor concept) can omit them entirely
+    rather than showing controls against a value that doesn't exist.
+  - `edgeStyles.tsx`: new `resolveEdgeWidth`/`resolveEdgeColor` (override beats note-wide beats
+    view default) and `EDGE_COLOR_NORMAL`/`EDGE_COLOR_HIGHLIGHT` (exported, replacing the former
+    internal-only marker fill constants). `edgeGradientId`/`edgeGradientStroke`/
+    `edgeGradientDefFor` now key on the edge's actually-resolved color, not just a highlighted
+    boolean, so two edges with identical geometry but different colors (via edgeColor/override)
+    get distinct gradient defs instead of colliding on one.
+  - Found and fixed a real React bug while wiring this up: `setRootAppearance` called
+    `setPreference()` (updates a different component, `PreferencesStateProvider`) from inside its
+    own `setRootAppearanceState` updater callback - React logs "Cannot update a component while
+    rendering a different component" for that, since updater functions must be pure and React can
+    invoke them during a render pass. Fixed by computing the merged value directly instead of
+    relying on the updater form.
+  - Fixed the Gradient preview icon in `NoteAppearanceMenu.tsx`, reported as rendering completely
+    blank - a chain of three SVG masking issues, each confirmed live before being fully fixed: (1)
+    `stopColor="currentColor"` doesn't work on `<stop>` (it isn't a painted element, so it never
+    inherits an ancestor's `color`); (2) switching to a fixed `stopColor="black"` with varying
+    `stopOpacity` still rendered blank, since an SVG `<mask>` defaults to *luminance* masking
+    (white = visible, black = invisible) and a black stop contributes ~0 luminance regardless of
+    its own opacity; (3) even after switching to `stopColor="white"`, the `<mask>`'s own region
+    (default `maskUnits="objectBoundingBox"`) degenerates to zero on a perfectly horizontal
+    `<line>`'s zero-height bounding box, clipping the line out entirely - fixed with an explicit
+    `maskUnits="userSpaceOnUse"` region matching the icon's own viewBox.
+
 ## v2026.9.73
 
 ✨ New
@@ -553,6 +606,63 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.9.74
+
+✨ Neu
+
+- **Liniendicke/-farbe pro Notiz, plus individuelle Pro-Kante-Überschreibungen** - nach direktem
+  Live-Nutzer-Feedback zum Glow-Linienstil aus v2026.9.73 ("dick und verschwommen, nicht schick"):
+  - **Glow-Linienstil komplett entfernt** (Backend-Enum-Wert stillgelegt, nicht wiederverwendet;
+    Frontend-Option, Rendering und Defs entfernt), statt ihn deaktiviert liegen zu lassen - der
+    Nutzer hat den Look grundsätzlich abgelehnt, nicht nur nicht genutzt.
+  - Backend: `Note` erhält `EdgeWidth` (double?, serverseitig auf 0,5-12px begrenzt) und
+    `EdgeColor` (Hex-String, gleiche Validierung wie `Color`) - Notiz-weite Linienstärke/-farbe für
+    jede von dieser Notiz ausgehende Kante, unabhängig von der eigenen Füllfarbe `Color` (expliziter
+    Nutzerwunsch: Linienfarbe getrennt vom Ursprungsknoten wählbar).
+  - Neues Modell/Tabelle `NoteEdgeOverride` (zusammengesetzter Schlüssel `SourceNoteId`+
+    `TargetNoteId`, an `ProjectId` gebunden) - ein Stil-Override nur für Dicke/Farbe EINER
+    bestimmten Verbindung, zusätzlich zu (nicht anstelle von) den Notiz-weiten Feldern oben. Deckt
+    sowohl eine Baum-Kante zu einer `ChildNote` als auch eine freie `NoteLink`-Verknüpfung
+    einheitlich ab, da beide einfach ein (Quelle, Ziel)-Notiz-Paar sind. Neuer Endpunkt
+    `PUT /api/projects/{projectId}/notes/{noteId}/edge-overrides/{targetNoteId}`
+    (`UpdateNoteEdgeOverrideRequest`) - beide Felder `null` löscht die Zeile, statt einen
+    wirkungslosen Override zu speichern. `NotesController.Delete` räumt explizit Zeilen auf, in
+    denen die gelöschte Notiz Quelle oder Ziel ist (NoAction-FKs auf beiden Seiten, gleiche
+    Begründung wie bei `NoteLink`). Migration `AddNoteEdgeWidthColorAndOverrides` für beide
+    Provider, live verifiziert.
+  - Jede Kante in beiden Graph-Ansichten ist jetzt einzeln anklickbar (eine breite, unsichtbare
+    Trefferfläche liegt unter jeder gerenderten Kante, Root-Baum-Kanten ausgenommen, da der
+    virtuelle Mittelpunkt keine echte Notiz ist) - öffnet das neue `EdgeOverridePanel.tsx` statt
+    des üblichen Knoten-Panels, stylt nur diese eine Verbindung. `NoteAppearanceMenu.tsx` erhält
+    passende „Liniendicke" (Schieberegler, 0,5-12px)/„Linienfarbe" (Palette, wiederverwendet aus
+    dem Knotenfarbe-Bereich) Controls für die Notiz-weiten Felder - beide als optionale Props, damit
+    der Root-/Mittelpunkt-Knoten (ohne echte Notiz, also ohne edgeWidth/edgeColor-Konzept) sie
+    komplett auslassen kann, statt Controls gegen einen nicht existierenden Wert anzuzeigen.
+  - `edgeStyles.tsx`: neue `resolveEdgeWidth`/`resolveEdgeColor` (Override schlägt Notiz-weit
+    schlägt Ansichts-Standard) und `EDGE_COLOR_NORMAL`/`EDGE_COLOR_HIGHLIGHT` (jetzt exportiert,
+    ersetzen die vorherigen internen Marker-Füllfarben-Konstanten). `edgeGradientId`/
+    `edgeGradientStroke`/`edgeGradientDefFor` schlüsseln jetzt auf die tatsächlich aufgelöste Farbe
+    der Kante, nicht nur ein Highlighted-Boolean, damit zwei Kanten mit identischer Geometrie aber
+    unterschiedlicher Farbe (via edgeColor/Override) getrennte Gradient-Defs bekommen statt zu
+    kollidieren.
+  - Dabei einen echten React-Bug gefunden und behoben: `setRootAppearance` rief `setPreference()`
+    (aktualisiert eine andere Komponente, `PreferencesStateProvider`) innerhalb seines eigenen
+    `setRootAppearanceState`-Updater-Callbacks auf - React meldet dafür „Cannot update a component
+    while rendering a different component", da Updater-Funktionen rein sein müssen und React sie
+    während eines Render-Durchlaufs aufrufen kann. Behoben, indem der zusammengeführte Wert direkt
+    berechnet wird, statt die Updater-Form zu nutzen.
+  - Das Verlauf-Vorschau-Icon in `NoteAppearanceMenu.tsx` repariert, das als komplett leer gemeldet
+    wurde - eine Kette aus drei SVG-Maskierungsproblemen, jedes live bestätigt bevor es vollständig
+    behoben war: (1) `stopColor="currentColor"` funktioniert bei `<stop>` nicht (kein gemaltes
+    Element, erbt daher nie die `color` eines Vorfahren); (2) Umstellung auf ein festes
+    `stopColor="black"` mit variabler `stopOpacity` blieb weiterhin leer, da eine SVG-`<mask>`
+    standardmäßig Luminanz-Maskierung nutzt (weiß = sichtbar, schwarz = unsichtbar) und ein
+    schwarzer Stop unabhängig von seiner Opacity ~0 Luminanz beiträgt; (3) selbst nach Umstellung
+    auf `stopColor="white"` degeneriert die eigene Region der `<mask>` (Standard
+    `maskUnits="objectBoundingBox"`) bei einer exakt horizontalen `<line>` mit Bounding-Box-Höhe
+    null zu einer Nullfläche, wodurch die Linie komplett ausgeblendet wird - behoben mit einer
+    expliziten `maskUnits="userSpaceOnUse"`-Region passend zum eigenen viewBox des Icons.
 
 ## v2026.9.73
 

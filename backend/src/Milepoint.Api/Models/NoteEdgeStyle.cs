@@ -17,9 +17,11 @@ public enum NoteEdgeStyle
     // Continuous line whose opacity fades toward transparent at both endpoints and is fully
     // opaque at its midpoint (an SVG linearGradient on the stroke) - a softer, more polished look
     // than a flat-opacity line, applied to the line only, never the arrowhead marker.
-    Gradient,
-    // Continuous line with a soft outer glow (an SVG blur filter behind the stroke) instead of a
-    // flat single-width line - the other "make it look more polished" option offered alongside
-    // Gradient, for the user to pick whichever reads better rather than only building one.
-    Glow
+    Gradient
+    // A "Glow" option (blurred halo behind the line) was tried and removed again per explicit
+    // user feedback ("den Leuchteneffekt... kannst Du bitte rausnehmen") - deliberately not kept
+    // around as a disabled/hidden option, since the user rejected the visual outright rather than
+    // just not using it. Its enum value (4, after Gradient) is retired, not reused - no other
+    // value moves, so this isn't a breaking change for any Solid/Dashed/Dotted/Gradient value
+    // already stored.
 }

@@ -3,19 +3,31 @@ import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from './types'
 
 export const getNotes = (projectId: string) => apiFetch<Note[]>(`/projects/${projectId}/notes`)
 
+// Every field below (except title/content/parentNoteId) has NO tri-state flag on the backend (see
+// UpdateNoteRequest's doc comment) - every PUT simply applies them as given, null clearing back to
+// "use the default". That means EVERY call to updateNote (including plain title/content saves)
+// must pass the note's current appearance fields explicitly, or they will be silently reset to
+// null/default - exactly the same trap parentNoteId has, just without a flag to opt out of it.
+// Callers must always pass the note's current values through, not just when actually changing them.
+export interface NoteAppearanceFields {
+  color: string | null
+  shape: NoteShape | null
+  edgeStyle: NoteEdgeStyle | null
+  edgeArrow: NoteEdgeArrow | null
+  edgeWidth: number | null
+  edgeColor: string | null
+}
+
 export const createNote = (
   projectId: string,
   title: string,
   content: string,
-  parentNoteId: string | null = null,
-  color: string | null = null,
-  shape: NoteShape | null = null,
-  edgeStyle: NoteEdgeStyle | null = null,
-  edgeArrow: NoteEdgeArrow | null = null,
+  parentNoteId: string | null,
+  appearance: NoteAppearanceFields,
 ) =>
   apiFetch<Note>(`/projects/${projectId}/notes`, {
     method: 'POST',
-    body: JSON.stringify({ title, content, parentNoteId, color, shape, edgeStyle, edgeArrow }),
+    body: JSON.stringify({ title, content, parentNoteId, ...appearance }),
   })
 
 // setParentNoteId tells the backend whether this call should touch the parent/child hierarchy at
@@ -24,23 +36,12 @@ export const createNote = (
 // root note) only when actually reassigning the hierarchy - e.g. from the radial tree view's
 // drag-and-drop. Without this distinction, ParentNoteId alone can't tell "leave unchanged" apart
 // from "clear it", since null is also its own valid value.
-//
-// color/shape/edgeStyle/edgeArrow have NO such tri-state flag on the backend (see
-// UpdateNoteRequest's doc comment) - every PUT simply applies them as given, null clearing back to
-// "use the default". That means EVERY call to updateNote (including plain title/content saves)
-// must pass the note's current color/shape/edgeStyle/edgeArrow explicitly, or they will be
-// silently reset to null/default - exactly the same trap parentNoteId has, just without a flag to
-// opt out of it. Callers must always pass the note's current values through, not just when
-// actually changing them.
 export const updateNote = (
   projectId: string,
   noteId: string,
   title: string,
   content: string,
-  color: string | null,
-  shape: NoteShape | null,
-  edgeStyle: NoteEdgeStyle | null,
-  edgeArrow: NoteEdgeArrow | null,
+  appearance: NoteAppearanceFields,
   parentNoteId?: { setParentNoteId: true; parentNoteId: string | null },
 ) =>
   apiFetch<Note>(`/projects/${projectId}/notes/${noteId}`, {
@@ -48,10 +49,7 @@ export const updateNote = (
     body: JSON.stringify({
       title,
       content,
-      color,
-      shape,
-      edgeStyle,
-      edgeArrow,
+      ...appearance,
       parentNoteId: parentNoteId?.parentNoteId ?? null,
       setParentNoteId: parentNoteId?.setParentNoteId ?? false,
     }),
@@ -69,4 +67,16 @@ export const updateNotePosition = (projectId: string, noteId: string, x: number,
   apiFetch<void>(`/projects/${projectId}/notes/${noteId}/position`, {
     method: 'PUT',
     body: JSON.stringify({ x, y }),
+  })
+
+// Creates/replaces (width and color both non-null) or deletes (both null) the style override for
+// one specific connection FROM sourceNoteId TO targetNoteId - see the backend's NoteEdgeOverride
+// doc comment for why this is a separate concept from the source note's own edgeWidth/edgeColor.
+// Works identically for a tree edge (targetNoteId = a ChildNote) and a free-view cross-link
+// (targetNoteId = an OutgoingLink target) - the connection is identified purely by the note pair,
+// not by which kind of connection it is.
+export const setNoteEdgeOverride = (projectId: string, sourceNoteId: string, targetNoteId: string, width: number | null, color: string | null) =>
+  apiFetch<void>(`/projects/${projectId}/notes/${sourceNoteId}/edge-overrides/${targetNoteId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ width, color }),
   })

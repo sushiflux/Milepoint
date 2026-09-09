@@ -1,10 +1,43 @@
-import type { NoteEdgeArrow, NoteEdgeStyle } from '../../api/types'
+import type { NoteEdgeArrow, NoteEdgeOverride, NoteEdgeStyle } from '../../api/types'
 
 // Shared edge-style/arrowhead rendering for both graph views (TreeGraphView's four static tree
 // layouts and NoteGraphView's free physics layout). An edge is styled by its SOURCE note's
-// edgeStyle/edgeArrow (the parent, for tree edges; the outgoingLinks owner, for free cross-links)
-// - never the target's, and never a per-connection setting - see Note.edgeStyle/edgeArrow's doc
-// comments in api/types.ts.
+// edgeStyle/edgeArrow/edgeWidth/edgeColor (the parent, for tree edges; the outgoingLinks owner,
+// for free cross-links) - never the target's - UNLESS the specific connection has its own
+// NoteEdgeOverride, which wins for width/color on that one connection only (edgeStyle/edgeArrow
+// stay note-wide only, no per-connection override for those - see resolveEdgeWidth/
+// resolveEdgeColor below). See Note.edgeStyle/edgeArrow/edgeWidth/edgeColor's doc comments in
+// api/types.ts.
+
+/** The default stroke width (px) an edge renders at when neither the source note's own edgeWidth
+ *  nor a per-connection override specifies one. */
+export const DEFAULT_EDGE_WIDTH = 1
+
+/**
+ * Effective stroke width for one connection: a per-connection NoteEdgeOverride's width wins if
+ * present, else the source note's own edgeWidth, else DEFAULT_EDGE_WIDTH - then bumped for the
+ * hover/highlight state the same way every edge already was before per-note/per-connection width
+ * existed (+0.5px), so a highlighted edge still reads as "thicker/emphasized" relative to its own
+ * base width rather than always jumping to a fixed 1.5px regardless of how thick it already was.
+ */
+// Same reasoning as clipPointToBoxEdge below.
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolveEdgeWidth(sourceEdgeWidth: number | null | undefined, override: NoteEdgeOverride | null | undefined, highlighted: boolean): number {
+  const base = override?.width ?? sourceEdgeWidth ?? DEFAULT_EDGE_WIDTH
+  return highlighted ? base + 0.5 : base
+}
+
+/** Effective stroke color for one connection, or undefined to fall back to the normal/highlighted
+ *  class-based color (stroke-slate-400/stroke-brand-primary) - a per-connection override's color
+ *  wins if present, else the source note's own edgeColor, else undefined (class-based default).
+ *  Gradient (see edgeGradientStroke below) still takes priority over this when active, since a
+ *  gradient IS a color choice in its own right (a resolved base color, faded via opacity) - the
+ *  caller should only apply this as a `stroke` style when edgeGradientStroke returned undefined. */
+// Same reasoning as clipPointToBoxEdge below.
+// eslint-disable-next-line react-refresh/only-export-components
+export function resolveEdgeColor(sourceEdgeColor: string | null | undefined, override: NoteEdgeOverride | null | undefined): string | undefined {
+  return override?.color ?? sourceEdgeColor ?? undefined
+}
 
 // Extra gap (px, in world/SVG units) left between a box's actual edge and where the line/marker
 // tip is drawn - a line ending exactly flush with the box border reads as touching/overlapping it
@@ -122,21 +155,23 @@ export function clipPointToBoxEdge(from: { x: number; y: number }, boxCenter: { 
   return { x: boxCenter.x + best.x * halfW, y: boxCenter.y + best.y * halfH }
 }
 
-// Marker/gradient/glow color decision: SVG markers/gradients can reference the stroking element's
-// live color via `context-stroke`/`context-fill`, but that's only supported in Chromium-based
-// browsers today (not Firefox) - too unreliable for a shape that must render correctly in every
-// browser Milepoint targets. Instead, each edge state (normal vs. hovered/highlighted) gets its
-// own pre-defined fixed color, matching the two stroke colors edges already use (stroke-slate-400/
-// 500 normal, stroke-brand-primary/-light highlighted - see the edges.map blocks in
-// NoteGraphView.tsx/TreeGraphView.tsx). Edges never use an arbitrary per-note color, only ever one
-// of these two fixed states, which is what keeps the Gradient/Glow defs below a small FIXED set
-// (one pair per state) rather than something generated per note/edge.
-const MARKER_FILL_NORMAL = '#94a3b8' // slate-400 - matches stroke-slate-400 used for non-highlighted edges
-const MARKER_FILL_HIGHLIGHT = '#6366f1' // brand-primary - matches stroke-brand-primary used for highlighted edges
+// Marker color decision: SVG markers can reference the stroking element's live color via
+// `context-stroke`, but that's only supported in Chromium-based browsers today (not Firefox) -
+// too unreliable for a marker that must render correctly in every browser Milepoint targets.
+// Instead, each edge state (normal vs. hovered/highlighted) gets its own pre-defined fixed marker
+// fill, matching the two default stroke colors edges use when neither a note's own edgeColor nor
+// a per-connection override specifies one (stroke-slate-400/500 normal, stroke-brand-primary/
+// -light highlighted - see the edges.map blocks in NoteGraphView.tsx/TreeGraphView.tsx). Exported
+// so callers can pass these as the fallback color into resolveEdgeColor/edgeGradientStroke - a
+// custom edgeColor/override only changes the LINE's color, never the arrowhead marker's (the
+// marker stays this small fixed pair regardless), so a Gradient edge still needs one of these two
+// as its own fallback when no custom color is set.
+export const EDGE_COLOR_NORMAL = '#94a3b8' // slate-400
+export const EDGE_COLOR_HIGHLIGHT = '#6366f1' // brand-primary
 
-/** strokeDasharray for a given edge style - undefined (omit the attribute) for Solid/Gradient/
- *  Glow/null (Gradient and Glow are both otherwise-continuous lines - see edgeGradientStroke/
- *  EdgeGradientDefs/EdgeGlowFilterDefs below for what actually distinguishes them). */
+/** strokeDasharray for a given edge style - undefined (omit the attribute) for Solid/Gradient/null
+ *  (Gradient is also an otherwise-continuous line - see edgeGradientStroke/edgeGradientDefFor
+ *  below for what actually distinguishes it). */
 // Same reasoning as clipPointToBoxEdge above.
 // eslint-disable-next-line react-refresh/only-export-components
 export function edgeStrokeDasharray(edgeStyle: NoteEdgeStyle | null | undefined): string | undefined {
@@ -150,107 +185,73 @@ export function edgeStrokeDasharray(edgeStyle: NoteEdgeStyle | null | undefined)
   }
 }
 
-// Gradient/Glow edge styles ("edler machen" - two alternative ways to make a line read as more
-// polished than a flat single-opacity/single-width stroke, offered as sibling options rather than
-// picking one for the user): Gradient fades the line's own opacity toward transparent at both
-// endpoints (full opacity at the midpoint) via an SVG linearGradient on the stroke; Glow keeps a
-// flat-opacity core stroke but adds a soft blurred halo behind it via an SVG blur filter. Both
-// leave the arrowhead marker itself untouched (fixed opaque fill, same as Solid/Dashed/Dotted) -
-// only the line changes. Edges only ever use one of two fixed colors (MARKER_FILL_NORMAL/
-// _HIGHLIGHT above, matching the stroke-slate-400/stroke-brand-primary classes every edge already
-// picks between) rather than an arbitrary per-note color, so the color side of this only ever
-// needs two fixed values, not one generated per note/edge - see edgeGradientId's doc comment for
-// why the gradient GEOMETRY still has to be generated per edge despite that.
-const EDGE_GLOW_FILTER_ID_NORMAL = 'note-edge-glow-normal'
-const EDGE_GLOW_FILTER_ID_HIGHLIGHT = 'note-edge-glow-highlight'
+// Gradient edge style ("edler machen" as an alternative to a flat single-opacity stroke): fades
+// the line's own opacity toward transparent at both endpoints, full opacity at the midpoint, via
+// an SVG linearGradient on the stroke. Leaves the arrowhead marker itself untouched (fixed opaque
+// fill, same as Solid/Dashed/Dotted) - only the line changes. A "Glow" option (blurred halo behind
+// the line) was tried and removed again per explicit user feedback rejecting the visual - see
+// NoteEdgeStyle.cs's doc comment.
 
 /**
- * Id for a <linearGradient> that must be defined specifically for one edge's actual endpoints
- * (see the returned id's doc usage in edgeGradientDefFor below) - unlike the marker/glow-filter
- * ids above, this can't be one small fixed set shared by every edge. SVG's default
- * gradientUnits="objectBoundingBox" maps a gradient's x1/y1..x2/y2 onto the referencing element's
- * bounding box at a FIXED angle (0,0)->(1,0) here is always literally left-to-right across that
- * box, regardless of the actual line's angle - correct only for a perfectly horizontal line. Any
- * edge running at an angle (which is most of them, in both the free-form physics layout and the
- * curved tree layouts) would then have its fade-to-transparent points sitting at the bounding
- * box's left/right edges instead of at the line's own start/end points, visibly skewing the fade.
- * gradientUnits="userSpaceOnUse" with the edge's own real x1/y1/x2/y2 coordinates is the only way
- * to keep the fade aligned with the actual line at every angle - which means a distinct gradient
- * definition per edge (parameterized by its endpoints), not a small reusable set like the marker
- * defs. Deterministic (endpoints + state, not e.g. Math.random()) so the same edge geometry always
- * maps to the same id, letting multiple edges that happen to share exact endpoints share one def
- * too rather than each rendering its own duplicate.
+ * Id for a <linearGradient> that must be defined specifically for one edge's actual endpoints AND
+ * resolved color (see the returned id's doc usage in edgeGradientDefFor below) - unlike the
+ * marker/glow-filter ids previously used here, this can't be one small fixed set shared by every
+ * edge. SVG's default gradientUnits="objectBoundingBox" maps a gradient's x1/y1..x2/y2 onto the
+ * referencing element's bounding box at a FIXED angle (0,0)->(1,0) here is always literally
+ * left-to-right across that box, regardless of the actual line's angle - correct only for a
+ * perfectly horizontal line. Any edge running at an angle (which is most of them, in both the
+ * free-form physics layout and the curved tree layouts) would then have its fade-to-transparent
+ * points sitting at the bounding box's left/right edges instead of at the line's own start/end
+ * points, visibly skewing the fade. gradientUnits="userSpaceOnUse" with the edge's own real
+ * x1/y1/x2/y2 coordinates is the only way to keep the fade aligned with the actual line at every
+ * angle - which means a distinct gradient definition per edge (parameterized by its endpoints),
+ * not a small reusable set like the marker defs. The resolved color is now also part of the key
+ * (not just a highlighted boolean) since Note.edgeColor/NoteEdgeOverride.color let two edges with
+ * identical geometry end up wanting different gradient colors. Deterministic (endpoints + color,
+ * not e.g. Math.random()) so the same edge geometry+color always maps to the same id, letting
+ * multiple edges that happen to share exact endpoints and color share one def too rather than
+ * each rendering its own duplicate.
  */
 // Same reasoning as clipPointToBoxEdge above.
 // eslint-disable-next-line react-refresh/only-export-components
-export function edgeGradientId(x1: number, y1: number, x2: number, y2: number, highlighted: boolean): string {
-  const key = `${x1.toFixed(1)}_${y1.toFixed(1)}_${x2.toFixed(1)}_${y2.toFixed(1)}_${highlighted ? 'h' : 'n'}`
-  return `note-edge-gradient-${key.replace(/[.-]/g, (c) => (c === '-' ? 'm' : '_'))}`
+export function edgeGradientId(x1: number, y1: number, x2: number, y2: number, color: string): string {
+  const key = `${x1.toFixed(1)}_${y1.toFixed(1)}_${x2.toFixed(1)}_${y2.toFixed(1)}_${color}`
+  return `note-edge-gradient-${key.replace(/[^a-zA-Z0-9]/g, (c) => `_${c.charCodeAt(0)}_`)}`
 }
 
-/** stroke color/url() to apply for a given edge style + highlighted state - Gradient uses a
- *  gradient url() instead of the plain currentColor/class-based stroke every other style uses, so
- *  the caller must apply this as an inline `stroke` style (overriding the stroke-slate-400/
- *  stroke-brand-primary Tailwind class it'd otherwise use) whenever it's non-undefined. Requires
- *  the caller to also render the matching <linearGradient> from edgeGradientDefFor with the same
- *  x1/y1/x2/y2/highlighted arguments - see its doc comment. */
+/** stroke color/url() to apply for a given edge style - Gradient uses a gradient url() instead of
+ *  the plain currentColor/class-based stroke every other style uses, so the caller must apply
+ *  this as an inline `stroke` style (overriding the stroke-slate-400/stroke-brand-primary
+ *  Tailwind class it'd otherwise use) whenever it's non-undefined. `resolvedColor` is this edge's
+ *  actual color (from resolveEdgeColor, or one of the normal/highlighted class-based fallbacks if
+ *  that returned undefined) - the gradient always needs a concrete color to fade, it can't fall
+ *  back to a CSS class the way a flat stroke can. Requires the caller to also render the matching
+ *  <linearGradient> from edgeGradientDefFor with the same x1/y1/x2/y2/resolvedColor arguments -
+ *  see its doc comment. */
 // Same reasoning as clipPointToBoxEdge above.
 // eslint-disable-next-line react-refresh/only-export-components
-export function edgeGradientStroke(edgeStyle: NoteEdgeStyle | null | undefined, x1: number, y1: number, x2: number, y2: number, highlighted: boolean): string | undefined {
+export function edgeGradientStroke(edgeStyle: NoteEdgeStyle | null | undefined, x1: number, y1: number, x2: number, y2: number, resolvedColor: string): string | undefined {
   if (edgeStyle !== 'Gradient') return undefined
-  return `url(#${edgeGradientId(x1, y1, x2, y2, highlighted)})`
+  return `url(#${edgeGradientId(x1, y1, x2, y2, resolvedColor)})`
 }
 
 /** The actual <linearGradient> element for one edge's Gradient style, or null when this edge
  *  isn't using Gradient - render this INLINE right next to the edge's own <path>/<line> (each
- *  edge renders its own, since the geometry is edge-specific - see edgeGradientId's doc comment),
- *  wrapped in a <defs> by the caller (SVG requires gradients to live in a <defs>, but each view
- *  already has its own map/loop over edges, so a single shared <defs> further up collecting one
- *  per edge is simpler than restructuring each view's loop to emit two sibling elements). */
+ *  edge renders its own, since the geometry+color is edge-specific - see edgeGradientId's doc
+ *  comment), wrapped in a <defs> by the caller (SVG requires gradients to live in a <defs>, but
+ *  each view already has its own map/loop over edges, so a single shared <defs> further up
+ *  collecting one per edge is simpler than restructuring each view's loop to emit two sibling
+ *  elements). */
 // Same reasoning as clipPointToBoxEdge above.
 // eslint-disable-next-line react-refresh/only-export-components
-export function edgeGradientDefFor(edgeStyle: NoteEdgeStyle | null | undefined, x1: number, y1: number, x2: number, y2: number, highlighted: boolean) {
+export function edgeGradientDefFor(edgeStyle: NoteEdgeStyle | null | undefined, x1: number, y1: number, x2: number, y2: number, resolvedColor: string) {
   if (edgeStyle !== 'Gradient') return null
-  const color = highlighted ? MARKER_FILL_HIGHLIGHT : MARKER_FILL_NORMAL
   return (
-    <linearGradient key={edgeGradientId(x1, y1, x2, y2, highlighted)} id={edgeGradientId(x1, y1, x2, y2, highlighted)} gradientUnits="userSpaceOnUse" x1={x1} y1={y1} x2={x2} y2={y2}>
-      <stop offset="0%" stopColor={color} stopOpacity="0" />
-      <stop offset="50%" stopColor={color} stopOpacity="1" />
-      <stop offset="100%" stopColor={color} stopOpacity="0" />
+    <linearGradient key={edgeGradientId(x1, y1, x2, y2, resolvedColor)} id={edgeGradientId(x1, y1, x2, y2, resolvedColor)} gradientUnits="userSpaceOnUse" x1={x1} y1={y1} x2={x2} y2={y2}>
+      <stop offset="0%" stopColor={resolvedColor} stopOpacity="0" />
+      <stop offset="50%" stopColor={resolvedColor} stopOpacity="1" />
+      <stop offset="100%" stopColor={resolvedColor} stopOpacity="0" />
     </linearGradient>
-  )
-}
-
-/** filter url() to apply for a given edge style + highlighted state, or undefined for every other
- *  style - applied as the SVG `filter` attribute alongside the line's normal stroke/class. Unlike
- *  the gradient above, the blur filter has no directional geometry of its own (feGaussianBlur is
- *  isotropic - same blur radius in every direction), so it doesn't have the objectBoundingBox
- *  angle problem and a small fixed set of defs (one pair, see EdgeGlowFilterDefs) is enough. */
-// Same reasoning as clipPointToBoxEdge above.
-// eslint-disable-next-line react-refresh/only-export-components
-export function edgeGlowFilter(edgeStyle: NoteEdgeStyle | null | undefined, highlighted: boolean): string | undefined {
-  if (edgeStyle !== 'Glow') return undefined
-  return `url(#${highlighted ? EDGE_GLOW_FILTER_ID_HIGHLIGHT : EDGE_GLOW_FILTER_ID_NORMAL})`
-}
-
-/** Shared <defs> for the Glow edge style's blur filter - render once per SVG alongside
- *  EdgeMarkerDefs. (Gradient's defs are NOT here - see edgeGradientDefFor's doc comment for why
- *  those have to be generated per edge instead of being a small fixed set like this one.) */
-export function EdgeGlowFilterDefs() {
-  return (
-    <defs>
-      {/* filterUnits="userSpaceOnUse" with a fixed padding, not the default objectBoundingBox -
-          a short, steep edge has a tiny bounding box, and a percentage-based filter region would
-          clip the blur right at the line's own bounds instead of letting it spread visibly beyond
-          them. x/y/width/height give a generous fixed pixel margin around the filtered element
-          instead. */}
-      <filter id={EDGE_GLOW_FILTER_ID_NORMAL} x="-50%" y="-50%" width="200%" height="200%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" />
-      </filter>
-      <filter id={EDGE_GLOW_FILTER_ID_HIGHLIGHT} x="-50%" y="-50%" width="200%" height="200%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="2" />
-      </filter>
-    </defs>
   )
 }
 
@@ -302,16 +303,16 @@ export function EdgeMarkerDefs() {
   return (
     <defs>
       <marker id={EDGE_MARKER_ID_NORMAL_END} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill={MARKER_FILL_NORMAL} />
+        <path d="M 0 0 L 10 5 L 0 10 z" fill={EDGE_COLOR_NORMAL} />
       </marker>
       <marker id={EDGE_MARKER_ID_NORMAL_START} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill={MARKER_FILL_NORMAL} />
+        <path d="M 0 0 L 10 5 L 0 10 z" fill={EDGE_COLOR_NORMAL} />
       </marker>
       <marker id={EDGE_MARKER_ID_HIGHLIGHT_END} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill={MARKER_FILL_HIGHLIGHT} />
+        <path d="M 0 0 L 10 5 L 0 10 z" fill={EDGE_COLOR_HIGHLIGHT} />
       </marker>
       <marker id={EDGE_MARKER_ID_HIGHLIGHT_START} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill={MARKER_FILL_HIGHLIGHT} />
+        <path d="M 0 0 L 10 5 L 0 10 z" fill={EDGE_COLOR_HIGHLIGHT} />
       </marker>
     </defs>
   )

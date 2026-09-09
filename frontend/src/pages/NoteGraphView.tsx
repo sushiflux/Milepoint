@@ -5,15 +5,19 @@ import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types
 import { NoteNodeVisual, measureNodeBox } from './notesGraph/NoteNodeShape'
 import {
   EdgeMarkerDefs,
-  EdgeGlowFilterDefs,
   edgeMarkerRefs,
   edgeStrokeDasharray,
   edgeGradientStroke,
   edgeGradientDefFor,
-  edgeGlowFilter,
   clipPointToBoxEdge,
+  resolveEdgeWidth,
+  resolveEdgeColor,
+  EDGE_COLOR_NORMAL,
+  EDGE_COLOR_HIGHLIGHT,
+  DEFAULT_EDGE_WIDTH,
 } from './notesGraph/edgeStyles'
 import GraphSidePanel from './notesGraph/GraphSidePanel'
+import EdgeOverridePanel from './notesGraph/EdgeOverridePanel'
 import type { GraphLayoutId } from './notesGraph/stylePresets'
 
 interface Props {
@@ -24,11 +28,19 @@ interface Props {
   onConnectNotes: (sourceId: string, targetId: string) => Promise<void>
   onChangeAppearance: (
     noteId: string,
-    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+    patch: {
+      color?: string | null
+      shape?: NoteShape | null
+      edgeStyle?: NoteEdgeStyle | null
+      edgeArrow?: NoteEdgeArrow | null
+      edgeWidth?: number | null
+      edgeColor?: string | null
+    },
   ) => Promise<void>
   onChangeLayout: (layout: GraphLayoutId) => void
   onApplyPreset: (presetId: string) => Promise<void>
   applyingPreset: boolean
+  onChangeEdgeOverride: (sourceNoteId: string, targetNoteId: string, width: number | null, color: string | null) => Promise<void>
 }
 
 interface Point {
@@ -186,6 +198,7 @@ export default function NoteGraphView({
   onChangeLayout,
   onApplyPreset,
   applyingPreset,
+  onChangeEdgeOverride,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -243,6 +256,9 @@ export default function NoteGraphView({
   // oder null (globale Einstellungen).
   const [panelOpen, setPanelOpen] = useState(false)
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
+  // A clicked EDGE (not node) opens EdgeOverridePanel instead of GraphSidePanel - mutually
+  // exclusive with selectedNoteId, same pattern as TreeGraphView.tsx.
+  const [selectedEdge, setSelectedEdge] = useState<{ sourceNoteId: string; targetNoteId: string } | null>(null)
   const [createNoteAt, setCreateNoteAt] = useState<{ screen: Point; world: Point } | null>(null)
   const [newNodeTitle, setNewNodeTitle] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -448,13 +464,27 @@ export default function NoteGraphView({
   }
 
   function selectNote(noteId: string) {
+    setSelectedEdge(null)
     setSelectedNoteId(noteId)
+    setPanelOpen(true)
+  }
+
+  function selectEdge(sourceNoteId: string, targetNoteId: string) {
+    setSelectedNoteId(null)
+    setSelectedEdge({ sourceNoteId, targetNoteId })
     setPanelOpen(true)
   }
 
   async function changeNodeAppearance(
     noteId: string,
-    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+    patch: {
+      color?: string | null
+      shape?: NoteShape | null
+      edgeStyle?: NoteEdgeStyle | null
+      edgeArrow?: NoteEdgeArrow | null
+      edgeWidth?: number | null
+      edgeColor?: string | null
+    },
   ) {
     try {
       await onChangeAppearance(noteId, patch)
@@ -470,6 +500,7 @@ export default function NoteGraphView({
     // dasselbe Muster) - es gibt keinen permanent sichtbaren "globalen" Panel-Zustand mehr.
     setPanelOpen(false)
     setSelectedNoteId(null)
+    setSelectedEdge(null)
     if (connectMode) {
       setConnectMode(false)
       setConnectFirstId(null)
@@ -755,10 +786,9 @@ export default function NoteGraphView({
           >
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
             <EdgeMarkerDefs />
-            <EdgeGlowFilterDefs />
             {/* Per-edge Gradient <linearGradient> defs, collected in one place - see
                 edgeGradientDefFor's doc comment for why each Gradient-styled edge needs its own
-                geometry-specific def rather than a small fixed set like EdgeGlowFilterDefs. Same
+                geometry+color-specific def rather than a small fixed set like EdgeMarkerDefs. Same
                 ref-read exception as the edges.map() block below - see its comment. */}
             <defs>
               {/* eslint-disable-next-line react-hooks/refs */}
@@ -773,9 +803,9 @@ export default function NoteGraphView({
                 const p1 = clipPointToBoxEdge(nb, na, boxA.width, boxA.height)
                 const p2 = clipPointToBoxEdge(na, nb, boxB.width, boxB.height)
                 const highlighted = hoveredId !== null && (a === hoveredId || b === hoveredId)
-                return (
-                  <g key={`${a}-${b}`}>{edgeGradientDefFor(sourceNote.edgeStyle, p1.x, p1.y, p2.x, p2.y, highlighted)}</g>
-                )
+                const override = sourceNote.edgeOverrides.find((o) => o.targetNoteId === b)
+                const resolvedColor = resolveEdgeColor(sourceNote.edgeColor, override) ?? (highlighted ? EDGE_COLOR_HIGHLIGHT : EDGE_COLOR_NORMAL)
+                return <g key={`${a}-${b}`}>{edgeGradientDefFor(sourceNote.edgeStyle, p1.x, p1.y, p2.x, p2.y, resolvedColor)}</g>
               })}
             </defs>
             {/* positionsRef intentionally holds the live physics-simulation state outside of
@@ -785,7 +815,10 @@ export default function NoteGraphView({
                 update + reconciliation per simulation tick, which would noticeably hurt the
                 drag/physics performance this view depends on - so these ref reads during render
                 are a deliberate, understood exception, not an oversight the rule is correctly
-                catching elsewhere. */}
+                catching elsewhere. Each edge is also wrapped in an invisible wider hit-area line +
+                click handler so a single connection can be clicked to open EdgeOverridePanel,
+                independent of clicking either endpoint's node - see TreeGraphView.tsx's matching
+                comment. */}
             {/* eslint-disable-next-line react-hooks/refs */}
             {edges.map(([a, b]) => {
               const na = positionsRef.current.get(a)
@@ -805,35 +838,49 @@ export default function NoteGraphView({
               const boxB = measureNodeBox(notesById.get(b)?.title ?? '', notesById.get(b)?.shape ?? null)
               const p1 = clipPointToBoxEdge(nb, na, boxA.width, boxA.height)
               const p2 = clipPointToBoxEdge(na, nb, boxB.width, boxB.height)
-              // Gradient overrides the plain stroke-slate-400/stroke-brand-primary class with an
-              // inline url() stroke (see edgeGradientStroke's doc comment) - only the className is
-              // dropped when active, everything else (width/dasharray/markers/opacity) stays the
-              // same.
-              const gradientStroke = edgeGradientStroke(sourceNote?.edgeStyle, p1.x, p1.y, p2.x, p2.y, highlighted)
-              const glowFilter = edgeGlowFilter(sourceNote?.edgeStyle, highlighted)
+              const override = sourceNote?.edgeOverrides.find((o) => o.targetNoteId === b)
+              const resolvedWidth = resolveEdgeWidth(sourceNote?.edgeWidth, override, highlighted)
+              const resolvedColor = resolveEdgeColor(sourceNote?.edgeColor, override)
+              // Gradient overrides the plain stroke-slate-400/stroke-brand-primary class (or a
+              // resolved custom color) with an inline url() stroke (see edgeGradientStroke's doc
+              // comment) - only the className/color is affected, width/dasharray/markers/opacity
+              // stay the same either way.
+              const gradientStroke = edgeGradientStroke(sourceNote?.edgeStyle, p1.x, p1.y, p2.x, p2.y, resolvedColor ?? (highlighted ? EDGE_COLOR_HIGHLIGHT : EDGE_COLOR_NORMAL))
               const opacity = dimmed ? 0.12 : highlighted ? 0.9 : 0.35
+              const isSelected = selectedEdge?.sourceNoteId === a && selectedEdge.targetNoteId === b
               return (
                 <g key={`${a}-${b}`}>
-                  {/* Glow renders as a SEPARATE wider/blurred duplicate line UNDERNEATH the normal
-                      sharp one - see TreeGraphView.tsx's matching comment for why applying the
-                      blur filter directly to the real line (the previous, buggy version) produces
-                      a thick diffuse haze with no crisp line left, not an elegant glow. */}
-                  {glowFilter && (
-                    <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} className={strokeClass} filter={glowFilter} strokeWidth={(highlighted ? 1.5 : 1) + 1.5} opacity={opacity * 0.8} />
-                  )}
                   <line
                     x1={p1.x}
                     y1={p1.y}
                     x2={p2.x}
                     y2={p2.y}
-                    className={gradientStroke ? undefined : strokeClass}
-                    style={gradientStroke ? { stroke: gradientStroke } : undefined}
-                    strokeWidth={highlighted ? 1.5 : 1}
+                    className={`${gradientStroke ? '' : strokeClass} ${isSelected ? 'drop-shadow-[0_0_2px_rgba(99,102,241,0.6)]' : ''}`}
+                    style={gradientStroke ? { stroke: gradientStroke } : resolvedColor ? { stroke: resolvedColor } : undefined}
+                    strokeWidth={resolvedWidth}
                     strokeDasharray={edgeStrokeDasharray(sourceNote?.edgeStyle)}
                     markerStart={markerStart}
                     markerEnd={markerEnd}
                     opacity={opacity}
                   />
+                  {sourceNote && (
+                    <line
+                      x1={p1.x}
+                      y1={p1.y}
+                      x2={p2.x}
+                      y2={p2.y}
+                      stroke="transparent"
+                      strokeWidth={Math.max(resolvedWidth + 10, 14)}
+                      className="cursor-pointer"
+                      onPointerDown={(event) => {
+                        event.stopPropagation()
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        selectEdge(a, b)
+                      }}
+                    />
+                  )}
                 </g>
               )
             })}
@@ -890,7 +937,30 @@ export default function NoteGraphView({
           shrink/grow alongside the panel instead of the panel just appearing on top. */}
       <div className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${panelOpen ? 'w-72' : 'w-0'}`}>
         <div className="h-full w-72">
-          {panelOpen && (
+          {panelOpen && selectedEdge ? (
+            (() => {
+              const sourceNote = notesById.get(selectedEdge.sourceNoteId)
+              const targetNote = notesById.get(selectedEdge.targetNoteId)
+              const override = sourceNote?.edgeOverrides.find((o) => o.targetNoteId === selectedEdge.targetNoteId) ?? null
+              if (!sourceNote || !targetNote) return null
+              return (
+                <EdgeOverridePanel
+                  sourceTitle={sourceNote.title}
+                  targetTitle={targetNote.title}
+                  width={override?.width ?? null}
+                  color={override?.color ?? null}
+                  fallbackWidth={sourceNote.edgeWidth ?? DEFAULT_EDGE_WIDTH}
+                  fallbackColor={sourceNote.edgeColor ?? EDGE_COLOR_NORMAL}
+                  onChangeWidth={(width) => onChangeEdgeOverride(selectedEdge.sourceNoteId, selectedEdge.targetNoteId, width, override?.color ?? null)}
+                  onChangeColor={(color) => onChangeEdgeOverride(selectedEdge.sourceNoteId, selectedEdge.targetNoteId, override?.width ?? null, color)}
+                  onClose={() => {
+                    setPanelOpen(false)
+                    setSelectedEdge(null)
+                  }}
+                />
+              )
+            })()
+          ) : panelOpen ? (
             <GraphSidePanel
               selected={selectedNoteId ? { kind: 'note', note: notes.find((n) => n.id === selectedNoteId) } : null}
               onClose={() => {
@@ -905,7 +975,7 @@ export default function NoteGraphView({
               showDetachParent={false}
               onChangeNoteAppearance={changeNodeAppearance}
             />
-          )}
+          ) : null}
         </div>
       </div>
     </div>

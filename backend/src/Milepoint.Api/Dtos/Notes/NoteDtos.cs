@@ -17,7 +17,9 @@ public record CreateNoteRequest(
     string? Color = null,
     NoteShape? Shape = null,
     NoteEdgeStyle? EdgeStyle = null,
-    NoteEdgeArrow? EdgeArrow = null);
+    NoteEdgeArrow? EdgeArrow = null,
+    double? EdgeWidth = null,
+    string? EdgeColor = null);
 
 // ParentNoteId alone can't distinguish "leave the parent assignment unchanged" from "clear it" -
 // both cases deserialize to the same null when the field is omitted from the JSON body, since
@@ -40,9 +42,22 @@ public record UpdateNoteRequest(
     string? Color = null,
     NoteShape? Shape = null,
     NoteEdgeStyle? EdgeStyle = null,
-    NoteEdgeArrow? EdgeArrow = null);
+    NoteEdgeArrow? EdgeArrow = null,
+    double? EdgeWidth = null,
+    string? EdgeColor = null);
 
 public record NoteLinkRefDto(string Id, string Title);
+
+// One connection's style override - see NoteEdgeOverride's doc comment for why this is a separate
+// concept from Note.EdgeWidth/EdgeColor. TargetNoteId identifies which of the source note's
+// outgoing connections this describes; the source note itself is the {noteId} route parameter on
+// the endpoint this is returned from/sent to, not repeated in the body.
+public record NoteEdgeOverrideDto(string TargetNoteId, double? Width, string? Color);
+
+// Width/Color both null deletes the override row entirely (falls back to the source note's own
+// EdgeWidth/EdgeColor) rather than storing a row that overrides nothing - see
+// NotesController.UpsertEdgeOverride.
+public record UpdateNoteEdgeOverrideRequest(double? Width, string? Color);
 
 public record NoteDto(
     string Id,
@@ -66,6 +81,16 @@ public record NoteDto(
     // arrowhead) - see Note.EdgeStyle/EdgeArrow's doc comments.
     NoteEdgeStyle? EdgeStyle,
     NoteEdgeArrow? EdgeArrow,
+    // Stroke width/color for every edge drawn FROM this note - null = use the view's default
+    // (1px, the normal/highlighted gray-or-brand-accent color) - see Note.EdgeWidth/EdgeColor's
+    // doc comments. A specific connection's own NoteEdgeOverride (see EdgeOverrides below) takes
+    // priority over these for that one connection only.
+    double? EdgeWidth,
+    string? EdgeColor,
+    // Per-connection overrides for this note's own outgoing connections (both ChildNotes edges and
+    // OutgoingLinks) - see NoteEdgeOverride's doc comment. Empty when no connection from this note
+    // has been individually restyled.
+    List<NoteEdgeOverrideDto> EdgeOverrides,
     // Persisted position in the free (physics-simulated) graph view - see Note.FreeViewX/Y's doc
     // comment. Both null = no saved position yet, frontend should pick its usual randomized/
     // simulated starting position. Not touched by Create/Update above - see

@@ -37,7 +37,14 @@ interface Props {
   // (getrennter Zustand, siehe onChangeRootAppearance in TreeGraphView).
   onChangeNoteAppearance?: (
     noteId: string,
-    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+    patch: {
+      color?: string | null
+      shape?: NoteShape | null
+      edgeStyle?: NoteEdgeStyle | null
+      edgeArrow?: NoteEdgeArrow | null
+      edgeWidth?: number | null
+      edgeColor?: string | null
+    },
   ) => void
   rootAppearance?: { color: string | null; shape: NoteShape | null; edgeStyle: NoteEdgeStyle | null; edgeArrow: NoteEdgeArrow | null }
   onChangeRootAppearance?: (patch: {
@@ -111,10 +118,14 @@ export default function GraphSidePanel({
                 shape={selected.note.shape}
                 edgeStyle={selected.note.edgeStyle}
                 edgeArrow={selected.note.edgeArrow}
+                edgeWidth={selected.note.edgeWidth}
+                edgeColor={selected.note.edgeColor}
                 onChangeColor={(color) => onChangeNoteAppearance(selected.note!.id, { color })}
                 onChangeShape={(shape) => onChangeNoteAppearance(selected.note!.id, { shape })}
                 onChangeEdgeStyle={(edgeStyle) => onChangeNoteAppearance(selected.note!.id, { edgeStyle })}
                 onChangeEdgeArrow={(edgeArrow) => onChangeNoteAppearance(selected.note!.id, { edgeArrow })}
+                onChangeEdgeWidth={(edgeWidth) => onChangeNoteAppearance(selected.note!.id, { edgeWidth })}
+                onChangeEdgeColor={(edgeColor) => onChangeNoteAppearance(selected.note!.id, { edgeColor })}
               />
             )}
           </div>
