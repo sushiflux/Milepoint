@@ -401,6 +401,12 @@ namespace Milepoint.Api.Data.Migrations.Postgres
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("EdgeArrow")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("EdgeStyle")
+                        .HasColumnType("integer");
+
                     b.Property<string>("ParentNoteId")
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");

@@ -75,7 +75,9 @@ public class NotesController : ControllerBase
             Content = request.Content,
             ParentNoteId = request.ParentNoteId,
             Color = request.Color,
-            Shape = request.Shape
+            Shape = request.Shape,
+            EdgeStyle = request.EdgeStyle,
+            EdgeArrow = request.EdgeArrow
         };
 
         _db.Notes.Add(note);
@@ -135,10 +137,12 @@ public class NotesController : ControllerBase
         {
             note.ParentNoteId = request.ParentNoteId;
         }
-        // Color/Shape are always applied as given (no tri-state flag needed - see
-        // UpdateNoteRequest's doc comment); null clears back to "use the default".
+        // Color/Shape/EdgeStyle/EdgeArrow are always applied as given (no tri-state flag needed -
+        // see UpdateNoteRequest's doc comment); null clears back to "use the default".
         note.Color = request.Color;
         note.Shape = request.Shape;
+        note.EdgeStyle = request.EdgeStyle;
+        note.EdgeArrow = request.EdgeArrow;
         note.UpdatedAt = DateTimeOffset.UtcNow;
 
         await SyncOutgoingLinksAsync(projectId, note);
@@ -268,6 +272,8 @@ public class NotesController : ControllerBase
         note.IncomingLinks.Select(l => new NoteLinkRefDto(l.SourceNoteId, l.SourceNote.Title)).ToList(),
         note.Color,
         note.Shape,
+        note.EdgeStyle,
+        note.EdgeArrow,
         note.CreatedAt,
         note.UpdatedAt);
 }

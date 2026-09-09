@@ -128,6 +128,14 @@ export interface NoteLinkRef {
 // as 'Rounded' but distinct so a future default change doesn't silently reinterpret existing data.
 export type NoteShape = 'Rounded' | 'Rectangle' | 'Diamond' | 'Underline' | 'Ellipse'
 
+// Mirrors backend Models/NoteEdgeStyle.cs / NoteEdgeArrow.cs. Both are per-note settings that
+// style every line drawn FROM this note - both its edges to its own ChildNotes (tree/mindmap
+// layouts) and its outgoing free cross-links (NoteGraphView) - never a per-connection setting.
+// Null means "no explicit choice" - rendered the same as 'Solid'/'None' but distinct, same
+// reasoning as NoteShape's null.
+export type NoteEdgeStyle = 'Solid' | 'Dashed' | 'Dotted'
+export type NoteEdgeArrow = 'None' | 'End' | 'Start' | 'Both'
+
 export interface Note {
   id: string
   title: string
@@ -143,6 +151,10 @@ export interface Note {
   // (see notesGraph/colorSchemes.ts) - the backend only ever stores/returns the resolved color.
   color: string | null
   shape: NoteShape | null
+  // Line style/arrowhead applied to every edge drawn FROM this note - see the type doc comments
+  // above. Null = use the view's default (solid, no arrowhead).
+  edgeStyle: NoteEdgeStyle | null
+  edgeArrow: NoteEdgeArrow | null
   createdAt: string
   updatedAt: string
 }

@@ -30,4 +30,12 @@ public class Note
     // backend never needs to know what schemes exist or how they're applied.
     public string? Color { get; set; }
     public NoteShape? Shape { get; set; }
+
+    // Line styling for every edge drawn FROM this note - both to its own ChildNotes (hierarchy)
+    // and along its OutgoingLinks (free cross-links). A per-note setting, not per-connection: there
+    // is exactly one styling choice per note, applied uniformly to everything that note points to.
+    // Both nullable = "use the view's default" (Solid line, no arrowhead), same reasoning as
+    // Color/Shape above.
+    public NoteEdgeStyle? EdgeStyle { get; set; }
+    public NoteEdgeArrow? EdgeArrow { get; set; }
 }

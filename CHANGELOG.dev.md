@@ -18,6 +18,32 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.72
+
+✨ New
+
+- **Click-to-open appearance menu, plus per-note edge line styling (dash pattern + arrowheads)**:
+  - Clicking a node (no drag) in both graph views now opens the same menu the right-click context
+    menu already showed, instead of jumping straight into the note editor - "Notiz öffnen" is
+    still the menu's first entry, so opening the note is one click away, not the only thing a
+    click does. Right-click still works identically as an alternative entry point.
+  - Backend: `Note` gains `EdgeStyle` (new `NoteEdgeStyle` enum: `Solid`/`Dashed`/`Dotted`) and
+    `EdgeArrow` (new `NoteEdgeArrow` enum: `None`/`End`/`Start`/`Both`) - same "no tri-state flag"
+    convention as `Color`/`Shape` (every `PUT` applies them as given, `null` = default). These
+    settings live on the note whose outgoing edges they affect - a note's `EdgeStyle`/`EdgeArrow`
+    style *every* line drawn from it, both to its `ChildNotes` in the tree layouts and along its
+    `OutgoingLinks` in the free-layout view. Migrations `AddNoteEdgeStyle` for both providers,
+    verified live.
+  - `notesGraph/edgeStyles.tsx`: shared `edgeStrokeDasharray()`, `edgeMarkerRefs()`, and an
+    `EdgeMarkerDefs` component (four `<marker>` defs - normal/highlighted × start/end) used by
+    both `TreeGraphView.tsx` and `NoteGraphView.tsx`'s edge rendering. Deliberately **not** using
+    SVG's `context-stroke` for marker color (unsupported in Firefox) - fixed fill colors matching
+    the existing `slate-400`/`brand-primary` stroke classes instead. In the tree layouts, an edge
+    is styled by its *parent* (source) note; root-level edges from the virtual project center have
+    no source note and always render as the plain default.
+  - `NoteAppearanceMenu.tsx` gains two new sections ("Linienstil"/"Pfeilspitzen") with hand-drawn
+    SVG preview icons, matching the existing color/shape sections' layout.
+
 ## v2026.9.71
 
 ✨ New
@@ -435,6 +461,36 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.9.72
+
+✨ Neu
+
+- **Klick öffnet direkt das Aussehen-Menü, plus Linien-Styling pro Notiz (Strichmuster +
+  Pfeilspitzen)**:
+  - Ein Klick auf einen Knoten (ohne Ziehen) öffnet in beiden Graph-Ansichten jetzt dasselbe Menü,
+    das bisher nur per Rechtsklick erschien, statt direkt in den Notiz-Editor zu springen -
+    „Notiz öffnen" ist weiterhin der erste Menüpunkt, also nur einen Klick entfernt, nicht mehr
+    das Einzige, was ein Klick tut. Rechtsklick funktioniert weiterhin identisch als Alternative.
+  - Backend: `Note` erhält `EdgeStyle` (neues Enum `NoteEdgeStyle`: `Solid`/`Dashed`/`Dotted`) und
+    `EdgeArrow` (neues Enum `NoteEdgeArrow`: `None`/`End`/`Start`/`Both`) - gleiche
+    „kein Tri-State-Flag"-Konvention wie bei `Color`/`Shape` (jedes `PUT` wendet sie wie
+    angegeben an, `null` = Standard). Diese Einstellungen liegen an der Notiz, deren ausgehende
+    Linien sie betreffen - `EdgeStyle`/`EdgeArrow` einer Notiz stylen *jede* von ihr ausgehende
+    Linie, sowohl zu ihren `ChildNotes` in den Baum-Layouts als auch entlang ihrer
+    `OutgoingLinks` in der freien Ansicht. Migrationen `AddNoteEdgeStyle` für beide Provider,
+    live verifiziert.
+  - `notesGraph/edgeStyles.tsx`: gemeinsame `edgeStrokeDasharray()`, `edgeMarkerRefs()` und eine
+    `EdgeMarkerDefs`-Komponente (vier `<marker>`-Definitionen - normal/hervorgehoben ×
+    Anfang/Ende), genutzt von `TreeGraphView.tsx`s und `NoteGraphView.tsx`s Kanten-Rendering.
+    Bewusst **kein** `context-stroke` für die Marker-Farbe (in Firefox nicht unterstützt) -
+    stattdessen feste Füllfarben passend zu den bestehenden `slate-400`/`brand-primary`-
+    Strich-Klassen. In den Baum-Layouts wird eine Kante nach ihrer *übergeordneten* (Quell-)
+    Notiz gestylt; Wurzel-Kanten vom virtuellen Projekt-Zentrum haben keine Quell-Notiz und
+    rendern immer im schlichten Standard.
+  - `NoteAppearanceMenu.tsx` erhält zwei neue Abschnitte („Linienstil"/„Pfeilspitzen") mit
+    handgezeichneten SVG-Vorschau-Icons, im gleichen Layout wie die bestehenden Farbe/Form-
+    Abschnitte.
 
 ## v2026.9.71
 

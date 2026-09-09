@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
-import type { Note, NoteShape } from '../../api/types'
+import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../../api/types'
 import { computeTreeLayout, type Point, type TreeLayoutId } from './treeLayouts'
 import { NoteNodeVisual } from './NoteNodeShape'
 import NoteAppearanceMenu from './NoteAppearanceMenu'
+import { EdgeMarkerDefs, edgeMarkerRefs, edgeStrokeDasharray } from './edgeStyles'
 
 interface Props {
   projectName: string
@@ -12,7 +13,10 @@ interface Props {
   onSelectNote: (note: Note) => void
   onCreateRootNote: (title: string) => Promise<void>
   onSetParent: (noteId: string, parentNoteId: string | null) => Promise<void>
-  onChangeAppearance: (noteId: string, patch: { color?: string | null; shape?: NoteShape | null }) => Promise<void>
+  onChangeAppearance: (
+    noteId: string,
+    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+  ) => Promise<void>
 }
 
 interface Transform {
@@ -94,6 +98,10 @@ export default function TreeGraphView({
   const result = useMemo(() => computeTreeLayout(layoutId, notes), [layoutId, notes])
   const { nodes: layout, edges } = result
   const nodes = useMemo(() => Array.from(layout.values()), [layout])
+  // Lookup for edge styling: each edge is styled by its SOURCE (parent) note's edgeStyle/edgeArrow
+  // - see edgeStyles.tsx's doc comment. Root-level edges (edge.parentId === null, from the virtual
+  // project center) have no source note and always render as the plain default (solid, no arrow).
+  const notesById = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
 
   useLayoutEffect(() => {
     const el = containerRef.current
@@ -210,6 +218,24 @@ export default function TreeGraphView({
     }
   }
 
+  async function changeNodeEdgeStyle(noteId: string, edgeStyle: NoteEdgeStyle | null) {
+    try {
+      await onChangeAppearance(noteId, { edgeStyle })
+      setActionError(null)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Linienstil konnte nicht geändert werden.')
+    }
+  }
+
+  async function changeNodeEdgeArrow(noteId: string, edgeArrow: NoteEdgeArrow | null) {
+    try {
+      await onChangeAppearance(noteId, { edgeArrow })
+      setActionError(null)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Pfeilspitzen konnten nicht geändert werden.')
+    }
+  }
+
   function handleNodePointerDown(id: string) {
     return (event: React.PointerEvent<SVGGElement>) => {
       if (event.button !== 0) return
@@ -283,8 +309,16 @@ export default function TreeGraphView({
     if (!drag) return
 
     if (!drag.moved) {
-      const note = notes.find((n) => n.id === drag.id)
-      if (note) onSelectNote(note)
+      // A plain click (no drag) opens the same appearance/actions menu the right-click context
+      // menu shows - previously this jumped straight to opening the note, which made a quick
+      // color/shape change require a right-click every time. "Notiz öffnen" is the menu's first
+      // entry, so opening the note is still one click away, just not the only thing a click does.
+      const node = nodes.find((n) => n.id === drag.id)
+      if (node) {
+        const t = transformRef.current
+        setContextMenu(null)
+        setNodeMenu({ screen: { x: node.x * t.k + t.x, y: node.y * t.k + t.y }, noteId: drag.id })
+      }
       return
     }
 
@@ -399,8 +433,12 @@ export default function TreeGraphView({
             <NoteAppearanceMenu
               color={nodeMenuNote.color}
               shape={nodeMenuNote.shape}
+              edgeStyle={nodeMenuNote.edgeStyle}
+              edgeArrow={nodeMenuNote.edgeArrow}
               onChangeColor={(color) => changeNodeColor(nodeMenuNote.id, color)}
               onChangeShape={(shape) => changeNodeShape(nodeMenuNote.id, shape)}
+              onChangeEdgeStyle={(edgeStyle) => changeNodeEdgeStyle(nodeMenuNote.id, edgeStyle)}
+              onChangeEdgeArrow={(edgeArrow) => changeNodeEdgeArrow(nodeMenuNote.id, edgeArrow)}
             />
           </div>
         </>
@@ -444,13 +482,18 @@ export default function TreeGraphView({
           onPointerUp={handleSvgPointerUp}
         >
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
+            <EdgeMarkerDefs />
             {/* Edges: a straight line is misleading for the mind-map layout since both endpoints
                 move along different rings - a slight quadratic curve through the midpoint reads
                 as "flowing outward from parent to child". The other (tree-shaped) layouts read
                 fine with the same curve, so one rendering path covers all four. Root notes get an
                 edge from the virtual center (0,0) just like every other node - computeTreeLayout's
                 buildEdges never skips depth-1 nodes, which is what fixes the original bug where
-                the project-to-main-note connection was missing entirely. */}
+                the project-to-main-note connection was missing entirely.
+                Style/arrowheads come from the edge's SOURCE (parent) note - edge.parentId is null
+                for a root-level edge from the virtual center, which has no note to style from, so
+                those always render as the plain default. The curve runs parent -> child, so
+                marker-start sits at the parent end, marker-end at the child end. */}
             {edges.map((edge) => {
               const { from: start, to: end } = edge
               const midX = (start.x + end.x) / 2
@@ -458,6 +501,8 @@ export default function TreeGraphView({
               const highlighted = hoveredId !== null && (edge.childId === hoveredId || edge.parentId === hoveredId)
               const dimmed = hoveredId !== null && !highlighted
               const strokeClass = highlighted ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'
+              const sourceNote = edge.parentId ? notesById.get(edge.parentId) : null
+              const { markerStart, markerEnd } = edgeMarkerRefs(sourceNote?.edgeArrow, highlighted)
               return (
                 <path
                   key={edge.childId}
@@ -465,6 +510,9 @@ export default function TreeGraphView({
                   fill="none"
                   className={strokeClass}
                   strokeWidth={highlighted ? 1.5 : 1}
+                  strokeDasharray={edgeStrokeDasharray(sourceNote?.edgeStyle)}
+                  markerStart={markerStart}
+                  markerEnd={markerEnd}
                   opacity={dimmed ? 0.12 : highlighted ? 0.9 : 0.35}
                 />
               )

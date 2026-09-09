@@ -403,6 +403,12 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<int?>("EdgeArrow")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("EdgeStyle")
+                        .HasColumnType("int");
+
                     b.Property<string>("ParentNoteId")
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");

@@ -1,15 +1,19 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ApiError } from '../api/client'
-import type { Note, NoteShape } from '../api/types'
+import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types'
 import { NoteNodeVisual } from './notesGraph/NoteNodeShape'
 import NoteAppearanceMenu from './notesGraph/NoteAppearanceMenu'
+import { EdgeMarkerDefs, edgeMarkerRefs, edgeStrokeDasharray } from './notesGraph/edgeStyles'
 
 interface Props {
   notes: Note[]
   onSelectNote: (note: Note) => void
   onCreateNote: (title: string) => Promise<void>
   onConnectNotes: (sourceId: string, targetId: string) => Promise<void>
-  onChangeAppearance: (noteId: string, patch: { color?: string | null; shape?: NoteShape | null }) => Promise<void>
+  onChangeAppearance: (
+    noteId: string,
+    patch: { color?: string | null; shape?: NoteShape | null; edgeStyle?: NoteEdgeStyle | null; edgeArrow?: NoteEdgeArrow | null },
+  ) => Promise<void>
 }
 
 interface Point {
@@ -168,6 +172,9 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
   const edges = useMemo(() => buildEdges(notes), [notes])
   const edgesRef = useRef(edges)
   edgesRef.current = edges
+  // Lookup for edge styling: each edge is styled by its SOURCE note (the first tuple element from
+  // buildEdges, i.e. the note whose outgoingLinks produced it) - see edgeStyles.tsx's doc comment.
+  const notesById = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
 
   const degree = useMemo(() => {
     const map = new Map<string, number>()
@@ -321,6 +328,24 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
     }
   }
 
+  async function changeNodeEdgeStyle(noteId: string, edgeStyle: NoteEdgeStyle | null) {
+    try {
+      await onChangeAppearance(noteId, { edgeStyle })
+      setActionError(null)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Linienstil konnte nicht geändert werden.')
+    }
+  }
+
+  async function changeNodeEdgeArrow(noteId: string, edgeArrow: NoteEdgeArrow | null) {
+    try {
+      await onChangeAppearance(noteId, { edgeArrow })
+      setActionError(null)
+    } catch (err) {
+      setActionError(err instanceof ApiError ? err.message : 'Pfeilspitzen konnten nicht geändert werden.')
+    }
+  }
+
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return
     setNodeMenu(null)
@@ -459,8 +484,16 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
         handleConnectClick(drag.id)
         return
       }
-      const note = notes.find((n) => n.id === drag.id)
-      if (note) onSelectNote(note)
+      // A plain click (no drag, not in connect mode) opens the same appearance/actions menu the
+      // right-click context menu shows - previously this jumped straight to opening the note,
+      // which made a quick color/shape change require a right-click every time. "Notiz öffnen" is
+      // the menu's first entry, so opening the note is still one click away.
+      const node = positionsRef.current.get(drag.id)
+      if (node) {
+        const t = transformRef.current
+        setContextMenu(null)
+        setNodeMenu({ screen: { x: node.x * t.k + t.x, y: node.y * t.k + t.y }, noteId: drag.id })
+      }
       return
     }
 
@@ -580,8 +613,12 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
             <NoteAppearanceMenu
               color={nodeMenuNote.color}
               shape={nodeMenuNote.shape}
+              edgeStyle={nodeMenuNote.edgeStyle}
+              edgeArrow={nodeMenuNote.edgeArrow}
               onChangeColor={(color) => changeNodeColor(nodeMenuNote.id, color)}
               onChangeShape={(shape) => changeNodeShape(nodeMenuNote.id, shape)}
+              onChangeEdgeStyle={(edgeStyle) => changeNodeEdgeStyle(nodeMenuNote.id, edgeStyle)}
+              onChangeEdgeArrow={(edgeArrow) => changeNodeEdgeArrow(nodeMenuNote.id, edgeArrow)}
             />
           </div>
         </>
@@ -625,6 +662,7 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
           onPointerUp={handleSvgPointerUp}
         >
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
+            <EdgeMarkerDefs />
             {edges.map(([a, b]) => {
               const na = positionsRef.current.get(a)
               const nb = positionsRef.current.get(b)
@@ -632,6 +670,9 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
               const highlighted = hoveredId !== null && (a === hoveredId || b === hoveredId)
               const dimmed = hoveredId !== null && !highlighted
               const strokeClass = highlighted ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'
+              // Styled by the source note (a) - see the notesById comment above.
+              const sourceNote = notesById.get(a)
+              const { markerStart, markerEnd } = edgeMarkerRefs(sourceNote?.edgeArrow, highlighted)
               return (
                 <line
                   key={`${a}-${b}`}
@@ -641,6 +682,9 @@ export default function NoteGraphView({ notes, onSelectNote, onCreateNote, onCon
                   y2={nb.y}
                   className={strokeClass}
                   strokeWidth={highlighted ? 1.5 : 1}
+                  strokeDasharray={edgeStrokeDasharray(sourceNote?.edgeStyle)}
+                  markerStart={markerStart}
+                  markerEnd={markerEnd}
                   opacity={dimmed ? 0.12 : highlighted ? 0.9 : 0.35}
                 />
               )
