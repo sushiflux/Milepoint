@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { addFavoriteProject, getProjects, removeFavoriteProject } from '../api/projects'
 import type { Project } from '../api/types'
+import { useClickOutside } from '../hooks/useClickOutside'
 
 const SWITCHER_ICON = (
   <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-brand-primary dark:text-brand-primary-light">
@@ -42,7 +43,13 @@ export default function ProjectSwitcher() {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+  const close = useCallback(() => {
+    setOpen(false)
+    setSearch('')
+  }, [])
+  useClickOutside(containerRef, open, close)
 
   useEffect(() => {
     getProjects()
@@ -89,7 +96,7 @@ export default function ProjectSwitcher() {
   const otherProjects = visibleProjects.filter((p) => !p.isFavorite)
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <button
         onClick={() => setOpen((prev) => !prev)}
         title="Projekt wechseln"
@@ -105,9 +112,7 @@ export default function ProjectSwitcher() {
       </button>
 
       {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
+        <div className="absolute left-0 top-full z-50 mt-2 w-72 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
             <div className="relative mb-2">
               <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">
                 {SEARCH_ICON}
@@ -179,9 +184,8 @@ export default function ProjectSwitcher() {
                   ))}
                 </div>
               )}
-            </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   )

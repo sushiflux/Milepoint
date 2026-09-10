@@ -1,6 +1,8 @@
 import { useId } from 'react'
 import type { NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../../api/types'
 import { COLOR_SCHEMES } from './colorSchemes'
+import { SHAPE_OPTIONS } from './shapeOptions'
+import { ShapePreviewIcon } from './shapePreview'
 
 // Shared "Aussehen anpassen" panel used by both graph views' node context menus - lets the user
 // pick this single note's color (from every defined palette, not just one), shape, and the style/
@@ -10,14 +12,6 @@ import { COLOR_SCHEMES } from './colorSchemes'
 // panel rather than a separate nested hover-submenu, matching the app's existing (flat,
 // click-to-open) menu/popover convention - see TreeGraphView/NoteGraphView's existing context
 // menus and the create-note inline form for the same glass/rounded-xl treatment.
-
-const SHAPE_OPTIONS: { value: NoteShape; label: string }[] = [
-  { value: 'Rounded', label: 'Abgerundet' },
-  { value: 'Rectangle', label: 'Rechteck' },
-  { value: 'Diamond', label: 'Raute' },
-  { value: 'Underline', label: 'Unterstrichen' },
-  { value: 'Ellipse', label: 'Oval' },
-]
 
 const EDGE_STYLE_OPTIONS: { value: NoteEdgeStyle; label: string }[] = [
   { value: 'Solid', label: 'Durchgezogen' },
@@ -59,45 +53,6 @@ interface Props {
 const MIN_EDGE_WIDTH = 0.5
 const MAX_EDGE_WIDTH = 12
 const DEFAULT_EDGE_WIDTH_FOR_SLIDER = 1
-
-function ShapePreviewIcon({ shape }: { shape: NoteShape }) {
-  // Small 20x14 inline SVG preview per shape - handwritten, no icon library, matching the
-  // project-wide convention of inline SVGs over external icon sets.
-  switch (shape) {
-    case 'Rectangle':
-      return (
-        <svg viewBox="0 0 20 14" className="h-3.5 w-5">
-          <rect x="1" y="1" width="18" height="12" className="fill-none stroke-current" strokeWidth="1.5" />
-        </svg>
-      )
-    case 'Diamond':
-      return (
-        <svg viewBox="0 0 20 14" className="h-3.5 w-5">
-          <polygon points="10,1 19,7 10,13 1,7" className="fill-none stroke-current" strokeWidth="1.5" />
-        </svg>
-      )
-    case 'Underline':
-      return (
-        <svg viewBox="0 0 20 14" className="h-3.5 w-5">
-          <line x1="2" y1="6" x2="18" y2="6" className="stroke-current" strokeWidth="1.5" />
-          <line x1="1" y1="11" x2="19" y2="11" className="stroke-current" strokeWidth="1.5" />
-        </svg>
-      )
-    case 'Ellipse':
-      return (
-        <svg viewBox="0 0 20 14" className="h-3.5 w-5">
-          <ellipse cx="10" cy="7" rx="9" ry="6" className="fill-none stroke-current" strokeWidth="1.5" />
-        </svg>
-      )
-    case 'Rounded':
-    default:
-      return (
-        <svg viewBox="0 0 20 14" className="h-3.5 w-5">
-          <rect x="1" y="1" width="18" height="12" rx="4" ry="4" className="fill-none stroke-current" strokeWidth="1.5" />
-        </svg>
-      )
-  }
-}
 
 // Stable per-icon-instance gradient id - unlike the real edge rendering (edgeStyles.tsx), which
 // only ever needs a small fixed set since every edge uses one of two fixed colors, this preview

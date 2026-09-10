@@ -1,15 +1,18 @@
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createNote, deleteNote, updateNote, setNoteEdgeOverride, getNotes, type NoteAppearanceFields } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types'
 import NoteGraphView from './NoteGraphView'
 import TreeGraphView, { type RootAppearance } from './notesGraph/TreeGraphView'
-import GraphSettingsPanel from './notesGraph/GraphSettingsPanel'
-import { STYLE_PRESETS, type GraphLayoutId } from './notesGraph/stylePresets'
+import LayoutPickerPanel from './notesGraph/LayoutPickerPanel'
+import ColorSchemePanel from './notesGraph/ColorSchemePanel'
+import ShapePickerPanel from './notesGraph/ShapePickerPanel'
+import type { GraphLayoutId } from './notesGraph/treeLayouts'
 import { assignSchemeColors, colorForIndex } from './notesGraph/colorSchemes'
 import AddButton from '../components/AddButton'
 import DictationButton from '../components/DictationButton'
 import { usePreferences } from '../context/PreferencesContext'
+import { useClickOutside } from '../hooks/useClickOutside'
 
 interface Props {
   projectId: string
@@ -33,6 +36,13 @@ type GraphLayout = GraphLayoutId
 
 const VIEW_MODE_PREFERENCE_KEY = 'notesViewMode'
 const GRAPH_LAYOUT_PREFERENCE_KEY = 'notesGraphLayout'
+// The last project-wide color scheme / node shape applied via the standalone "Farbschema"/"Form"
+// buttons. Purely for the active-item highlight in those menus - the actual per-note colors/shapes
+// live on each Note and can't be reverse-derived (different notes hold different values), so this
+// is just a remembered "what did I last apply to everything" marker. Frontend-only preference, no
+// backend field.
+const GRAPH_SCHEME_PREFERENCE_KEY = 'notesGraphScheme'
+const GRAPH_SHAPE_PREFERENCE_KEY = 'notesGraphShape'
 // Frontend-only appearance for the virtual project-center node in TreeGraphView (no backing Note
 // object exists for it - see TreeGraphView's RootAppearance type / GraphSidePanel's "kind: 'root'"
 // case). Persisted the same way as notesGraphLayout, JSON-serialized since it's a small object,
@@ -52,6 +62,10 @@ function isViewMode(value: string): value is ViewMode {
 
 function isGraphLayout(value: string): value is GraphLayout {
   return value === 'free' || value === 'mindmap' || value === 'tree-horizontal' || value === 'tree-vertical' || value === 'fishbone'
+}
+
+function isNoteShape(value: string): value is NoteShape {
+  return value === 'Rounded' || value === 'Rectangle' || value === 'Diamond' || value === 'Underline' || value === 'Ellipse'
 }
 
 // Der Root-Knoten (virtueller Projekt-Mittelpunkt) hat keine eigene Notiz-ID und wird daher nicht
@@ -106,6 +120,10 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
   const [rootAppearance, setRootAppearanceState] = useState<RootAppearance>(
     storedRootAppearance ? parseRootAppearance(storedRootAppearance) : DEFAULT_ROOT_APPEARANCE,
   )
+  const storedScheme = getPreference(GRAPH_SCHEME_PREFERENCE_KEY, '')
+  const [appliedSchemeId, setAppliedSchemeIdState] = useState<string | null>(storedScheme || null)
+  const storedShape = getPreference(GRAPH_SHAPE_PREFERENCE_KEY, '')
+  const [appliedShape, setAppliedShapeState] = useState<NoteShape | null>(isNoteShape(storedShape) ? storedShape : null)
   const [applyingPreset, setApplyingPreset] = useState(false)
   const [presetError, setPresetError] = useState<string | null>(null)
 
@@ -129,6 +147,11 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
       if (isViewMode(dbViewMode) && dbViewMode !== viewMode) setViewModeState(dbViewMode)
       const dbGraphLayout = getPreference(GRAPH_LAYOUT_PREFERENCE_KEY, graphLayout)
       if (isGraphLayout(dbGraphLayout) && dbGraphLayout !== graphLayout) setGraphLayoutState(dbGraphLayout)
+      const dbScheme = getPreference(GRAPH_SCHEME_PREFERENCE_KEY, '')
+      if ((dbScheme || null) !== appliedSchemeId) setAppliedSchemeIdState(dbScheme || null)
+      const dbShape = getPreference(GRAPH_SHAPE_PREFERENCE_KEY, '')
+      const dbShapeValue = isNoteShape(dbShape) ? dbShape : null
+      if (dbShapeValue !== appliedShape) setAppliedShapeState(dbShapeValue)
       const dbRootAppearanceRaw = getPreference(ROOT_APPEARANCE_PREFERENCE_KEY, '')
       if (dbRootAppearanceRaw) {
         const dbRootAppearance = parseRootAppearance(dbRootAppearanceRaw)
@@ -154,6 +177,16 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     setPreference(GRAPH_LAYOUT_PREFERENCE_KEY, layout)
   }
 
+  function setAppliedSchemeId(schemeId: string) {
+    setAppliedSchemeIdState(schemeId)
+    setPreference(GRAPH_SCHEME_PREFERENCE_KEY, schemeId)
+  }
+
+  function setAppliedShape(shape: NoteShape) {
+    setAppliedShapeState(shape)
+    setPreference(GRAPH_SHAPE_PREFERENCE_KEY, shape)
+  }
+
   function setRootAppearance(patch: Partial<RootAppearance>) {
     // setPreference() (which updates PreferencesStateProvider's own state - a DIFFERENT component)
     // must not run inside the setRootAppearanceState updater callback below - React logs "Cannot
@@ -169,14 +202,16 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     setPreference(ROOT_APPEARANCE_PREFERENCE_KEY, JSON.stringify(next))
   }
 
-  // Standalone layout-picker popover, next to the List/Graph toggle - reaches the exact same
-  // GraphSettingsPanel content (layout + style presets + root appearance) that TreeGraphView's
-  // center-node click already opens, but from a fixed spot that works in BOTH the free and tree
-  // views. The free view (NoteGraphView) has no root/center-node concept at all, so a note click
-  // there could never reach this menu - and even in the tree views, a user might not think to
-  // click the center node specifically to find layout options. Kept alongside the existing
-  // center-node entry point rather than replacing it (the user asked for both to coexist).
-  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
+  // Three standalone popovers in one segmented container next to the List/Graph toggle - "Layout"
+  // (LayoutPickerPanel), "Farbschema" (ColorSchemePanel, pure palette) and "Form" (ShapePickerPanel,
+  // node shape). These used to be one combined "Layout & Stil" menu (and before that only reachable
+  // by clicking TreeGraphView's center node); per explicit user feedback they're now three separate
+  // axes, each applied immediately without a confirm dialog. All work in the free view too (which
+  // has no center-node concept). Only one popover open at a time.
+  const [openMenu, setOpenMenu] = useState<'layout' | 'scheme' | 'shape' | null>(null)
+  const graphMenuRef = useRef<HTMLDivElement>(null)
+  const closeGraphMenu = useCallback(() => setOpenMenu(null), [])
+  useClickOutside(graphMenuRef, openMenu !== null, closeGraphMenu)
 
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -436,46 +471,55 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     onNotesChange(refreshed)
   }
 
-  // Wendet eine vordefinierte Stil-Vorlage (stylePresets.ts) auf ALLE Notizen im Projekt an: wechselt
-  // das Layout und aktualisiert Farbe (via assignSchemeColors reihum aus dem Schema)/Form/Linienstil/
-  // Pfeilspitzen jeder einzelnen Notiz sowie des Root-Knotens. Läuft sequenziell statt Promise.all,
-  // damit ein einzelner Fehlschlag mitten im Durchlauf nicht dutzende parallele Requests im
-  // unbestimmten Zustand hinterlässt und der Nutzer eine konkrete Fehlermeldung sieht.
-  async function handleApplyPreset(presetId: string) {
-    const preset = STYLE_PRESETS.find((p) => p.id === presetId)
-    if (!preset) return
+  // Verteilt die Palette eines Farbschemas (colorSchemes.ts) reihum auf ALLE Notizen im Projekt
+  // (der Mittelpunkt bekommt die erste Farbe) - nur die FARBE, sonst nichts. Ohne Rückfrage, sofort.
+  // Form und Linienstil bleiben unangetastet. Läuft sequenziell statt Promise.all, damit ein
+  // einzelner Fehlschlag mitten im Durchlauf nicht dutzende parallele Requests im unbestimmten
+  // Zustand hinterlässt und der Nutzer eine konkrete Fehlermeldung sieht.
+  async function handleApplyScheme(schemeId: string) {
     setApplyingPreset(true)
     setPresetError(null)
     try {
-      const colorByNoteId = assignSchemeColors(notes.map((n) => n.id), preset.colorSchemeId)
+      const colorByNoteId = assignSchemeColors(notes.map((n) => n.id), schemeId)
       const updatedNotes: Note[] = []
       for (const note of notes) {
-        const color = colorByNoteId.get(note.id) ?? null
-        // edgeWidth/edgeColor deliberately carried over from the note's current value, not reset
-        // by the preset - a preset controls layout/palette/shape/line-style/arrowheads, but a
-        // line's thickness/explicit color is a finer per-note choice the user makes separately
-        // (see NoteAppearanceMenu's "Liniendicke"/"Linienfarbe" controls) and shouldn't be
-        // silently wiped out just because a different overall preset was applied.
+        // Only `color` changes; everything else is re-sent unchanged via appearanceOf (updateNote
+        // has no tri-state flag - see NoteAppearanceFields).
         const updated = await updateNote(projectId, note.id, note.title, note.content, {
-          color,
-          shape: preset.shape,
-          edgeStyle: preset.edgeStyle,
-          edgeArrow: preset.edgeArrow,
-          edgeWidth: note.edgeWidth,
-          edgeColor: note.edgeColor,
+          ...appearanceOf(note),
+          color: colorByNoteId.get(note.id) ?? null,
         })
         updatedNotes.push(updated)
       }
       onNotesChange(notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n))
-      setRootAppearance({
-        color: colorForRootPreset(preset.colorSchemeId),
-        shape: preset.shape,
-        edgeStyle: preset.edgeStyle,
-        edgeArrow: preset.edgeArrow,
-      })
-      setGraphLayout(preset.layout)
+      setRootAppearance({ color: colorForRootPreset(schemeId) })
+      setAppliedSchemeId(schemeId)
     } catch (err) {
-      setPresetError(err instanceof ApiError ? err.message : 'Stil-Vorlage konnte nicht vollständig angewendet werden.')
+      setPresetError(err instanceof ApiError ? err.message : 'Farbschema konnte nicht vollständig angewendet werden.')
+    } finally {
+      setApplyingPreset(false)
+    }
+  }
+
+  // Setzt eine Knotenform auf ALLE Notizen im Projekt (inkl. Mittelpunkt) - nur die FORM, sonst
+  // nichts. Ohne Rückfrage, sofort. Farbe und Linienstil bleiben unangetastet.
+  async function handleApplyShape(shape: NoteShape) {
+    setApplyingPreset(true)
+    setPresetError(null)
+    try {
+      const updatedNotes: Note[] = []
+      for (const note of notes) {
+        const updated = await updateNote(projectId, note.id, note.title, note.content, {
+          ...appearanceOf(note),
+          shape,
+        })
+        updatedNotes.push(updated)
+      }
+      onNotesChange(notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n))
+      setRootAppearance({ shape })
+      setAppliedShape(shape)
+    } catch (err) {
+      setPresetError(err instanceof ApiError ? err.message : 'Form konnte nicht vollständig angewendet werden.')
     } finally {
       setApplyingPreset(false)
     }
@@ -500,48 +544,38 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
         </div>
 
         {viewMode === 'graph' && (
-          <div className="relative">
-            <button
-              onClick={() => setLayoutMenuOpen((prev) => !prev)}
-              // relative + z-30, matching (and beating) the fixed inset-0 z-20 overlay below - a
-              // CSS z-index only has any effect on a positioned element (position !== static), so
-              // giving only the *container* div a z-index did nothing for this static <button>: a
-              // position:fixed sibling with an explicit z-index always paints above a position:
-              // static sibling regardless of DOM order or the container's own z-index, since that
-              // internal comparison is unrelated to how the container stacks against elements
-              // OUTSIDE it. Without this, the overlay - needed to cover the full viewport for the
-              // click-outside-closes behavior - visually sat on top of the button itself once the
-              // menu was open, silently swallowing every click on it (including the one meant to
-              // close the menu again). Confirmed live via Playwright: a second click on "Layout &
-              // Stil" hit the overlay div instead and timed out retrying.
-              className={`relative z-30 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                layoutMenuOpen
-                  ? 'border-brand-primary/50 bg-brand-primary/10 text-brand-primary dark:text-brand-primary-light'
-                  : 'border-slate-200/50 glass text-slate-600 hover:bg-slate-100/50 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50'
-              }`}
-            >
-              Layout &amp; Stil
-            </button>
-            {layoutMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-20" onClick={() => setLayoutMenuOpen(false)} />
-                <div className="absolute left-0 top-full z-30 mt-1.5 max-h-[70vh] w-72 overflow-y-auto rounded-xl border border-slate-200/50 glass-panel shadow-xl dark:border-slate-700/50">
-                  <GraphSettingsPanel
-                    currentLayout={graphLayout}
-                    onChangeLayout={setGraphLayout}
-                    onApplyPreset={handleApplyPreset}
-                    applyingPreset={applyingPreset}
-                    rootAppearance={rootAppearance}
-                    onChangeRootAppearance={setRootAppearance}
-                    // The root/center node only exists visually in the tree layouts - in the free
-                    // view (graphLayout === 'free') there is nothing on screen for these settings
-                    // to style, so they're hidden here rather than shown for a node that isn't
-                    // rendered anywhere.
-                    showRootAppearance={graphLayout !== 'free'}
-                  />
-                </div>
-              </>
-            )}
+          // Layout / Farbschema / Form as one segmented control, same glass-panel/rounded-lg
+          // treatment as the List/Graph toggle above so they read as one related group. Each
+          // button toggles its own popover (openMenu, only one open at a time); useClickOutside
+          // on the whole group closes whichever popover is open when a pointerdown/Escape lands
+          // anywhere outside it (replaced an earlier `fixed inset-0` overlay that a higher-z
+          // element could paint over, leaving the menu stuck open).
+          <div className="relative z-30 flex w-fit rounded-lg p-1 glass-panel" ref={graphMenuRef}>
+            {(
+              [
+                { key: 'layout', label: 'Layout', panel: <LayoutPickerPanel currentLayout={graphLayout} onChangeLayout={setGraphLayout} /> },
+                { key: 'scheme', label: 'Farbschema', panel: <ColorSchemePanel currentSchemeId={appliedSchemeId} onApplyScheme={handleApplyScheme} applying={applyingPreset} /> },
+                { key: 'shape', label: 'Form', panel: <ShapePickerPanel currentShape={appliedShape} onApplyShape={handleApplyShape} applying={applyingPreset} /> },
+              ] as const
+            ).map((item) => (
+              <div key={item.key} className="relative">
+                <button
+                  onClick={() => setOpenMenu((prev) => (prev === item.key ? null : item.key))}
+                  className={`relative z-30 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    openMenu === item.key
+                      ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light'
+                      : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  {item.label}
+                </button>
+                {openMenu === item.key && (
+                  <div className="absolute left-0 top-full z-30 mt-1.5 max-h-[70vh] w-72 overflow-y-auto rounded-xl border border-slate-200/50 glass-panel shadow-xl dark:border-slate-700/50">
+                    {item.panel}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -558,9 +592,6 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
             onCreateNote={handleGraphCreateNote}
             onConnectNotes={handleGraphConnect}
             onChangeAppearance={handleNoteAppearanceChange}
-            onChangeLayout={setGraphLayout}
-            onApplyPreset={handleApplyPreset}
-            applyingPreset={applyingPreset}
             onChangeEdgeOverride={handleEdgeOverrideChange}
           />
         ) : (
@@ -572,9 +603,6 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
             onChangeAppearance={handleNoteAppearanceChange}
             onCreateRootNote={handleTreeCreateRootNote}
             onSetParent={handleTreeSetParent}
-            onChangeLayout={setGraphLayout}
-            onApplyPreset={handleApplyPreset}
-            applyingPreset={applyingPreset}
             rootAppearance={rootAppearance}
             onChangeRootAppearance={setRootAppearance}
             onChangeEdgeOverride={handleEdgeOverrideChange}

@@ -29,6 +29,11 @@ export interface TreeLayoutResult {
 
 export type TreeLayoutId = 'mindmap' | 'tree-horizontal' | 'tree-vertical' | 'fishbone'
 
+// 'free' is the physics-simulated force graph (NoteGraphView); the four TreeLayoutId values are
+// the static tree layouts (TreeGraphView). This is the full set of options the standalone "Layout"
+// button offers.
+export type GraphLayoutId = 'free' | TreeLayoutId
+
 interface TreeShape {
   byId: Map<string, Note>
   childrenOf: Map<string, Note[]>

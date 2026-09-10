@@ -18,6 +18,52 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.75
+
+🔄 Change
+
+- **Center-node click no longer opens the project-wide layout/preset options** - per explicit user
+  feedback. `GraphSidePanel`'s `kind: 'root'` branch now renders only `NoteAppearanceMenu` (the
+  center node's own color/shape/edge style/arrowheads - no width/color, it has no backing `Note`),
+  identical in shape to what a regular note click opens. The `currentLayout`/`onChangeLayout`/
+  `onApplyPreset`/`applyingPreset` props are gone from `GraphSidePanel` and from
+  `TreeGraphView`/`NoteGraphView`.
+- **"Layout & Stil" split into THREE separate, fully independent axes** in one segmented control
+  (same glass-panel treatment as the List/Graph toggle), `openMenu: 'layout' | 'scheme' | 'shape'
+  | null` in `NotesView.tsx`, one popover at a time:
+  - `LayoutPickerPanel.tsx` (new): the 5 layouts, each with a small hand-drawn SVG topology
+    thumbnail (radial / left-right / top-down / herringbone / loose). Handwritten SVGs, no icon
+    library - same convention as `NoteAppearanceMenu`'s shape/edge preview icons.
+  - `ColorSchemePanel.tsx` (new): **pure palette** - the 6 `COLOR_SCHEMES` from `colorSchemes.ts`,
+    each previewed as its own swatches. Applying one only distributes that palette round-robin
+    across every note (`assignSchemeColors`, center gets the first color) - nothing else.
+  - `ShapePickerPanel.tsx` (new): the 5 `NoteShape` values applied project-wide - nothing else
+    changes. `SHAPE_OPTIONS` extracted to `shapeOptions.ts` and `ShapePreviewIcon` to
+    `shapePreview.tsx` (two files so each stays a single-export module for Fast Refresh); both
+    shared with `NoteAppearanceMenu`.
+  - `stylePresets.ts` + `GraphSettingsPanel.tsx` deleted. `GraphLayoutId` moved to
+    `treeLayouts.ts`.
+- **No confirm dialog on any of the three** - previously a `window.confirm("… anwenden? Dies
+  überschreibt …")` gated the preset apply; removed per explicit user feedback, all three apply
+  immediately.
+- **The three axes no longer interfere with each other**: `handleApplyPreset` split into
+  `handleApplyScheme` (only `color`, via `appearanceOf(note)` for everything else) and
+  `handleApplyShape` (only `shape`); neither touches layout, and applying one leaves the other
+  two untouched. Last-applied scheme/shape remembered only as a preference
+  (`notesGraphScheme`/`notesGraphShape`) for the active-item highlight - the real per-note values
+  can't be reverse-derived.
+- **Every dropdown menu now closes on an outside click or Escape** - per explicit user feedback
+  that menus stayed stuck open after clicking away. New `useClickOutside(ref, active, onOutside)`
+  hook (`hooks/useClickOutside.ts`): a document-level capture-phase `pointerdown` listener plus an
+  Escape handler, active only while the menu is open. Replaces the `<div className="fixed inset-0">`
+  click-catcher overlays, which silently failed whenever a higher-`z-index`/`position: fixed`
+  element painted over them or a `stopPropagation()` sat in the click path. Applied to the header
+  user menu (`Header.tsx`), the project switcher (`ProjectSwitcher.tsx`), the shared
+  `ContextMenu.tsx`, both graph views' right-click menus (`NoteGraphView.tsx`,
+  `notesGraph/TreeGraphView.tsx`) and the Layout/Farbschema/Form popovers (`NotesView.tsx`).
+  `TimelineView.tsx`/`KanbanBoard.tsx` already had their own outside-click effects (multi-menu,
+  conditional refs - left as-is) and only gained the matching Escape-to-close.
+
 ## v2026.9.74
 
 ✨ New
@@ -606,6 +652,55 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.9.75
+
+🔄 Geändert
+
+- **Klick auf den Mittelpunkt-Knoten öffnet nicht mehr die projektweiten Layout-/Vorlagen-
+  Optionen** - auf ausdrücklichen Nutzerwunsch. Der `kind: 'root'`-Zweig von `GraphSidePanel`
+  rendert jetzt nur noch `NoteAppearanceMenu` (das eigene Aussehen des Mittelpunkts -
+  Farbe/Form/Linienstil/Pfeilspitzen, keine Dicke/Farbe, da er keine echte `Note` hat), formgleich
+  zu dem, was ein Klick auf eine normale Notiz öffnet. Die Props `currentLayout`/`onChangeLayout`/
+  `onApplyPreset`/`applyingPreset` sind aus `GraphSidePanel` sowie aus
+  `TreeGraphView`/`NoteGraphView` entfernt.
+- **„Layout & Stil" in DREI getrennte, vollständig unabhängige Achsen aufgeteilt** in einem
+  segmentierten Container (gleiches glass-panel-Aussehen wie der Liste/Graph-Umschalter),
+  `openMenu: 'layout' | 'scheme' | 'shape' | null` in `NotesView.tsx`, immer nur ein Popover offen:
+  - `LayoutPickerPanel.tsx` (neu): die 5 Layouts, jeweils mit einem kleinen handgezeichneten
+    SVG-Topologie-Vorschaubild (radial / links-rechts / oben-unten / Fischgräten / lose).
+    Handgezeichnete SVGs, keine Icon-Bibliothek - gleiche Konvention wie die Form-/Linien-Vorschau-
+    Icons in `NoteAppearanceMenu`.
+  - `ColorSchemePanel.tsx` (neu): **reine Palette** - die 6 `COLOR_SCHEMES` aus `colorSchemes.ts`,
+    jeweils als eigene Farbfelder vorgeschaut. Ein Klick verteilt nur diese Palette reihum auf alle
+    Notizen (`assignSchemeColors`, der Mittelpunkt bekommt die erste Farbe) - sonst nichts.
+  - `ShapePickerPanel.tsx` (neu): die 5 `NoteShape`-Werte projektweit angewendet - sonst ändert
+    sich nichts. `SHAPE_OPTIONS` nach `shapeOptions.ts` und `ShapePreviewIcon` nach
+    `shapePreview.tsx` ausgelagert (zwei Dateien, damit jede ein Single-Export-Modul für Fast
+    Refresh bleibt); beide mit `NoteAppearanceMenu` geteilt.
+  - `stylePresets.ts` + `GraphSettingsPanel.tsx` gelöscht. `GraphLayoutId` nach `treeLayouts.ts`
+    verschoben.
+- **Keine Rückfrage-Dialoge mehr bei allen dreien** - vorher gate ein `window.confirm("…
+  anwenden? Dies überschreibt …")` das Anwenden einer Vorlage; auf ausdrücklichen Nutzerwunsch
+  entfernt, alle drei wirken sofort.
+- **Die drei Achsen beeinflussen sich nicht mehr gegenseitig**: `handleApplyPreset` aufgeteilt in
+  `handleApplyScheme` (nur `color`, alles andere über `appearanceOf(note)`) und `handleApplyShape`
+  (nur `shape`); keine der beiden fasst das Layout an, und eine anzuwenden lässt die anderen beiden
+  unangetastet. Das zuletzt angewendete Schema/die zuletzt angewendete Form wird nur als Preference
+  (`notesGraphScheme`/`notesGraphShape`) für die Aktiv-Markierung gemerkt - die echten Pro-Notiz-
+  Werte lassen sich nicht zurückrechnen.
+- **Jedes Dropdown-Menü schließt jetzt bei Klick daneben oder Escape** - auf ausdrücklichen
+  Nutzerwunsch, weil Menüs nach dem Wegklicken offen stehen blieben. Neuer Hook
+  `useClickOutside(ref, active, onOutside)` (`hooks/useClickOutside.ts`): ein `pointerdown`-Listener
+  auf Dokumentebene in der Capture-Phase plus ein Escape-Handler, nur aktiv solange das Menü offen
+  ist. Ersetzt die `<div className="fixed inset-0">`-Fangschicht-Overlays, die stillschweigend
+  versagten, sobald ein Element mit höherem `z-index`/`position: fixed` darüber lag oder ein
+  `stopPropagation()` im Klickpfad saß. Angewendet auf das Header-Benutzermenü (`Header.tsx`), den
+  Projektwechsler (`ProjectSwitcher.tsx`), das geteilte `ContextMenu.tsx`, die Rechtsklick-Menüs
+  beider Graph-Ansichten (`NoteGraphView.tsx`, `notesGraph/TreeGraphView.tsx`) und die
+  Layout-/Farbschema-/Form-Popover (`NotesView.tsx`). `TimelineView.tsx`/`KanbanBoard.tsx` hatten
+  bereits eigene Außenklick-Effekte (mehrere Menüs, bedingte Refs - unverändert gelassen) und
+  bekamen nur das passende Escape-zum-Schließen dazu.
 
 ## v2026.9.74
 

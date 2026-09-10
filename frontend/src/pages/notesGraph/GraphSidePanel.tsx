@@ -1,15 +1,15 @@
 import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../../api/types'
 import NoteAppearanceMenu from './NoteAppearanceMenu'
-import type { GraphLayoutId } from './stylePresets'
-import GraphSettingsPanel from './GraphSettingsPanel'
 
 // Rechtes Seitenpanel (XMind-artig) - ersetzt die bisherigen Popup-Kontextmenüs in
 // TreeGraphView/NoteGraphView vollständig. Wird von beiden Graph-Ansichten gemeinsam genutzt,
 // genau wie NoteAppearanceMenu bereits geteilt wird. Erscheint NUR, wenn ein Knoten ausgewählt
-// ist (eine echte Notiz, oder - nur in TreeGraphView - der Projekt-Mittelpunkt). Die globalen
-// Optionen (Layout + Stil-Vorlagen + Mittelpunkt-Aussehen) sind hier über den Root-Klick weiterhin
-// erreichbar (GraphSettingsPanel, geteilt mit dem eigenständigen, immer sichtbaren Layout-Button
-// in NotesView.tsx - siehe dessen Kommentar für warum es jetzt beide Zugänge gibt).
+// ist (eine echte Notiz, oder - nur in TreeGraphView - der Projekt-Mittelpunkt). Beide Fälle
+// zeigen ausschließlich das Aussehen des jeweiligen Knotens (Farbe/Form/Linienstil). Layout-Wahl
+// und Stil-Vorlagen leben NICHT mehr hier - die sind nur noch über den eigenständigen
+// "Layout & Stil"-Button neben dem Liste/Graph-Umschalter erreichbar (früher öffnete der Klick auf
+// den Mittelpunkt auch die projektweiten Optionen; das wurde auf ausdrücklichen Nutzerwunsch
+// entfernt, siehe GraphSettingsPanel).
 
 export interface SelectedNodeInfo {
   /** Echte Notiz-ID, oder null für den virtuellen Projekt-Mittelpunkt (nur in TreeGraphView). */
@@ -21,12 +21,6 @@ interface Props {
   /** null => Panel wird von der aufrufenden View gar nicht gerendert (siehe panelOpen dort). */
   selected: SelectedNodeInfo | null
   onClose: () => void
-
-  // Globale Optionen (nur relevant wenn selected?.kind === 'root')
-  currentLayout: GraphLayoutId
-  onChangeLayout: (layout: GraphLayoutId) => void
-  onApplyPreset: (presetId: string) => Promise<void>
-  applyingPreset: boolean
 
   // Individuelle Optionen für eine ausgewählte Notiz (kind === 'note')
   onOpenNote?: (note: Note) => void
@@ -58,10 +52,6 @@ interface Props {
 export default function GraphSidePanel({
   selected,
   onClose,
-  currentLayout,
-  onChangeLayout,
-  onApplyPreset,
-  applyingPreset,
   onOpenNote,
   onDetachParent,
   showDetachParent,
@@ -130,15 +120,24 @@ export default function GraphSidePanel({
             )}
           </div>
         ) : isRootSelected && rootAppearance && onChangeRootAppearance ? (
-          <GraphSettingsPanel
-            currentLayout={currentLayout}
-            onChangeLayout={onChangeLayout}
-            onApplyPreset={onApplyPreset}
-            applyingPreset={applyingPreset}
-            rootAppearance={rootAppearance}
-            onChangeRootAppearance={onChangeRootAppearance}
-            showRootAppearance
-          />
+          <div>
+            <p className="px-3 pb-1 pt-2.5 text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
+              Farbe/Form/Linienstil für den Mittelpunkt und seine Verbindungen zu den Hauptnotizen.
+            </p>
+            {/* Root has no backing Note (frontend-only RootAppearance preference), so no
+                edgeWidth/edgeColor concept - those three NoteAppearanceMenu props are omitted, which
+                hides the "Liniendicke"/"Linienfarbe" controls. */}
+            <NoteAppearanceMenu
+              color={rootAppearance.color}
+              shape={rootAppearance.shape}
+              edgeStyle={rootAppearance.edgeStyle}
+              edgeArrow={rootAppearance.edgeArrow}
+              onChangeColor={(color) => onChangeRootAppearance({ color })}
+              onChangeShape={(shape) => onChangeRootAppearance({ shape })}
+              onChangeEdgeStyle={(edgeStyle) => onChangeRootAppearance({ edgeStyle })}
+              onChangeEdgeArrow={(edgeArrow) => onChangeRootAppearance({ edgeArrow })}
+            />
+          </div>
         ) : null}
       </div>
     </div>

@@ -154,10 +154,27 @@ cross-links — a hand-rolled simulation, not d3-force, to keep the bundle small
 `notesGraph/TreeGraphView.tsx` (a shared canvas for four static tree layouts computed by
 `notesGraph/treeLayouts.ts` from the parent/child hierarchy: mind map/radial, left-to-right tree,
 top-to-bottom org chart, fishbone — one shared node-position algorithm module, one shared
-zoom/pan/drag-to-reparent canvas). The layout picker itself lives in two places at once by design
-(a standalone "Layout & Stil" button next to the List/Graph toggle in `NotesView.tsx`, AND a click
-on `TreeGraphView`'s center node) — the free view has no center-node concept at all, so only the
-standalone button reaches it there.
+zoom/pan/drag-to-reparent canvas). Three **fully independent axes**, one segmented control (same
+glass-panel/rounded-lg look as the List/Graph toggle, `openMenu` state, only one popover open at a
+time) next to the List/Graph toggle in `NotesView.tsx`:
+- **"Layout"** (`LayoutPickerPanel.tsx`) — the 5 layouts, each with a hand-drawn SVG topology
+  thumbnail (`GraphLayoutId` now lives in `treeLayouts.ts`, not the deleted `stylePresets.ts`).
+- **"Farbschema"** (`ColorSchemePanel.tsx`) — **pure palette**, the 6 `COLOR_SCHEMES` from
+  `colorSchemes.ts`, each previewed as its own swatches. Applying one distributes that palette
+  round-robin across every note (`assignSchemeColors`), center node gets the first color. Nothing
+  but `color` changes.
+- **"Form"** (`ShapePickerPanel.tsx`) — the 5 `NoteShape` values (`SHAPE_OPTIONS` in
+  `shapeOptions.ts`, preview icon in `shapePreview.tsx` — split into two files so each stays a
+  single-export module for Fast Refresh), applied project-wide. Nothing but `shape` changes.
+
+All three apply **immediately, no confirm dialog** (removed per explicit user feedback). They used
+to be one combined "Layout & Stil" menu whose presets set layout+color+shape+edge-style at once;
+now each axis is separate. The last-applied scheme/shape is remembered only as a preference
+(`notesGraphScheme`/`notesGraphShape`) for the active-item highlight — the real per-note values
+can't be reverse-derived since notes can hold different values. Clicking `TreeGraphView`'s center
+node opens only that node's own appearance (color/shape/edge style, no width/color — the center
+has no backing `Note`), the same `NoteAppearanceMenu` a regular note click opens — never any of
+these three menus.
 
 `Note.Color`/`Note.Shape` (hex color, `NoteShape` enum) control per-node appearance across both
 graph views; color palettes/schemes are frontend-only concept, the backend only ever stores a
@@ -174,13 +191,14 @@ views — `resolveEdgeWidth`/`resolveEdgeColor` implement the override-beats-not
 
 Both graph views share a permanent right-side panel (`notesGraph/GraphSidePanel.tsx`, flex sibling
 with an animated width, not absolutely positioned — this is what makes the canvas visibly shrink
-alongside it) that swaps content based on what's selected: a note node → `NoteAppearanceMenu.tsx`
-(color/shape/edge style/arrowheads/width/color); the tree view's virtual center node →
-`GraphSettingsPanel.tsx` (layout picker + style presets + center-node appearance — the same
-component the standalone "Layout & Stil" button also opens); a clicked edge →
-`EdgeOverridePanel.tsx`. Selection state (`selectedNodeId`/`selectedEdge`, mutually exclusive) and
-panel open/close both live in each view's own component, not lifted up — `NotesView.tsx` only
-supplies the data callbacks (`onChangeAppearance`, `onChangeEdgeOverride`, etc.).
+alongside it) that swaps content based on what's selected: a note node OR the tree view's virtual
+center node → `NoteAppearanceMenu.tsx` (color/shape/edge style/arrowheads; plus width/color for a
+real note, omitted for the center node which has no backing `Note`); a clicked edge →
+`EdgeOverridePanel.tsx`. The project-wide Layout/Farbschema/Form menus are NOT in this panel at
+all — only in the three-button segmented control in `NotesView.tsx` (see above). Selection state
+(`selectedNodeId`/`selectedEdge`, mutually exclusive) and panel open/close both live in each view's
+own component, not lifted up — `NotesView.tsx` only supplies the data callbacks
+(`onChangeAppearance`, `onChangeEdgeOverride`, `onChangeRootAppearance`, etc.).
 
 A "Glow" edge style (blurred halo behind the line) was tried and removed again after live user
 feedback rejected the visual outright — don't reintroduce it without being asked. Its replacement,
@@ -229,6 +247,19 @@ wherever dictation appears (currently the Notes editor).
 ### Realtime
 
 Kanban board state syncs live across open tabs/users via SignalR (`Hubs/`), not polling.
+
+### Dropdown menus close via `useClickOutside`, not an overlay
+
+Every popover/dropdown/context menu in the frontend closes on an outside `pointerdown` (capture
+phase) or `Escape` through the shared `hooks/useClickOutside.ts` hook — `useClickOutside(ref,
+menuIsOpen, closeCallback)`, with `ref` on the menu's own container (or the segmented control
+wrapping several sibling popovers that share one `openMenu` state). Do **not** reach for a
+`<div className="fixed inset-0" onClick={close}>` click-catcher overlay: it silently fails
+whenever a higher-`z-index`/`position: fixed` element paints over it or a `stopPropagation()`
+sits in the click path — this bit the header menu, project switcher, both graph views'
+right-click menus and the Notes Layout/Farbschema/Form popovers before they were converted.
+`TimelineView.tsx`/`KanbanBoard.tsx` keep their own hand-rolled multi-menu outside-click effects
+(conditional refs the single-ref hook can't express cleanly) but still handle Escape the same way.
 
 ### Versioning
 

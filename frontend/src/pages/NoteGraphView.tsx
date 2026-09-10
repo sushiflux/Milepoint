@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ApiError } from '../api/client'
 import { updateNotePosition } from '../api/notes'
 import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types'
@@ -18,7 +18,7 @@ import {
 } from './notesGraph/edgeStyles'
 import GraphSidePanel from './notesGraph/GraphSidePanel'
 import EdgeOverridePanel from './notesGraph/EdgeOverridePanel'
-import type { GraphLayoutId } from './notesGraph/stylePresets'
+import { useClickOutside } from '../hooks/useClickOutside'
 
 interface Props {
   projectId: string
@@ -37,9 +37,6 @@ interface Props {
       edgeColor?: string | null
     },
   ) => Promise<void>
-  onChangeLayout: (layout: GraphLayoutId) => void
-  onApplyPreset: (presetId: string) => Promise<void>
-  applyingPreset: boolean
   onChangeEdgeOverride: (sourceNoteId: string, targetNoteId: string, width: number | null, color: string | null) => Promise<void>
 }
 
@@ -195,9 +192,6 @@ export default function NoteGraphView({
   onCreateNote,
   onConnectNotes,
   onChangeAppearance,
-  onChangeLayout,
-  onApplyPreset,
-  applyingPreset,
   onChangeEdgeOverride,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -251,6 +245,9 @@ export default function NoteGraphView({
   const autoFitRef = useRef(true)
 
   const [contextMenu, setContextMenu] = useState<{ screen: Point; world: Point } | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
+  const closeContextMenu = useCallback(() => setContextMenu(null), [])
+  useClickOutside(contextMenuRef, contextMenu !== null, closeContextMenu)
   // Rechtes Seitenpanel statt Popup-Kontextmenü - siehe TreeGraphView.tsx für dasselbe Muster.
   // Kein Root-Knoten in dieser freien Ansicht, daher ist selectedNoteId immer eine echte Notiz-ID
   // oder null (globale Einstellungen).
@@ -724,27 +721,25 @@ export default function NoteGraphView({
         )}
 
         {contextMenu && (
-          <>
-            <div className="fixed inset-0 z-20" onClick={() => setContextMenu(null)} />
-            <div
-              className="absolute z-30 w-48 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
-              style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
+          <div
+            ref={contextMenuRef}
+            className="absolute z-30 w-48 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
+            style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
+          >
+            <button
+              onClick={openCreateNoteInput}
+              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
-              <button
-                onClick={openCreateNoteInput}
-                className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                Neue Notiz erstellen
-              </button>
-              <button
-                onClick={startConnectMode}
-                disabled={notes.length < 2}
-                className="block w-full px-4 py-2 text-left font-medium text-slate-700 transition-colors hover:bg-slate-100/50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800/50"
-              >
-                Notizen verbinden
-              </button>
-            </div>
-          </>
+              Neue Notiz erstellen
+            </button>
+            <button
+              onClick={startConnectMode}
+              disabled={notes.length < 2}
+              className="block w-full px-4 py-2 text-left font-medium text-slate-700 transition-colors hover:bg-slate-100/50 disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800/50"
+            >
+              Notizen verbinden
+            </button>
+          </div>
         )}
 
         {createNoteAt && (
@@ -967,10 +962,6 @@ export default function NoteGraphView({
                 setPanelOpen(false)
                 setSelectedNoteId(null)
               }}
-              currentLayout="free"
-              onChangeLayout={onChangeLayout}
-              onApplyPreset={onApplyPreset}
-              applyingPreset={applyingPreset}
               onOpenNote={onSelectNote}
               showDetachParent={false}
               onChangeNoteAppearance={changeNodeAppearance}

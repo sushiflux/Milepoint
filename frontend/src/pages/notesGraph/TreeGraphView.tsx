@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
 import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../../api/types'
 import { computeTreeLayout, type Point, type TreeEdge, type TreeLayoutId } from './treeLayouts'
@@ -18,7 +18,7 @@ import {
 } from './edgeStyles'
 import GraphSidePanel from './GraphSidePanel'
 import EdgeOverridePanel from './EdgeOverridePanel'
-import type { GraphLayoutId } from './stylePresets'
+import { useClickOutside } from '../../hooks/useClickOutside'
 
 export interface RootAppearance {
   color: string | null
@@ -45,9 +45,6 @@ interface Props {
       edgeColor?: string | null
     },
   ) => Promise<void>
-  onChangeLayout: (layout: GraphLayoutId) => void
-  onApplyPreset: (presetId: string) => Promise<void>
-  applyingPreset: boolean
   rootAppearance: RootAppearance
   onChangeRootAppearance: (patch: Partial<RootAppearance>) => void
   // Per-connection style override (see NoteEdgeOverride's backend doc comment) - width/color of
@@ -107,9 +104,6 @@ export default function TreeGraphView({
   onCreateRootNote,
   onSetParent,
   onChangeAppearance,
-  onChangeLayout,
-  onApplyPreset,
-  applyingPreset,
   rootAppearance,
   onChangeRootAppearance,
   onChangeEdgeOverride,
@@ -128,6 +122,9 @@ export default function TreeGraphView({
 
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ screen: Point; world: Point } | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
+  const closeContextMenu = useCallback(() => setContextMenu(null), [])
+  useClickOutside(contextMenuRef, contextMenu !== null, closeContextMenu)
   // Rechtes Seitenpanel: panelOpen steuert Sichtbarkeit, selectedNodeId die kontextabhängige
   // Auswahl innerhalb des offenen Panels ('__root__' = virtueller Projekt-Mittelpunkt, sonst eine
   // Notiz-ID). Ein Klick auf einen Knoten öffnet das Panel UND wählt ihn aus; ein Klick auf leere
@@ -473,20 +470,18 @@ export default function TreeGraphView({
         )}
 
         {contextMenu && (
-          <>
-            <div className="fixed inset-0 z-20" onClick={() => setContextMenu(null)} />
-            <div
-              className="absolute z-30 w-48 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
-              style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
+          <div
+            ref={contextMenuRef}
+            className="absolute z-30 w-48 overflow-hidden rounded-xl border border-slate-200/50 glass shadow-xl dark:border-slate-700/50"
+            style={{ left: contextMenu.screen.x, top: contextMenu.screen.y }}
+          >
+            <button
+              onClick={openCreateNoteInput}
+              className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
             >
-              <button
-                onClick={openCreateNoteInput}
-                className="block w-full px-3 py-1.5 text-left text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-              >
-                Neue Hauptnotiz erstellen
-              </button>
-            </div>
-          </>
+              Neue Hauptnotiz erstellen
+            </button>
+          </div>
         )}
 
         {createNoteAt && (
@@ -746,10 +741,6 @@ export default function TreeGraphView({
                 setPanelOpen(false)
                 setSelectedNodeId(null)
               }}
-              currentLayout={layoutId}
-              onChangeLayout={onChangeLayout}
-              onApplyPreset={onApplyPreset}
-              applyingPreset={applyingPreset}
               onOpenNote={onSelectNote}
               onDetachParent={detachFromParent}
               showDetachParent

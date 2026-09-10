@@ -501,8 +501,18 @@ export default function TimelineView({ projectId, boards, workItems, milestones,
       if (filterMenuRef.current && !filterMenuRef.current.contains(target)) setFilterMenuOpen(false)
       if (depMenuRef.current && !depMenuRef.current.contains(target)) setDepMenuRow(null)
     }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      setRangeMenuOpen(false)
+      setFilterMenuOpen(false)
+      setDepMenuRow(null)
+    }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
   }, [rangeMenuOpen, filterMenuOpen, depMenuRow])
 
   const itemsByParent = useMemo(() => {

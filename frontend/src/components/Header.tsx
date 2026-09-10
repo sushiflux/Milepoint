@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
 import { getVersion } from '../api/version'
+import { useClickOutside } from '../hooks/useClickOutside'
 import ThemeToggle from './ThemeToggle'
 import ProjectSwitcher from './ProjectSwitcher'
 import logoDark from '../assets/logo-dark.svg'
@@ -43,6 +44,9 @@ export default function Header() {
   const { theme } = useTheme()
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [appVersion, setAppVersion] = useState<string | null>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+  const closeUserMenu = useCallback(() => setUserMenuOpen(false), [])
+  useClickOutside(userMenuRef, userMenuOpen, closeUserMenu)
   const logo = theme === 'dark' ? logoDark : logoLight
   const wordmark = theme === 'dark' ? wordmarkDark : wordmarkLight
 
@@ -110,7 +114,7 @@ export default function Header() {
         <div className="h-5 w-px bg-slate-200 dark:bg-slate-700/80" />
 
         {/* User Profile Popover */}
-        <div className="relative">
+        <div className="relative" ref={userMenuRef}>
           <button
             onClick={() => setUserMenuOpen((prev) => !prev)}
             title="Benutzerprofil & Einstellungen"
@@ -122,9 +126,7 @@ export default function Header() {
           </button>
 
           {userMenuOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setUserMenuOpen(false)} />
-              <div className="absolute right-0 top-full z-50 mt-2 w-60 rounded-xl border border-slate-200/80 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
+            <div className="absolute right-0 top-full z-50 mt-2 w-60 rounded-xl border border-slate-200/80 bg-white/95 p-3 shadow-2xl backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-900/95">
                 {/* User Header */}
                 <div className="flex items-center gap-3 border-b border-slate-100 pb-3 dark:border-slate-800">
                   <div className="flex h-9 w-9 items-center justify-center rounded-full bg-brand-primary/10 text-sm font-bold text-brand-primary dark:bg-brand-primary/20 dark:text-brand-primary-light">
@@ -171,12 +173,11 @@ export default function Header() {
                   </button>
                 </div>
 
-                {/* Footer: app version, always visible somewhere in the UI per project convention */}
-                <div className="mt-2 border-t border-slate-100 pt-2 text-center text-[10px] font-medium text-slate-400 dark:border-slate-800 dark:text-slate-500">
-                  Milepoint {appVersion ?? '–'}
-                </div>
+              {/* Footer: app version, always visible somewhere in the UI per project convention */}
+              <div className="mt-2 border-t border-slate-100 pt-2 text-center text-[10px] font-medium text-slate-400 dark:border-slate-800 dark:text-slate-500">
+                Milepoint {appVersion ?? '–'}
               </div>
-            </>
+            </div>
           )}
         </div>
       </div>
