@@ -248,13 +248,11 @@ export default function NoteGraphView({
   const contextMenuRef = useRef<HTMLDivElement>(null)
   const closeContextMenu = useCallback(() => setContextMenu(null), [])
   useClickOutside(contextMenuRef, contextMenu !== null, closeContextMenu)
-  // Rechtes Seitenpanel statt Popup-Kontextmenü - siehe TreeGraphView.tsx für dasselbe Muster.
-  // Kein Root-Knoten in dieser freien Ansicht, daher ist selectedNoteId immer eine echte Notiz-ID
-  // oder null (globale Einstellungen).
+  // Rechtes Seitenpanel statt Popup-Kontextmenü.
   const [panelOpen, setPanelOpen] = useState(false)
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   // A clicked EDGE (not node) opens EdgeOverridePanel instead of GraphSidePanel - mutually
-  // exclusive with selectedNoteId, same pattern as TreeGraphView.tsx.
+  // exclusive with selectedNoteId.
   const [selectedEdge, setSelectedEdge] = useState<{ sourceNoteId: string; targetNoteId: string } | null>(null)
   const [createNoteAt, setCreateNoteAt] = useState<{ screen: Point; world: Point } | null>(null)
   const [newNodeTitle, setNewNodeTitle] = useState('')
@@ -493,8 +491,8 @@ export default function NoteGraphView({
 
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return
-    // Klick auf leere Canvas-Fläche schließt das Panel komplett (siehe TreeGraphView.tsx für
-    // dasselbe Muster) - es gibt keinen permanent sichtbaren "globalen" Panel-Zustand mehr.
+    // Klick auf leere Canvas-Fläche schließt das Panel komplett - es gibt keinen permanent
+    // sichtbaren "globalen" Panel-Zustand mehr.
     setPanelOpen(false)
     setSelectedNoteId(null)
     setSelectedEdge(null)
@@ -812,8 +810,7 @@ export default function NoteGraphView({
                 are a deliberate, understood exception, not an oversight the rule is correctly
                 catching elsewhere. Each edge is also wrapped in an invisible wider hit-area line +
                 click handler so a single connection can be clicked to open EdgeOverridePanel,
-                independent of clicking either endpoint's node - see TreeGraphView.tsx's matching
-                comment. */}
+                independent of clicking either endpoint's node. */}
             {/* eslint-disable-next-line react-hooks/refs */}
             {edges.map(([a, b]) => {
               const na = positionsRef.current.get(a)
@@ -927,9 +924,9 @@ export default function NoteGraphView({
         )}
       </div>
 
-      {/* Flex sibling with an animated width, not absolutely positioned over the canvas - see
-          TreeGraphView's matching comment for why this is what makes the canvas visibly
-          shrink/grow alongside the panel instead of the panel just appearing on top. */}
+      {/* Flex sibling with an animated width, not absolutely positioned over the canvas - this is
+          what makes the canvas visibly shrink/grow alongside the panel instead of the panel just
+          appearing on top. */}
       <div className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${panelOpen ? 'w-72' : 'w-0'}`}>
         <div className="h-full w-72">
           {panelOpen && selectedEdge ? (
@@ -957,13 +954,15 @@ export default function NoteGraphView({
             })()
           ) : panelOpen ? (
             <GraphSidePanel
-              selected={selectedNoteId ? { kind: 'note', note: notes.find((n) => n.id === selectedNoteId) } : null}
+              selected={(() => {
+                const note = selectedNoteId ? notes.find((n) => n.id === selectedNoteId) : undefined
+                return note ? { note } : null
+              })()}
               onClose={() => {
                 setPanelOpen(false)
                 setSelectedNoteId(null)
               }}
               onOpenNote={onSelectNote}
-              showDetachParent={false}
               onChangeNoteAppearance={changeNodeAppearance}
             />
           ) : null}

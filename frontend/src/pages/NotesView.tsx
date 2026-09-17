@@ -1,14 +1,11 @@
 import { useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { createNote, deleteNote, updateNote, setNoteEdgeOverride, getNotes, type NoteAppearanceFields } from '../api/notes'
 import { ApiError } from '../api/client'
-import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types'
+import type { Note, NoteShape } from '../api/types'
 import NoteGraphView from './NoteGraphView'
-import TreeGraphView, { type RootAppearance } from './notesGraph/TreeGraphView'
-import LayoutPickerPanel from './notesGraph/LayoutPickerPanel'
 import ColorSchemePanel from './notesGraph/ColorSchemePanel'
 import ShapePickerPanel from './notesGraph/ShapePickerPanel'
-import type { GraphLayoutId } from './notesGraph/treeLayouts'
-import { assignSchemeColors, colorForIndex } from './notesGraph/colorSchemes'
+import { assignSchemeColors } from './notesGraph/colorSchemes'
 import AddButton from '../components/AddButton'
 import DictationButton from '../components/DictationButton'
 import { usePreferences } from '../context/PreferencesContext'
@@ -16,7 +13,6 @@ import { useClickOutside } from '../hooks/useClickOutside'
 
 interface Props {
   projectId: string
-  projectName: string
   notes: Note[]
   onNotesChange: (notes: Note[]) => void
 }
@@ -29,13 +25,8 @@ interface OpenTab {
 }
 
 type ViewMode = 'list' | 'graph'
-// 'free' is the physics-simulated force graph (NoteGraphView, based on the free cross-links);
-// the other four are static tree layouts sharing TreeGraphView, based on the parent/child
-// hierarchy - see notesGraph/treeLayouts.ts for how each one computes node positions.
-type GraphLayout = GraphLayoutId
 
 const VIEW_MODE_PREFERENCE_KEY = 'notesViewMode'
-const GRAPH_LAYOUT_PREFERENCE_KEY = 'notesGraphLayout'
 // The last project-wide color scheme / node shape applied via the standalone "Farbschema"/"Form"
 // buttons. Purely for the active-item highlight in those menus - the actual per-note colors/shapes
 // live on each Note and can't be reverse-derived (different notes hold different values), so this
@@ -43,54 +34,18 @@ const GRAPH_LAYOUT_PREFERENCE_KEY = 'notesGraphLayout'
 // backend field.
 const GRAPH_SCHEME_PREFERENCE_KEY = 'notesGraphScheme'
 const GRAPH_SHAPE_PREFERENCE_KEY = 'notesGraphShape'
-// Frontend-only appearance for the virtual project-center node in TreeGraphView (no backing Note
-// object exists for it - see TreeGraphView's RootAppearance type / GraphSidePanel's "kind: 'root'"
-// case). Persisted the same way as notesGraphLayout, JSON-serialized since it's a small object,
-// not a single scalar.
-const ROOT_APPEARANCE_PREFERENCE_KEY = 'notesGraphRootAppearance'
 // Kein modul-globales RegExp mit 'g'-Flag (dessen lastIndex müsste zwischen Aufrufen mutiert
 // werden, was react-hooks/immutability zurecht als Render-unsichere Mutation eines außerhalb der
 // Komponente definierten Werts ablehnt) - stattdessen die reine Pattern-Quelle halten und in
 // renderContent() pro Aufruf ein frisches RegExp-Objekt erzeugen.
 const LINK_PATTERN_SOURCE = '\\[\\[([^[\\]]+)]]'
 
-const DEFAULT_ROOT_APPEARANCE: RootAppearance = { color: null, shape: null, edgeStyle: null, edgeArrow: null }
-
 function isViewMode(value: string): value is ViewMode {
   return value === 'list' || value === 'graph'
 }
 
-function isGraphLayout(value: string): value is GraphLayout {
-  return value === 'free' || value === 'mindmap' || value === 'tree-horizontal' || value === 'tree-vertical' || value === 'fishbone'
-}
-
 function isNoteShape(value: string): value is NoteShape {
   return value === 'Rounded' || value === 'Rectangle' || value === 'Diamond' || value === 'Underline' || value === 'Ellipse'
-}
-
-// Der Root-Knoten (virtueller Projekt-Mittelpunkt) hat keine eigene Notiz-ID und wird daher nicht
-// von assignSchemeColors' reihum-Verteilung erfasst - er erhält stattdessen die erste Farbe des
-// gewählten Schemas, damit er farblich sichtbar zur selben Vorlage gehört, ohne mit der ersten
-// echten Notiz zu kollidieren wäre (unterschiedliche Knotenform/-größe macht das ohnehin klar).
-function colorForRootPreset(schemeId: string): string {
-  return colorForIndex(schemeId, 0)
-}
-
-function parseRootAppearance(raw: string): RootAppearance {
-  try {
-    const parsed = JSON.parse(raw)
-    if (parsed && typeof parsed === 'object') {
-      return {
-        color: typeof parsed.color === 'string' ? parsed.color : null,
-        shape: typeof parsed.shape === 'string' ? (parsed.shape as NoteShape) : null,
-        edgeStyle: typeof parsed.edgeStyle === 'string' ? (parsed.edgeStyle as NoteEdgeStyle) : null,
-        edgeArrow: typeof parsed.edgeArrow === 'string' ? (parsed.edgeArrow as NoteEdgeArrow) : null,
-      }
-    }
-  } catch {
-    // Kein gültiges JSON (z.B. noch nie gesetzt) - Standardwert verwenden.
-  }
-  return DEFAULT_ROOT_APPEARANCE
 }
 
 // Pulls the appearance fields updateNote()/createNote() always need re-sent (see
@@ -110,16 +65,10 @@ function appearanceOf(note: Note): NoteAppearanceFields {
 
 const DEFAULT_APPEARANCE: NoteAppearanceFields = { color: null, shape: null, edgeStyle: null, edgeArrow: null, edgeWidth: null, edgeColor: null }
 
-export default function NotesView({ projectId, projectName, notes, onNotesChange }: Props) {
+export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   const { loaded: preferencesLoaded, getPreference, setPreference } = usePreferences()
   const storedViewMode = getPreference(VIEW_MODE_PREFERENCE_KEY, 'list')
   const [viewMode, setViewModeState] = useState<ViewMode>(isViewMode(storedViewMode) ? storedViewMode : 'list')
-  const storedGraphLayout = getPreference(GRAPH_LAYOUT_PREFERENCE_KEY, 'free')
-  const [graphLayout, setGraphLayoutState] = useState<GraphLayout>(isGraphLayout(storedGraphLayout) ? storedGraphLayout : 'free')
-  const storedRootAppearance = getPreference(ROOT_APPEARANCE_PREFERENCE_KEY, '')
-  const [rootAppearance, setRootAppearanceState] = useState<RootAppearance>(
-    storedRootAppearance ? parseRootAppearance(storedRootAppearance) : DEFAULT_ROOT_APPEARANCE,
-  )
   const storedScheme = getPreference(GRAPH_SCHEME_PREFERENCE_KEY, '')
   const [appliedSchemeId, setAppliedSchemeIdState] = useState<string | null>(storedScheme || null)
   const storedShape = getPreference(GRAPH_SHAPE_PREFERENCE_KEY, '')
@@ -129,52 +78,33 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
 
   // useState's initializer above only ever runs once, on this component's very first mount - but
   // PreferencesContext loads the real DB values asynchronously (see PreferencesContext.tsx), so if
-  // NotesView happens to mount before that fetch resolves, `storedViewMode`/`storedGraphLayout`/
-  // `storedRootAppearance` above all read as their hardcoded fallback ('list'/'free'/default) at
-  // that first render and then stay frozen at that wrong value forever, since useState never
-  // re-runs its initializer on its own. This is exactly the "view mode randomly flips between
-  // list/graph on repeated reloads" bug: which value gets frozen in depends on a race between this
-  // mount and the preferences fetch, not on anything the user did. Once `loaded` flips true, the
-  // DB values are authoritative and get synced in here - same prevLoaded-comparison-during-render
-  // pattern as ThemeContext.tsx (a ref-based comparison would hit the same react-hooks/refs
-  // restriction that react-hooks/set-state-in-effect exists to avoid in the first place), so this
-  // only reacts to the one loaded: false -> true transition, never re-fires on every render.
+  // NotesView happens to mount before that fetch resolves, `storedViewMode` above reads as its
+  // hardcoded fallback ('list') at that first render and then stays frozen at that wrong value
+  // forever, since useState never re-runs its initializer on its own. This is exactly the "view
+  // mode randomly flips between list/graph on repeated reloads" bug: which value gets frozen in
+  // depends on a race between this mount and the preferences fetch, not on anything the user did.
+  // Once `loaded` flips true, the DB values are authoritative and get synced in here - same
+  // prevLoaded-comparison-during-render pattern as ThemeContext.tsx (a ref-based comparison would
+  // hit the same react-hooks/refs restriction that react-hooks/set-state-in-effect exists to avoid
+  // in the first place), so this only reacts to the one loaded: false -> true transition, never
+  // re-fires on every render.
   const [prevPreferencesLoaded, setPrevPreferencesLoaded] = useState(preferencesLoaded)
   if (preferencesLoaded !== prevPreferencesLoaded) {
     setPrevPreferencesLoaded(preferencesLoaded)
     if (preferencesLoaded) {
       const dbViewMode = getPreference(VIEW_MODE_PREFERENCE_KEY, viewMode)
       if (isViewMode(dbViewMode) && dbViewMode !== viewMode) setViewModeState(dbViewMode)
-      const dbGraphLayout = getPreference(GRAPH_LAYOUT_PREFERENCE_KEY, graphLayout)
-      if (isGraphLayout(dbGraphLayout) && dbGraphLayout !== graphLayout) setGraphLayoutState(dbGraphLayout)
       const dbScheme = getPreference(GRAPH_SCHEME_PREFERENCE_KEY, '')
       if ((dbScheme || null) !== appliedSchemeId) setAppliedSchemeIdState(dbScheme || null)
       const dbShape = getPreference(GRAPH_SHAPE_PREFERENCE_KEY, '')
       const dbShapeValue = isNoteShape(dbShape) ? dbShape : null
       if (dbShapeValue !== appliedShape) setAppliedShapeState(dbShapeValue)
-      const dbRootAppearanceRaw = getPreference(ROOT_APPEARANCE_PREFERENCE_KEY, '')
-      if (dbRootAppearanceRaw) {
-        const dbRootAppearance = parseRootAppearance(dbRootAppearanceRaw)
-        setRootAppearanceState((prev) =>
-          dbRootAppearance.color !== prev.color ||
-          dbRootAppearance.shape !== prev.shape ||
-          dbRootAppearance.edgeStyle !== prev.edgeStyle ||
-          dbRootAppearance.edgeArrow !== prev.edgeArrow
-            ? dbRootAppearance
-            : prev,
-        )
-      }
     }
   }
 
   function setViewMode(mode: ViewMode) {
     setViewModeState(mode)
     setPreference(VIEW_MODE_PREFERENCE_KEY, mode)
-  }
-
-  function setGraphLayout(layout: GraphLayout) {
-    setGraphLayoutState(layout)
-    setPreference(GRAPH_LAYOUT_PREFERENCE_KEY, layout)
   }
 
   function setAppliedSchemeId(schemeId: string) {
@@ -187,28 +117,12 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     setPreference(GRAPH_SHAPE_PREFERENCE_KEY, shape)
   }
 
-  function setRootAppearance(patch: Partial<RootAppearance>) {
-    // setPreference() (which updates PreferencesStateProvider's own state - a DIFFERENT component)
-    // must not run inside the setRootAppearanceState updater callback below - React logs "Cannot
-    // update a component while rendering a different component" when an updater function (which
-    // must be a pure computation of prev -> next) has a side effect like that, since React can
-    // invoke updater functions during a render pass (e.g. replaying them to reconcile a batch),
-    // not only after commit. `rootAppearance` is already the current value here (this function
-    // closes over the same render's state, no stale-closure risk since it's only ever called from
-    // an event handler, never from inside another updater), so the merge can happen directly
-    // instead of needing the updater form at all.
-    const next = { ...rootAppearance, ...patch }
-    setRootAppearanceState(next)
-    setPreference(ROOT_APPEARANCE_PREFERENCE_KEY, JSON.stringify(next))
-  }
-
-  // Three standalone popovers in one segmented container next to the List/Graph toggle - "Layout"
-  // (LayoutPickerPanel), "Farbschema" (ColorSchemePanel, pure palette) and "Form" (ShapePickerPanel,
-  // node shape). These used to be one combined "Layout & Stil" menu (and before that only reachable
-  // by clicking TreeGraphView's center node); per explicit user feedback they're now three separate
-  // axes, each applied immediately without a confirm dialog. All work in the free view too (which
-  // has no center-node concept). Only one popover open at a time.
-  const [openMenu, setOpenMenu] = useState<'layout' | 'scheme' | 'shape' | null>(null)
+  // Two standalone popovers in one segmented container next to the List/Graph toggle -
+  // "Farbschema" (ColorSchemePanel, pure palette) and "Form" (ShapePickerPanel, node shape), each
+  // applied immediately without a confirm dialog. useClickOutside on the whole group closes
+  // whichever popover is open when a pointerdown/Escape lands anywhere outside it. Only one
+  // popover open at a time.
+  const [openMenu, setOpenMenu] = useState<'scheme' | 'shape' | null>(null)
   const graphMenuRef = useRef<HTMLDivElement>(null)
   const closeGraphMenu = useCallback(() => setOpenMenu(null), [])
   useClickOutside(graphMenuRef, openMenu !== null, closeGraphMenu)
@@ -306,7 +220,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     if (!title) return
 
     try {
-      const created = await createNote(projectId, title, '', null, DEFAULT_APPEARANCE)
+      const created = await createNote(projectId, title, '', DEFAULT_APPEARANCE)
       onNotesChange([...notes, created])
       setNewTitle('')
       setShowCreateForm(false)
@@ -392,7 +306,7 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
   }
 
   async function handleGraphCreateNote(title: string) {
-    const created = await createNote(projectId, title, '', null, DEFAULT_APPEARANCE)
+    const created = await createNote(projectId, title, '', DEFAULT_APPEARANCE)
     onNotesChange([...notes, created])
   }
 
@@ -408,32 +322,9 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
   }
 
-  // Shared by all four tree layouts (Mind Map, Baum, Organigramm, Fischgräten) - they only differ
-  // in node placement (see notesGraph/treeLayouts.ts), the hierarchy interactions are identical.
-  function handleTreeSelect(note: Note) {
-    openNote(note)
-    setViewMode('list')
-  }
-
-  async function handleTreeCreateRootNote(title: string) {
-    const created = await createNote(projectId, title, '', null, DEFAULT_APPEARANCE)
-    onNotesChange([...notes, created])
-  }
-
-  async function handleTreeSetParent(noteId: string, parentNoteId: string | null) {
-    const note = notes.find((n) => n.id === noteId)
-    if (!note) return
-    const updated = await updateNote(projectId, note.id, note.title, note.content, appearanceOf(note), {
-      setParentNoteId: true,
-      parentNoteId,
-    })
-    onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
-  }
-
-  // Shared by both graph views (free + all four tree layouts) - changes only the note's own
-  // appearance fields, always re-sending the note's current title/content so neither is
-  // accidentally touched (updateNote always applies title/content as given, same as the
-  // appearance fields themselves).
+  // Changes only the note's own appearance fields, always re-sending the note's current
+  // title/content so neither is accidentally touched (updateNote always applies title/content as
+  // given, same as the appearance fields themselves).
   async function handleNoteAppearanceChange(
     noteId: string,
     patch: {
@@ -471,11 +362,11 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     onNotesChange(refreshed)
   }
 
-  // Verteilt die Palette eines Farbschemas (colorSchemes.ts) reihum auf ALLE Notizen im Projekt
-  // (der Mittelpunkt bekommt die erste Farbe) - nur die FARBE, sonst nichts. Ohne Rückfrage, sofort.
-  // Form und Linienstil bleiben unangetastet. Läuft sequenziell statt Promise.all, damit ein
-  // einzelner Fehlschlag mitten im Durchlauf nicht dutzende parallele Requests im unbestimmten
-  // Zustand hinterlässt und der Nutzer eine konkrete Fehlermeldung sieht.
+  // Verteilt die Palette eines Farbschemas (colorSchemes.ts) reihum auf ALLE Notizen im Projekt -
+  // nur die FARBE, sonst nichts. Ohne Rückfrage, sofort. Form und Linienstil bleiben unangetastet.
+  // Läuft sequenziell statt Promise.all, damit ein einzelner Fehlschlag mitten im Durchlauf nicht
+  // dutzende parallele Requests im unbestimmten Zustand hinterlässt und der Nutzer eine konkrete
+  // Fehlermeldung sieht.
   async function handleApplyScheme(schemeId: string) {
     setApplyingPreset(true)
     setPresetError(null)
@@ -492,7 +383,6 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
         updatedNotes.push(updated)
       }
       onNotesChange(notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n))
-      setRootAppearance({ color: colorForRootPreset(schemeId) })
       setAppliedSchemeId(schemeId)
     } catch (err) {
       setPresetError(err instanceof ApiError ? err.message : 'Farbschema konnte nicht vollständig angewendet werden.')
@@ -501,8 +391,8 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
     }
   }
 
-  // Setzt eine Knotenform auf ALLE Notizen im Projekt (inkl. Mittelpunkt) - nur die FORM, sonst
-  // nichts. Ohne Rückfrage, sofort. Farbe und Linienstil bleiben unangetastet.
+  // Setzt eine Knotenform auf ALLE Notizen im Projekt - nur die FORM, sonst nichts. Ohne
+  // Rückfrage, sofort. Farbe und Linienstil bleiben unangetastet.
   async function handleApplyShape(shape: NoteShape) {
     setApplyingPreset(true)
     setPresetError(null)
@@ -516,7 +406,6 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
         updatedNotes.push(updated)
       }
       onNotesChange(notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n))
-      setRootAppearance({ shape })
       setAppliedShape(shape)
     } catch (err) {
       setPresetError(err instanceof ApiError ? err.message : 'Form konnte nicht vollständig angewendet werden.')
@@ -544,18 +433,18 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
         </div>
 
         {viewMode === 'graph' && (
-          // Layout / Farbschema / Form as one segmented control, same glass-panel/rounded-lg
-          // treatment as the List/Graph toggle above so they read as one related group. Each
-          // button toggles its own popover (openMenu, only one open at a time); useClickOutside
-          // on the whole group closes whichever popover is open when a pointerdown/Escape lands
-          // anywhere outside it (replaced an earlier `fixed inset-0` overlay that a higher-z
-          // element could paint over, leaving the menu stuck open).
+          // Farbschema / Form as one segmented control, same glass-panel/rounded-lg treatment as
+          // the List/Graph toggle above so they read as one related group. Each button toggles its
+          // own popover (openMenu, only one open at a time); useClickOutside on the whole group
+          // closes whichever popover is open when a pointerdown/Escape lands anywhere outside it.
           <div className="relative z-30 flex w-fit rounded-lg p-1 glass-panel" ref={graphMenuRef}>
             {(
               [
-                { key: 'layout', label: 'Layout', panel: <LayoutPickerPanel currentLayout={graphLayout} onChangeLayout={setGraphLayout} /> },
-                { key: 'scheme', label: 'Farbschema', panel: <ColorSchemePanel currentSchemeId={appliedSchemeId} onApplyScheme={handleApplyScheme} applying={applyingPreset} /> },
-                { key: 'shape', label: 'Form', panel: <ShapePickerPanel currentShape={appliedShape} onApplyShape={handleApplyShape} applying={applyingPreset} /> },
+                // Each panel's apply callback also closes the popover - picking a scheme/shape is
+                // a one-shot action, and leaving the menu open over the graph just hides the
+                // result the user wants to see.
+                { key: 'scheme', label: 'Farbschema', panel: <ColorSchemePanel currentSchemeId={appliedSchemeId} onApplyScheme={async (id) => { await handleApplyScheme(id); setOpenMenu(null) }} applying={applyingPreset} /> },
+                { key: 'shape', label: 'Form', panel: <ShapePickerPanel currentShape={appliedShape} onApplyShape={async (s) => { await handleApplyShape(s); setOpenMenu(null) }} applying={applyingPreset} /> },
               ] as const
             ).map((item) => (
               <div key={item.key} className="relative">
@@ -584,30 +473,15 @@ export default function NotesView({ projectId, projectName, notes, onNotesChange
       {presetError && <p className="text-sm text-red-400">{presetError}</p>}
 
       {viewMode === 'graph' ? (
-        graphLayout === 'free' ? (
-          <NoteGraphView
-            projectId={projectId}
-            notes={notes}
-            onSelectNote={handleGraphSelect}
-            onCreateNote={handleGraphCreateNote}
-            onConnectNotes={handleGraphConnect}
-            onChangeAppearance={handleNoteAppearanceChange}
-            onChangeEdgeOverride={handleEdgeOverrideChange}
-          />
-        ) : (
-          <TreeGraphView
-            projectName={projectName}
-            notes={notes}
-            layout={graphLayout}
-            onSelectNote={handleTreeSelect}
-            onChangeAppearance={handleNoteAppearanceChange}
-            onCreateRootNote={handleTreeCreateRootNote}
-            onSetParent={handleTreeSetParent}
-            rootAppearance={rootAppearance}
-            onChangeRootAppearance={setRootAppearance}
-            onChangeEdgeOverride={handleEdgeOverrideChange}
-          />
-        )
+        <NoteGraphView
+          projectId={projectId}
+          notes={notes}
+          onSelectNote={handleGraphSelect}
+          onCreateNote={handleGraphCreateNote}
+          onConnectNotes={handleGraphConnect}
+          onChangeAppearance={handleNoteAppearanceChange}
+          onChangeEdgeOverride={handleEdgeOverrideChange}
+        />
       ) : (
         <div className="flex gap-6">
           <aside className="w-56 shrink-0 space-y-3">

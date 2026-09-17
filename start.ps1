@@ -6,8 +6,14 @@
   .\start.ps1 -Action restart  Stoppt und startet neu
   .\start.ps1 -Action status   Zeigt den Container-Status
   .\start.ps1 -Action logs     Folgt den Logs aller Services
-  .\start.ps1 -Db mssql        Wechselt DB_PROVIDER und startet nur das Backend neu
-  .\start.ps1 -WithWhisper     Startet zusätzlich den optionalen Speech-to-Text-Dienst (whisper)
+  .\start.ps1 -Db mssql -MssqlCheck   Wechselt DB_PROVIDER auf mssql UND startet den mssql-Dienst mit
+  .\start.ps1 -MssqlCheck             Startet zusätzlich den mssql-Dienst (Provider-Kompatibilitätscheck vor RC/V-Commit)
+  .\start.ps1 -NoWhisper              Startet OHNE den Speech-to-Text-Dienst (whisper) - läuft sonst immer mit
+
+  Hinweis: "-Action stop" ohne -MssqlCheck lässt einen zuvor gestarteten mssql-Container bewusst
+  weiterlaufen (analog zu whisper/-NoWhisper) - nach einem MSSQL-Check manuell stoppen, wenn er
+  nicht weiterlaufen soll: docker stop milepoint-mssql-1 (mssql ist deutlich RAM-hungriger als
+  whisper, läuft also nicht "einfach mit" wie whisper standardmäßig).
 #>
 
 param(
@@ -19,12 +25,25 @@ param(
 
     [switch]$NoBuild,
 
-    # Optionaler Speech-to-Text-Dienst für die Voice-Dictation-Funktion (siehe docker-compose.yml,
-    # Service "whisper"). Läuft standardmäßig NICHT mit - die meisten Nutzer verwenden den
-    # Browser-basierten Provider ohne serverseitige Transkription. Aktiviert das Compose-Profil
-    # "whisper" zusätzlich zum normalen Start/Stop/Restart.
-    [switch]$WithWhisper
+    # Speech-to-Text-Dienst für die Voice-Dictation-Funktion (siehe docker-compose.yml, Service
+    # "whisper"). Läuft standardmäßig MIT - der Admin-Bereich lässt den Transkriptionsanbieter
+    # jederzeit auf "Whisper" umstellen, und ohne laufenden Container führt das sonst zu einem
+    # stillen 502 bei jedem Diktierversuch statt einer klaren Fehlermeldung beim Stack-Start
+    # (live beobachtet: Provider stand auf Whisper, Stack lief ohne den Container, DictationButton
+    # scheiterte erst beim tatsächlichen Aufnahmeversuch). -NoWhisper schaltet es explizit ab, für
+    # den seltenen Fall, dass wirklich nur der Browser-Provider genutzt werden soll und der
+    # zusätzliche Container vermieden werden soll.
+    [switch]$NoWhisper,
+
+    # MSSQL läuft NICHT mehr standardmäßig mit (siehe docker-compose.yml, Service "mssql" hinter
+    # dem "mssql-check"-Profil) - der tägliche Dev-Stack braucht nur Postgres. -MssqlCheck startet
+    # den mssql-Dienst gezielt mit, für den Fall, dass die SqlServerPmDbContext-Seite der dualen
+    # EF-Core-Provider-Architektur geprüft werden muss (Standardfall: vor einem RC-Commit/V-Commit,
+    # siehe "Test depth by commit word" in der globalen CLAUDE.md). Ohne dieses Flag bleibt mssql
+    # unberührt (weder gestartet noch gestoppt), analog zum -NoWhisper/whisper-Muster oben.
+    [switch]$MssqlCheck
 )
+$WithWhisper = -not $NoWhisper
 
 $ErrorActionPreference = 'Stop'
 $ProjectName = 'milepoint'
@@ -191,13 +210,16 @@ function Resolve-Ports {
 }
 
 function Invoke-Compose([string[]]$ComposeArgs) {
-    # --profile whisper aktiviert den optionalen whisper-Service zusätzlich zu den profillosen
-    # (Standard-)Services - Compose startet Services ohne "profiles:"-Eintrag immer, unabhängig
-    # von --profile, siehe docker-compose.yml. Ohne -WithWhisper bleibt whisper unberührt (weder
-    # gestartet noch gestoppt), damit ein bereits separat laufender whisper-Container durch einen
-    # normalen "start.ps1 stop" nicht versehentlich mit heruntergefahren wird.
+    # --profile whisper/--profile mssql-check aktivieren die entsprechenden Services zusätzlich zu
+    # den profillosen (Standard-)Services - Compose startet Services ohne "profiles:"-Eintrag immer,
+    # unabhängig von --profile, siehe docker-compose.yml. $WithWhisper ist standardmäßig true (siehe
+    # oben), $MssqlCheck standardmäßig false (MSSQL ist die Ausnahme, nicht der Dev-Alltag) - ohne
+    # das jeweilige Flag bleibt der Service unberührt (weder gestartet noch gestoppt), damit ein
+    # bereits separat laufender Container durch einen normalen "start.ps1 stop" nicht versehentlich
+    # mit heruntergefahren wird.
     $profileArgs = @()
-    if ($WithWhisper) { $profileArgs = @('--profile', 'whisper') }
+    if ($WithWhisper) { $profileArgs += @('--profile', 'whisper') }
+    if ($MssqlCheck) { $profileArgs += @('--profile', 'mssql-check') }
     & docker compose -p $ProjectName --env-file $EnvFile @profileArgs @ComposeArgs
     if ($LASTEXITCODE -ne 0) {
         throw "docker compose $($ComposeArgs -join ' ') ist fehlgeschlagen (Exit Code $LASTEXITCODE)."
@@ -232,8 +254,9 @@ function Get-ComposeContainers {
 function Wait-ForHealth([int]$TimeoutSeconds = 240) {
     Write-Host "`nWarte auf Healthchecks..." -ForegroundColor Cyan
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $servicesWithHealthcheck = @('postgres', 'mssql', 'redis', 'backend', 'frontend')
+    $servicesWithHealthcheck = @('postgres', 'redis', 'backend', 'frontend')
     if ($WithWhisper) { $servicesWithHealthcheck += 'whisper' }
+    if ($MssqlCheck) { $servicesWithHealthcheck += 'mssql' }
 
     while ((Get-Date) -lt $deadline) {
         $containers = Get-ComposeContainers
@@ -362,11 +385,23 @@ switch ($Action) {
 Initialize-EnvFile
 
 if ($Db) {
+    # mssql läuft nur hinter dem "mssql-check"-Profil (siehe docker-compose.yml) - ohne -MssqlCheck
+    # würde "-Db mssql" das Backend auf einen nicht laufenden Service umstellen und stumm mit einem
+    # Verbindungsfehler scheitern (dasselbe Muster, das beim Whisper-Provider schon zu einem
+    # schwer diagnostizierbaren 502 geführt hat - hier lieber sofort und klar abbrechen).
+    if ($Db -eq 'mssql' -and -not $MssqlCheck) {
+        throw "-Db mssql braucht auch -MssqlCheck, damit der mssql-Dienst tatsächlich mitläuft (er ist seit der Dev-Stack-Vereinfachung kein Dauer-Service mehr). Beispiel: .\start.ps1 -Db mssql -MssqlCheck"
+    }
+
     Set-EnvValue -Path $EnvFile -Key 'DB_PROVIDER' -Value $Db
     Write-Host "DB_PROVIDER auf '$Db' gesetzt." -ForegroundColor Cyan
 
     $backendRunning = & docker compose -p $ProjectName ps -q backend
     if ($backendRunning) {
+        if ($MssqlCheck) {
+            Write-Host "Starte mssql (mssql-check-Profil) mit..." -ForegroundColor Cyan
+            Invoke-Compose @('up', '-d', 'mssql')
+        }
         Write-Host "Starte Backend neu, damit die neue Datenbank verwendet wird..." -ForegroundColor Cyan
         Invoke-Compose @('up', '-d', '--force-recreate', 'backend')
         Wait-ForHealth -TimeoutSeconds 120
@@ -438,6 +473,10 @@ Write-Host "  Mailpit:  http://localhost:$mailpitPort"
 if ($WithWhisper) {
     $whisperPort = Get-EnvValue -Path $EnvFile -Key 'WHISPER_PORT'
     Write-Host "  Whisper:  http://localhost:$whisperPort  (Speech-to-Text, POST /asr)"
+}
+if ($MssqlCheck) {
+    $mssqlPort = Get-EnvValue -Path $EnvFile -Key 'MSSQL_PORT'
+    Write-Host "  MSSQL:    localhost:$mssqlPort  (mssql-check-Profil aktiv)"
 }
 Write-Host "`nBeim ersten Aufruf warnt der Browser vor dem Zertifikat (selbst ausgestellte, lokale CA von Caddy)."
 Write-Host "Einmalig als vertrauenswürdig einrichten: siehe docs/03-runbook.md Abschnitt 'HTTPS lokal vertrauen'."

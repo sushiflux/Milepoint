@@ -20,8 +20,16 @@ services:
       timeout: 5s
       retries: 10
 
+  # MSSQL is NOT part of the everyday dev stack anymore - it only starts via the "mssql-check"
+  # profile (docker compose --profile mssql-check up -d mssql, or start.ps1 -MssqlCheck), spun up
+  # deliberately before an RC-Commit/V-Commit to verify the SqlServerPmDbContext provider still
+  # works (see the dual-EF-Core-provider architecture in CLAUDE.md), rather than staying resident
+  # for the rest of a session the way it used to. Keeping two full DB servers running all the time
+  # for a provider only occasionally exercised was wasted resources for no daily benefit - Postgres
+  # alone is the dev default now (DB_PROVIDER=postgres).
   mssql:
     image: mcr.microsoft.com/mssql/server:2025-latest
+    profiles: ["mssql-check"]
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?MSSQL_SA_PASSWORD fehlt in .env}
@@ -59,7 +67,6 @@ services:
       - "${ADMINER_PORT:-8081}:8080"
     depends_on:
       - postgres
-      - mssql
 
   backend:
     build:
@@ -69,6 +76,9 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       DB_PROVIDER: ${DB_PROVIDER:-postgres}
       ConnectionStrings__Postgres: Host=postgres;Port=5432;Database=${POSTGRES_DB:-milepoint};Username=${POSTGRES_USER:-milepoint};Password=${POSTGRES_PASSWORD:?}
+      # Only actually dialed when DB_PROVIDER=mssql - the mssql service itself only exists behind
+      # the "mssql-check" profile (see its own comment above), so this connection string sits
+      # unused/harmless whenever DB_PROVIDER stays at the postgres default.
       ConnectionStrings__Mssql: Server=mssql,1433;Database=${MSSQL_DB:-Milepoint};User Id=sa;Password=${MSSQL_SA_PASSWORD:?};TrustServerCertificate=True;Encrypt=False
       ConnectionStrings__Redis: redis:6379
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?JWT_SIGNING_KEY fehlt in .env}
@@ -87,10 +97,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      mssql:
-        condition: service_healthy
       redis:
         condition: service_healthy
+      # No hard dependency on mssql here on purpose - it's behind the "mssql-check" profile and
+      # usually isn't running at all (see its own comment above). If DB_PROVIDER=mssql is set
+      # without also starting that profile, the backend's own startup migration will fail loudly
+      # with a connection error - that's the correct failure mode (explicit, not silently skipped).
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/healthz"]
       interval: 10s

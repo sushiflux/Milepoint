@@ -122,7 +122,7 @@ export default function ProjectPage() {
 
           {activeTab === 'kanban' && <KanbanBoard board={board} items={workItems} users={users} onItemsChange={setWorkItems} />}
 
-          {activeTab === 'notes' && <NotesView projectId={projectId} projectName={project.name} notes={notes} onNotesChange={setNotes} />}
+          {activeTab === 'notes' && <NotesView projectId={projectId} notes={notes} onNotesChange={setNotes} />}
           </main>
         </div>
       </div>

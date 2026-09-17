@@ -150,10 +150,6 @@ export interface Note {
   id: string
   title: string
   content: string
-  // Parent/child hierarchy for the radial tree view - separate from the free-form
-  // outgoingLinks/incomingLinks cross-links above. Null parentNoteId means a root-level note.
-  parentNoteId: string | null
-  childNoteIds: string[]
   outgoingLinks: NoteLinkRef[]
   incomingLinks: NoteLinkRef[]
   // Concrete hex color (e.g. "#3b82f6") for this note's node in the graph/tree views, or null to

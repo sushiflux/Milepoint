@@ -1,10 +1,9 @@
 import { COLOR_SCHEMES } from './colorSchemes'
 
-// Farbschema-Auswahl für die Notizen-Graph-Ansichten - reine FARBE, sonst nichts. Eine von drei
-// getrennten Achsen im Layout/Farbschema/Form-Container neben dem Liste/Graph-Umschalter (siehe
-// LayoutPickerPanel für das Layout, ShapePickerPanel für die Form). Ein Klick verteilt die Palette
-// des gewählten Schemas reihum auf alle Notizen (der Mittelpunkt bekommt die erste Farbe) - ohne
-// Rückfrage, sofort wirksam. Form und Linienstil bleiben unangetastet.
+// Farbschema-Auswahl für die freie Notizen-Graph-Ansicht - reine FARBE, sonst nichts. Eine von
+// zwei getrennten Achsen im Farbschema/Form-Container neben dem Liste/Graph-Umschalter (siehe
+// ShapePickerPanel für die Form). Ein Klick verteilt die Palette des gewählten Schemas reihum auf
+// alle Notizen - ohne Rückfrage, sofort wirksam. Form und Linienstil bleiben unangetastet.
 
 interface Props {
   /** Schema-ID, dessen Palette gerade auf die Notizen verteilt ist, oder null wenn (noch) keine

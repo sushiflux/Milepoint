@@ -49,12 +49,19 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(STORAGE_KEY, theme)
   }, [theme])
 
+  // setPreference() (which updates PreferencesStateProvider's own state - a DIFFERENT component)
+  // must not run inside the setTheme updater callback - React logs "Cannot update a component
+  // while rendering a different component" when an updater function (which must be a pure
+  // computation of prev -> next) has a side effect like that, since React can invoke updater
+  // functions during a render pass (e.g. replaying them to reconcile a batch), not only after
+  // commit. `theme` is already the current value here (this function closes over the same
+  // render's state, no stale-closure risk since it's only ever called from an event handler,
+  // never from inside another updater), so the next value can be computed directly instead of
+  // needing the updater form at all - same fix as NotesView.tsx's setRootAppearance.
   const toggleTheme = () => {
-    setTheme((prev) => {
-      const next = prev === 'light' ? 'dark' : 'light'
-      setPreference(PREFERENCE_KEY, next)
-      return next
-    })
+    const next = theme === 'light' ? 'dark' : 'light'
+    setTheme(next)
+    setPreference(PREFERENCE_KEY, next)
   }
 
   return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>

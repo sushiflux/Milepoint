@@ -1,13 +1,11 @@
 import type { NoteEdgeArrow, NoteEdgeOverride, NoteEdgeStyle } from '../../api/types'
 
-// Shared edge-style/arrowhead rendering for both graph views (TreeGraphView's four static tree
-// layouts and NoteGraphView's free physics layout). An edge is styled by its SOURCE note's
-// edgeStyle/edgeArrow/edgeWidth/edgeColor (the parent, for tree edges; the outgoingLinks owner,
-// for free cross-links) - never the target's - UNLESS the specific connection has its own
-// NoteEdgeOverride, which wins for width/color on that one connection only (edgeStyle/edgeArrow
-// stay note-wide only, no per-connection override for those - see resolveEdgeWidth/
-// resolveEdgeColor below). See Note.edgeStyle/edgeArrow/edgeWidth/edgeColor's doc comments in
-// api/types.ts.
+// Shared edge-style/arrowhead rendering for NoteGraphView's free physics layout. An edge is
+// styled by its SOURCE note's edgeStyle/edgeArrow/edgeWidth/edgeColor (the outgoingLinks owner) -
+// never the target's - UNLESS the specific connection has its own NoteEdgeOverride, which wins
+// for width/color on that one connection only (edgeStyle/edgeArrow stay note-wide only, no
+// per-connection override for those - see resolveEdgeWidth/resolveEdgeColor below). See
+// Note.edgeStyle/edgeArrow/edgeWidth/edgeColor's doc comments in api/types.ts.
 
 /** The default stroke width (px) an edge renders at when neither the source note's own edgeWidth
  *  nor a per-connection override specifies one. */
@@ -105,10 +103,9 @@ const ANCHOR_FRACTIONS_TALL = buildAnchorFractions(ANCHORS_SHORT_SIDE, ANCHORS_L
  */
 // clipPointToBoxEdge/edgeStrokeDasharray/edgeMarkerRefs below are exported alongside
 // EdgeMarkerDefs because they're all facets of the same shared edge-rendering logic this file
-// owns (used identically by both NoteGraphView.tsx and TreeGraphView.tsx) - splitting these pure
-// helpers into their own file would separate them from the marker/id constants and doc comments
-// they're directly tied to, for no real benefit, so a targeted disable is more pragmatic than a
-// structural split.
+// owns - splitting these pure helpers into their own file would separate them from the marker/id
+// constants and doc comments they're directly tied to, for no real benefit, so a targeted disable
+// is more pragmatic than a structural split.
 // eslint-disable-next-line react-refresh/only-export-components
 export function clipPointToBoxEdge(from: { x: number; y: number }, boxCenter: { x: number; y: number }, boxWidth: number, boxHeight: number): { x: number; y: number } {
   const dx = boxCenter.x - from.x
@@ -161,7 +158,7 @@ export function clipPointToBoxEdge(from: { x: number; y: number }, boxCenter: { 
 // Instead, each edge state (normal vs. hovered/highlighted) gets its own pre-defined fixed marker
 // fill, matching the two default stroke colors edges use when neither a note's own edgeColor nor
 // a per-connection override specifies one (stroke-slate-400/500 normal, stroke-brand-primary/
-// -light highlighted - see the edges.map blocks in NoteGraphView.tsx/TreeGraphView.tsx). Exported
+// -light highlighted - see the edges.map block in NoteGraphView.tsx). Exported
 // so callers can pass these as the fallback color into resolveEdgeColor/edgeGradientStroke - a
 // custom edgeColor/override only changes the LINE's color, never the arrowhead marker's (the
 // marker stays this small fixed pair regardless), so a Gradient edge still needs one of these two

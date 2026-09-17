@@ -207,12 +207,6 @@ public class ProjectsController : ControllerBase
             .Where(m => m.ProjectId == projectId && m.ParentWorkItemId != null)
             .ExecuteUpdateAsync(s => s.SetProperty(m => m.ParentWorkItemId, (string?)null));
 
-        // Note.ParentNoteId is Restrict too (same reasoning as WorkItem.ParentWorkItemId above -
-        // see NotesController.Delete for the equivalent per-note re-parenting on a single delete).
-        await _db.Notes
-            .Where(n => n.ProjectId == projectId && n.ParentNoteId != null)
-            .ExecuteUpdateAsync(s => s.SetProperty(n => n.ParentNoteId, (string?)null));
-
         await _db.WorkItemDependencies
             .Where(d => workItemIds.Contains(d.DependentWorkItemId) || workItemIds.Contains(d.BlockingWorkItemId))
             .ExecuteDeleteAsync();

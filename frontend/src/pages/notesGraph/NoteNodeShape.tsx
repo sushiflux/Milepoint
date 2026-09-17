@@ -2,10 +2,10 @@ import type { ReactNode } from 'react'
 import type { NoteShape } from '../../api/types'
 import { getReadableTextColor } from './colorSchemes'
 
-// Shared node-shape rendering for both graph views (TreeGraphView's four static tree layouts and
-// NoteGraphView's free physics layout). Both previously drew every node as a plain fixed-radius
-// <circle> regardless of note.shape/note.color - this replaces that with an actual rendering of
-// the five NoteShape values, sized to fit the title text instead of a small fixed dot.
+// Node-shape rendering for NoteGraphView's free physics layout. Previously drew every node as a
+// plain fixed-radius <circle> regardless of note.shape/note.color - this replaces that with an
+// actual rendering of the five NoteShape values, sized to fit the title text instead of a small
+// fixed dot.
 
 const FONT_SIZE = 11
 const TEXT_PADDING_X = 14

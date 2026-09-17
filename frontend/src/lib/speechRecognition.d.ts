@@ -1,7 +1,8 @@
 // Minimal ambient typings for the Web Speech API (SpeechRecognition), which TypeScript's own
 // lib.dom.d.ts does not yet include as of the TS/DOM lib version this project targets. Only the
 // members DictationButton.tsx actually uses are declared - this is not meant to be a complete
-// spec typing.
+// spec typing. Also carries the `webkitAudioContext` fallback used by useMicLevels.ts (Safari
+// still ships AudioContext only under the vendor-prefixed name).
 export {}
 
 declare global {
@@ -43,5 +44,6 @@ declare global {
   interface Window {
     SpeechRecognition?: new () => SpeechRecognition
     webkitSpeechRecognition?: new () => SpeechRecognition
+    webkitAudioContext?: typeof AudioContext
   }
 }

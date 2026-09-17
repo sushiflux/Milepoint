@@ -4,16 +4,13 @@ namespace Milepoint.Api.Models;
 // apply uniformly to every line a note draws outward). The user asked to be able to click a single
 // line in the graph and restyle just that one connection's width/color, in addition to (not
 // instead of) the existing "click the source note, style all its outgoing lines" flow. One row per
-// styled connection, identified by the (SourceNoteId, TargetNoteId) pair - covers both kinds of
-// connection Milepoint draws a line for uniformly:
-//   - a tree/hierarchy edge (SourceNoteId = the parent, TargetNoteId = the child)
-//   - a free cross-link (SourceNoteId = the NoteLink's owning note, TargetNoteId = the linked note)
-// A separate table rather than a column on Note because a connection isn't owned by exactly one
-// Note the way Color/Shape are - a free cross-link involves two notes, and even a tree edge's
-// natural "owner" (the child, via ParentNoteId) doesn't extend cleanly to cross-links, which have
-// no single natural owning row at all. Rows are pure style data with no independent identity of
-// their own (no Id) - the composite key IS the connection they style, deleted via ExecuteDelete
-// rather than tracked/loaded when a note itself is deleted (see NotesController.Delete).
+// styled connection, identified by the (SourceNoteId, TargetNoteId) pair - SourceNoteId is the
+// NoteLink's owning note, TargetNoteId is the linked note. A separate table rather than a column
+// on Note because a connection isn't owned by exactly one Note the way Color/Shape are - a free
+// cross-link involves two notes with no single natural owning row. Rows are pure style data with
+// no independent identity of their own (no Id) - the composite key IS the connection they style,
+// deleted via ExecuteDelete rather than tracked/loaded when a note itself is deleted (see
+// NotesController.Delete).
 public class NoteEdgeOverride
 {
     // Scoped to a project (not derivable from the two note ids alone without a join) so

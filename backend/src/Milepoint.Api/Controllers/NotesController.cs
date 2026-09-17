@@ -28,7 +28,6 @@ public class NotesController : ControllerBase
             .Where(n => n.ProjectId == projectId)
             .Include(n => n.OutgoingLinks).ThenInclude(l => l.TargetNote)
             .Include(n => n.IncomingLinks).ThenInclude(l => l.SourceNote)
-            .Include(n => n.ChildNotes)
             .Include(n => n.OutgoingEdgeOverrides)
             .OrderBy(n => n.Title)
             .ToListAsync();
@@ -58,12 +57,6 @@ public class NotesController : ControllerBase
             return Conflict("Eine Notiz mit diesem Titel existiert bereits in diesem Projekt.");
         }
 
-        if (request.ParentNoteId is not null &&
-            !await _db.Notes.AnyAsync(n => n.Id == request.ParentNoteId && n.ProjectId == projectId))
-        {
-            return BadRequest("Übergeordnete Notiz gehört nicht zu diesem Projekt.");
-        }
-
         if (!IsValidColor(request.Color))
         {
             return BadRequest("Farbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
@@ -84,7 +77,6 @@ public class NotesController : ControllerBase
             ProjectId = projectId,
             Title = request.Title,
             Content = request.Content,
-            ParentNoteId = request.ParentNoteId,
             Color = request.Color,
             Shape = request.Shape,
             EdgeStyle = request.EdgeStyle,
@@ -118,24 +110,6 @@ public class NotesController : ControllerBase
             return Conflict("Eine Notiz mit diesem Titel existiert bereits in diesem Projekt.");
         }
 
-        if (request.SetParentNoteId && request.ParentNoteId is not null)
-        {
-            if (request.ParentNoteId == noteId)
-            {
-                return BadRequest("Eine Notiz kann nicht ihre eigene übergeordnete Notiz sein.");
-            }
-
-            if (!await _db.Notes.AnyAsync(n => n.Id == request.ParentNoteId && n.ProjectId == projectId))
-            {
-                return BadRequest("Übergeordnete Notiz gehört nicht zu diesem Projekt.");
-            }
-
-            if (await WouldCreateCycleAsync(noteId, request.ParentNoteId))
-            {
-                return BadRequest("Diese Zuordnung würde einen Zyklus in der Notiz-Hierarchie erzeugen.");
-            }
-        }
-
         if (!IsValidColor(request.Color))
         {
             return BadRequest("Farbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
@@ -153,16 +127,8 @@ public class NotesController : ControllerBase
 
         note.Title = request.Title;
         note.Content = request.Content;
-        // Only touch the hierarchy when the caller explicitly asked to (see SetParentNoteId's doc
-        // comment on UpdateNoteRequest) - a plain title/content save must never silently detach a
-        // note from its parent just because the request happened to omit ParentNoteId.
-        if (request.SetParentNoteId)
-        {
-            note.ParentNoteId = request.ParentNoteId;
-        }
-        // Color/Shape/EdgeStyle/EdgeArrow/EdgeWidth/EdgeColor are always applied as given (no
-        // tri-state flag needed - see UpdateNoteRequest's doc comment); null clears back to "use
-        // the default".
+        // Color/Shape/EdgeStyle/EdgeArrow/EdgeWidth/EdgeColor are always applied as given; null
+        // clears back to "use the default".
         note.Color = request.Color;
         note.Shape = request.Shape;
         note.EdgeStyle = request.EdgeStyle;
@@ -180,12 +146,11 @@ public class NotesController : ControllerBase
 
     // Lightweight, high-frequency position sync for the free (physics-simulated) graph view -
     // deliberately separate from the full Update endpoint above (see UpdateNotePositionRequest's
-    // doc comment). A single targeted EF Core update on exactly two columns via ExecuteUpdateAsync
-    // (same pattern already used for the ParentNoteId bulk re-parent in Delete below), so no
-    // tracked entity is loaded/round-tripped just to change a position. No title-uniqueness check,
-    // no content/hierarchy touch, no outgoing-link re-sync - none of that applies to a pure
-    // position write. Rate-limiting/debouncing how often the frontend calls this is out of scope
-    // here (handled client-side).
+    // doc comment). A single targeted EF Core update on exactly two columns via ExecuteUpdateAsync,
+    // so no tracked entity is loaded/round-tripped just to change a position. No title-uniqueness
+    // check, no content touch, no outgoing-link re-sync - none of that applies to a pure position
+    // write. Rate-limiting/debouncing how often the frontend calls this is out of scope here
+    // (handled client-side).
     [HttpPut("{noteId}/position")]
     public async Task<IActionResult> UpdatePosition(string projectId, string noteId, UpdateNotePositionRequest request)
     {
@@ -221,16 +186,6 @@ public class NotesController : ControllerBase
         await _db.NoteEdgeOverrides
             .Where(o => o.SourceNoteId == noteId || o.TargetNoteId == noteId)
             .ExecuteDeleteAsync();
-
-        // Deletion decision: children are promoted to root-level notes (ParentNoteId = null)
-        // rather than deleted along with their parent. Unlike WorkItem's subtree-delete (a Kanban
-        // task's subtasks are meaningless without it), a note's children are independent content a
-        // user wrote deliberately - silently deleting a whole branch of someone's notes because
-        // they removed the top one would be surprising and is not reversible. Matches Restrict on
-        // the FK above: this explicit re-parent has to happen before the parent row can go away.
-        await _db.Notes
-            .Where(n => n.ParentNoteId == noteId)
-            .ExecuteUpdateAsync(s => s.SetProperty(n => n.ParentNoteId, (string?)null));
 
         _db.Notes.Remove(note);
         await _db.SaveChangesAsync();
@@ -268,48 +223,10 @@ public class NotesController : ControllerBase
             .Where(n => n.ProjectId == projectId && n.Id == noteId)
             .Include(n => n.OutgoingLinks).ThenInclude(l => l.TargetNote)
             .Include(n => n.IncomingLinks).ThenInclude(l => l.SourceNote)
-            .Include(n => n.ChildNotes)
             .Include(n => n.OutgoingEdgeOverrides)
             .FirstOrDefaultAsync();
 
         return note is null ? null : ToDto(note);
-    }
-
-    // Walks the ancestor chain starting at targetParentId (the note about to become candidateNoteId's
-    // parent) all the way up to the root, checking whether candidateNoteId itself shows up along the
-    // way. If it does, setting the parent would close a loop (directly, e.g. A -> A, or transitively,
-    // e.g. A -> B -> C -> A) - the whole point of a tree is that every node has a finite path to a
-    // root, so any parent assignment that reintroduces a node into its own ancestor chain is rejected.
-    // Bounded by MaxDepthGuard rather than trusting the data to be acyclic already, so a
-    // pre-existing bug/manual DB edit can't turn this into an infinite loop.
-    private async Task<bool> WouldCreateCycleAsync(string candidateNoteId, string targetParentId)
-    {
-        const int maxDepthGuard = 10_000;
-        var currentId = targetParentId;
-
-        for (var depth = 0; depth < maxDepthGuard; depth++)
-        {
-            if (currentId == candidateNoteId)
-            {
-                return true;
-            }
-
-            var parentId = await _db.Notes
-                .Where(n => n.Id == currentId)
-                .Select(n => n.ParentNoteId)
-                .FirstOrDefaultAsync();
-
-            if (parentId is null)
-            {
-                return false;
-            }
-
-            currentId = parentId;
-        }
-
-        // Ancestor chain longer than the guard allows - treat as a (pre-existing) cycle rather
-        // than risk an unbounded loop.
-        return true;
     }
 
     // Accepts "#rgb" or "#rrggbb" (case-insensitive), the standard short/long CSS hex-color forms
@@ -333,8 +250,6 @@ public class NotesController : ControllerBase
         note.Id,
         note.Title,
         note.Content,
-        note.ParentNoteId,
-        note.ChildNotes.Select(c => c.Id).ToList(),
         note.OutgoingLinks.Select(l => new NoteLinkRefDto(l.TargetNoteId, l.TargetNote.Title)).ToList(),
         note.IncomingLinks.Select(l => new NoteLinkRefDto(l.SourceNoteId, l.SourceNote.Title)).ToList(),
         note.Color,
@@ -349,13 +264,11 @@ public class NotesController : ControllerBase
         note.CreatedAt,
         note.UpdatedAt);
 
-    // Creates or replaces the style override for one specific connection FROM this note (see
-    // NoteEdgeOverride's doc comment) - both a tree edge to a ChildNote and a free-view
-    // OutgoingLink use the same shape, so this one endpoint covers both without needing to know
-    // which kind of connection it is. A request with both Width and Color null deletes the row
-    // instead of storing a no-op override, so "reset to the note's own EdgeWidth/EdgeColor" is a
-    // single call either way rather than a separate delete-vs-upsert decision the frontend has to
-    // make itself.
+    // Creates or replaces the style override for one specific outgoing [[Title]] link from this
+    // note (see NoteEdgeOverride's doc comment). A request with both Width and Color null deletes
+    // the row instead of storing a no-op override, so "reset to the note's own EdgeWidth/EdgeColor"
+    // is a single call either way rather than a separate delete-vs-upsert decision the frontend
+    // has to make itself.
     [HttpPut("{noteId}/edge-overrides/{targetNoteId}")]
     public async Task<IActionResult> UpsertEdgeOverride(string projectId, string noteId, string targetNoteId, UpdateNoteEdgeOverrideRequest request)
     {

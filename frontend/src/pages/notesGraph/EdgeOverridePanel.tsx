@@ -2,10 +2,10 @@ import { COLOR_SCHEMES } from './colorSchemes'
 
 // Panel for restyling ONE specific connection's width/color, distinct from NoteAppearanceMenu
 // (which restyles every connection a note draws outward at once). Reached by clicking a line
-// directly in either graph view - see TreeGraphView.tsx/NoteGraphView.tsx's edge click handlers.
-// Deliberately does NOT offer edgeStyle/edgeArrow here (those stay note-wide only, no
-// per-connection override - see NoteEdgeOverride's backend doc comment for why width/color are
-// the two fields that got this treatment).
+// directly in the graph view - see NoteGraphView.tsx's edge click handler. Deliberately does NOT
+// offer edgeStyle/edgeArrow here (those stay note-wide only, no per-connection override - see
+// NoteEdgeOverride's backend doc comment for why width/color are the two fields that got this
+// treatment).
 
 const MIN_EDGE_WIDTH = 0.5
 const MAX_EDGE_WIDTH = 12

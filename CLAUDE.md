@@ -22,9 +22,10 @@ not always fully up to date with the current state).
 .\start.ps1 -Action restart
 .\start.ps1 -Action status
 .\start.ps1 -Action logs
-.\start.ps1 -Db mssql          # Switch DB_PROVIDER and restart only the backend (Postgres/MSSQL always run in parallel)
-.\start.ps1 -Db postgres
-.\start.ps1 -WithWhisper       # Also start the optional self-hosted Whisper speech-to-text service
+.\start.ps1 -Db mssql -MssqlCheck  # Switch DB_PROVIDER to mssql AND start the mssql service (not part of the default dev stack anymore)
+.\start.ps1 -Db postgres           # Switch back (postgres is the dev default, mssql keeps running until stopped manually)
+.\start.ps1 -MssqlCheck            # Start mssql alongside the current provider, without switching DB_PROVIDER
+.\start.ps1 -NoWhisper             # Start WITHOUT the self-hosted Whisper speech-to-text service (runs by default)
 ```
 
 `.env` is auto-generated from `.env.example` on first run (random passwords/JWT secret). Occupied
@@ -98,10 +99,19 @@ already a plain nullable `int`, as every enum column in this project is).
 `IDataProtectionKeyContext`) is subclassed by `PostgresPmDbContext` and `SqlServerPmDbContext`.
 `Program.cs` registers only one concrete context based on `DB_PROVIDER` (`postgres` default or
 `mssql`), and injects it as `PmDbContextBase` everywhere else in the app — controllers/services
-never reference the provider-specific subclasses directly. Both databases always run in the
-Compose stack simultaneously; switching is just an env var + backend restart, no data migration
-between them. (The `Pm` prefix on these context classes is a leftover from the pre-rename working
-title "PM" — kept only to avoid regenerating every migration; it's not user-facing anywhere.)
+never reference the provider-specific subclasses directly. Switching is just an env var + backend
+restart, no data migration between them. (The `Pm` prefix on these context classes is a leftover
+from the pre-rename working title "PM" — kept only to avoid regenerating every migration; it's not
+user-facing anywhere.)
+
+**Postgres is the only DB that runs by default in the dev stack** — `mssql` sits behind the
+`mssql-check` Compose profile (`start.ps1 -MssqlCheck`, or `-Db mssql -MssqlCheck` to also switch
+the provider), started deliberately rather than staying resident for the whole session. See
+"Customer distribution concept" below for why (RC/V-Commit is where MSSQL compatibility actually
+needs to be re-verified, not every dev session) and note `stop`/`restart` without `-MssqlCheck`
+leaves an already-running `mssql` container alone (same pattern as `whisper`/`-NoWhisper`) — stop
+it manually (`docker stop milepoint-mssql-1`) when done checking, since it's noticeably more
+RAM-hungry than whisper and isn't meant to just keep running in the background.
 
 ### IDs
 
@@ -136,69 +146,58 @@ boards in one call, so the timeline never queries boards individually. Key relat
   blocker dependency lines as right-angled SVG paths, milestones as diamond markers interleaved
   chronologically into the same row tree) — commits to the backend on `pointerup`, not during drag.
 
-### Notes: two independent relationship graphs, four+ ways to view them
+### Notes: a plain notes app with free cross-links, two ways to view them
 
-`Note` (title + Markdown content, unique per-project title) has **two separate, non-overlapping**
-relationship structures that must not be conflated when working on either:
-1. **Free cross-links** (`[[Title]]` syntax, parsed server-side by `NoteLinkParser` on every save
-   into `NoteLink` rows) — Obsidian-style backlinking. Renaming a note doesn't retroactively fix
-   other notes' raw `[[OldTitle]]` text; that only re-resolves once those notes are saved again.
-2. **Parent/child hierarchy** (`ParentNoteId`/`ChildNotes`, unlimited depth, cycle-checked
-   server-side via `NotesController.WouldCreateCycleAsync`) — a Mindmap-style outline, entirely
-   independent of the links above. Deleting a note promotes its children to root notes rather than
-   cascading the delete (a note's content is independently authored, unlike a Kanban subtask).
+`Note` (title + Markdown content, unique per-project title) has exactly **one** relationship
+structure: **free cross-links** (`[[Title]]` syntax, parsed server-side by `NoteLinkParser` on
+every save into `NoteLink` rows) — Obsidian-style backlinking. Renaming a note doesn't
+retroactively fix other notes' raw `[[OldTitle]]` text; that only re-resolves once those notes are
+saved again. There used to also be a separate parent/child hierarchy driving four tree-layout
+graph views (Mind Map/Baum/Organigramm/Fischgräten, a whole `notesGraph/treeLayouts.ts` module) —
+removed entirely per explicit user request to go "back to the roots": a plain notes app, not a
+mind-mapping tool. `ParentNoteId`/`ChildNotes` are gone from `Note` and `NoteDto`
+(migration `RemoveNoteHierarchy`, both providers), along with `TreeGraphView.tsx`,
+`treeLayouts.ts`, `LayoutPickerPanel.tsx`, and the "Layout" button/menu in `NotesView.tsx`. Don't
+reintroduce a hierarchy/tree-layout concept without being asked again.
 
-`NotesView.tsx` has two tabs: **List** (the traditional editor) and **Graph**, the latter with a
-layout picker switching between `NoteGraphView.tsx` (physics-simulated force layout over the free
-cross-links — a hand-rolled simulation, not d3-force, to keep the bundle small) and
-`notesGraph/TreeGraphView.tsx` (a shared canvas for four static tree layouts computed by
-`notesGraph/treeLayouts.ts` from the parent/child hierarchy: mind map/radial, left-to-right tree,
-top-to-bottom org chart, fishbone — one shared node-position algorithm module, one shared
-zoom/pan/drag-to-reparent canvas). Three **fully independent axes**, one segmented control (same
-glass-panel/rounded-lg look as the List/Graph toggle, `openMenu` state, only one popover open at a
-time) next to the List/Graph toggle in `NotesView.tsx`:
-- **"Layout"** (`LayoutPickerPanel.tsx`) — the 5 layouts, each with a hand-drawn SVG topology
-  thumbnail (`GraphLayoutId` now lives in `treeLayouts.ts`, not the deleted `stylePresets.ts`).
+`NotesView.tsx` has two tabs: **List** (the traditional editor) and **Graph** — the latter is
+`NoteGraphView.tsx`, a physics-simulated force layout over the free cross-links (a hand-rolled
+simulation, not d3-force, to keep the bundle small). There is no layout picker anymore — the free
+graph is the only graph view. A two-button segmented control (same glass-panel/rounded-lg look as
+the List/Graph toggle, `openMenu` state, only one popover open at a time) sits next to the
+List/Graph toggle in `NotesView.tsx`:
 - **"Farbschema"** (`ColorSchemePanel.tsx`) — **pure palette**, the 6 `COLOR_SCHEMES` from
   `colorSchemes.ts`, each previewed as its own swatches. Applying one distributes that palette
-  round-robin across every note (`assignSchemeColors`), center node gets the first color. Nothing
-  but `color` changes.
+  round-robin across every note (`assignSchemeColors`). Nothing but `color` changes.
 - **"Form"** (`ShapePickerPanel.tsx`) — the 5 `NoteShape` values (`SHAPE_OPTIONS` in
   `shapeOptions.ts`, preview icon in `shapePreview.tsx` — split into two files so each stays a
   single-export module for Fast Refresh), applied project-wide. Nothing but `shape` changes.
 
-All three apply **immediately, no confirm dialog** (removed per explicit user feedback). They used
-to be one combined "Layout & Stil" menu whose presets set layout+color+shape+edge-style at once;
-now each axis is separate. The last-applied scheme/shape is remembered only as a preference
-(`notesGraphScheme`/`notesGraphShape`) for the active-item highlight — the real per-note values
-can't be reverse-derived since notes can hold different values. Clicking `TreeGraphView`'s center
-node opens only that node's own appearance (color/shape/edge style, no width/color — the center
-has no backing `Note`), the same `NoteAppearanceMenu` a regular note click opens — never any of
-these three menus.
+Both apply **immediately, no confirm dialog** (removed per explicit user feedback), and picking an
+option **closes its popover** (one-shot action, and the open menu covered the graph). The
+last-applied scheme/shape is remembered only as a preference (`notesGraphScheme`/`notesGraphShape`)
+for the active-item highlight — the real per-note values can't be reverse-derived since notes can
+hold different values.
 
-`Note.Color`/`Note.Shape` (hex color, `NoteShape` enum) control per-node appearance across both
-graph views; color palettes/schemes are frontend-only concept, the backend only ever stores a
-resolved hex value. `Note.EdgeStyle`/`Note.EdgeArrow`/`Note.EdgeWidth`/`Note.EdgeColor` style every
-line an edge draws *from* that note (never the target's) — dash pattern, arrowheads, stroke width
-(px), and stroke color, independent of the node's own `Color`. A specific connection can further
+`Note.Color`/`Note.Shape` (hex color, `NoteShape` enum) control per-node appearance in the graph
+view; color palettes/schemes are a frontend-only concept, the backend only ever stores a resolved
+hex value. `Note.EdgeStyle`/`Note.EdgeArrow`/`Note.EdgeWidth`/`Note.EdgeColor` style every line an
+edge draws *from* that note (never the target's) — dash pattern, arrowheads, stroke width (px),
+and stroke color, independent of the node's own `Color`. A specific connection can further
 override just its own width/color via `NoteEdgeOverride` (composite-keyed on
-`SourceNoteId`+`TargetNoteId`, covering both a tree edge to a `ChildNote` and a free-view
-`NoteLink` uniformly) — reachable by clicking the line itself directly in either graph view (a
-wide invisible hit-area path/line sits under every rendered edge), opening `EdgeOverridePanel`
+`SourceNoteId`+`TargetNoteId`) — reachable by clicking the line itself directly in the graph view
+(a wide invisible hit-area path/line sits under every rendered edge), opening `EdgeOverridePanel`
 instead of the usual node panel. `edgeStyles.tsx` centralizes all of this shared rendering logic
-(anchor-point box-edge clipping, marker/gradient defs, width/color resolution) for both graph
-views — `resolveEdgeWidth`/`resolveEdgeColor` implement the override-beats-note-default priority.
+(anchor-point box-edge clipping, marker/gradient defs, width/color resolution) —
+`resolveEdgeWidth`/`resolveEdgeColor` implement the override-beats-note-default priority.
 
-Both graph views share a permanent right-side panel (`notesGraph/GraphSidePanel.tsx`, flex sibling
-with an animated width, not absolutely positioned — this is what makes the canvas visibly shrink
-alongside it) that swaps content based on what's selected: a note node OR the tree view's virtual
-center node → `NoteAppearanceMenu.tsx` (color/shape/edge style/arrowheads; plus width/color for a
-real note, omitted for the center node which has no backing `Note`); a clicked edge →
-`EdgeOverridePanel.tsx`. The project-wide Layout/Farbschema/Form menus are NOT in this panel at
-all — only in the three-button segmented control in `NotesView.tsx` (see above). Selection state
-(`selectedNodeId`/`selectedEdge`, mutually exclusive) and panel open/close both live in each view's
-own component, not lifted up — `NotesView.tsx` only supplies the data callbacks
-(`onChangeAppearance`, `onChangeEdgeOverride`, `onChangeRootAppearance`, etc.).
+`NoteGraphView.tsx` has a permanent right-side panel (`notesGraph/GraphSidePanel.tsx`, flex
+sibling with an animated width, not absolutely positioned — this is what makes the canvas visibly
+shrink alongside it) that swaps content based on what's selected: a note node →
+`NoteAppearanceMenu.tsx` (color/shape/edge style/arrowheads/width/color); a clicked edge →
+`EdgeOverridePanel.tsx`. Selection state (`selectedNoteId`/`selectedEdge`, mutually exclusive) and
+panel open/close live in `NoteGraphView.tsx` itself, not lifted up — `NotesView.tsx` only supplies
+the data callbacks (`onChangeAppearance`, `onChangeEdgeOverride`, etc.).
 
 A "Glow" edge style (blurred halo behind the line) was tried and removed again after live user
 feedback rejected the visual outright — don't reintroduce it without being asked. Its replacement,
@@ -211,24 +210,17 @@ invisible, not simply "opacity") and its own region defaults to `objectBoundingB
 degenerates to zero on a perfectly horizontal/vertical line's zero-height/-width bounding box —
 both bit the small gradient preview icon in `NoteAppearanceMenu.tsx` before being fixed.
 
-### Update requests use two different "don't touch this field" conventions — know which applies
+### `UpdateNoteRequest`/`CreateNoteRequest` apply every field exactly as given
 
-- `UpdateNoteRequest.ParentNoteId` needs an explicit `SetParentNoteId: true` to be applied at all
-  (default `false` = hierarchy untouched) — because `null` is *also* the field's valid "no parent"
-  value, so a request that simply omits the field can't otherwise be told apart from one explicitly
-  clearing it.
-- `Color`/`Shape`/`EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor` on the same request have **no**
-  such flag — every `PUT` applies them exactly as given (`null` = revert to default). This means
-  every caller of `updateNote()` on the frontend, including plain title/content-only saves, must
-  always pass the note's *current* appearance fields through (see `NoteAppearanceFields`/
-  `appearanceOf()` in `NotesView.tsx`), or they get silently reset. This asymmetry is intentional
-  (see the doc comments on `UpdateNoteRequest`/`NoteDtos.cs`) — the parent hierarchy is often
-  edited in isolation (e.g. drag-and-drop in the tree view) while the appearance fields are always
-  in hand whenever a note is saved at all, the same way `Title`/`Content` already are.
-- `NoteEdgeOverride` rows use a *third* convention: `PUT .../edge-overrides/{targetNoteId}` with
-  both `Width` and `Color` null **deletes** the row (falls back to the source note's own
-  `EdgeWidth`/`EdgeColor`) rather than storing a no-op override — there's no separate delete
-  endpoint, a caller resets by sending both fields null.
+`Color`/`Shape`/`EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor` have no tri-state flag — every
+`PUT`/`POST` applies them exactly as given (`null` = revert to default). This means every caller
+of `updateNote()`/`createNote()` on the frontend, including plain title/content-only saves, must
+always pass the note's *current* appearance fields through (see `NoteAppearanceFields`/
+`appearanceOf()` in `NotesView.tsx`), or they get silently reset. `NoteEdgeOverride` rows use a
+*separate* convention: `PUT .../edge-overrides/{targetNoteId}` with both `Width` and `Color` null
+**deletes** the row (falls back to the source note's own `EdgeWidth`/`EdgeColor`) rather than
+storing a no-op override — there's no separate delete endpoint, a caller resets by sending both
+fields null.
 
 ### Voice dictation: three transcription providers behind one interface
 
@@ -243,6 +235,44 @@ Data Protection, whose key ring is persisted to the database (`PersistKeysToDbCo
 survives container restarts — this is also why `PmDbContextBase` implements
 `IDataProtectionKeyContext`. `DictationButton.tsx` is the single reusable UI entry point used
 wherever dictation appears (currently the Notes editor).
+
+`DictationButton.tsx` also has an in-app microphone device picker (a chevron next to the mic
+button, `navigator.mediaDevices.enumerateDevices()` filtered to `audioinput`, refreshed on the
+`devicechange` event) — added per explicit user feedback that switching microphones used to mean
+going into the browser's own site permission settings. Only shown for the MediaRecorder-based
+providers (Whisper/OpenAI/Google, which explicitly request a `deviceId`); never for `Browser`
+(the Web Speech API has no deviceId concept, always uses the OS/browser default input). The
+chosen device is a DB-backed preference (`dictation.micDeviceId`), requested via
+`getUserMedia({ audio: { deviceId: { ideal } } })` so an unplugged/stale device falls back to the
+default instead of throwing. The one-time browser permission prompt itself is a Web Platform
+security boundary and can't be skipped from app code — but switching the requested `deviceId`
+after permission is already granted does NOT re-trigger that prompt, which is what actually
+removes the revoke/re-grant round-trip the user was hitting. Both the error popup and the device
+menu compute their own left/right alignment from the button's `getBoundingClientRect()` before
+opening (see `computeEdgeAlign`) so neither clips off the visible window near a screen edge — a
+fixed `left-1/2`/`-translate-x-1/2`/`left-0` previously did, cutting the error text off entirely.
+Note: Chromium's `--use-fake-device-for-media-stream` test flag regenerates random `deviceId`
+values on every page load, so a Playwright test using it will never see the picker's highlighted
+selection survive a reload — that's a fake-device testing artifact, not an app bug (confirmed by
+enumerating devices before/after a reload with `--use-fake-device-for-media-stream` and observing
+different IDs both times); a real browser/mic keeps a stable `deviceId` per origin+hardware.
+
+While recording, `DictationButton.tsx` also shows live mixer-style equalizer bars next to the mic
+button (`EqualizerBars`, driven by the new `hooks/useMicLevels.ts`) — added per explicit user
+feedback that the existing `animate-ping` red ring alone wasn't enough feedback that the mic is
+actually listening and reacting to voice. `useMicLevels(stream: MediaStream | null)` owns a Web
+Audio API `AudioContext`/`AnalyserNode` (`fftSize = 128`, grouping the 64 frequency bins into 9
+bars, each eased frame-to-frame rather than snapped to the raw FFT read) — deliberately never
+connected to `audioContext.destination`, so nothing is ever audibly played back, purely an
+analysis tap. The two recording paths acquire their stream differently, so the hook takes an
+already-acquired `MediaStream` rather than requesting its own: the MediaRecorder path
+(Whisper/OpenAI/Google) already holds one in `streamRef` and just mirrors it into a second
+`visualizerStream` state var; the Web Speech API path (`Browser` provider) has no stream of its
+own at all, so `startBrowserRecognition()` fires a second, independent, best-effort `getUserMedia`
+call purely for the visualization (a failure there doesn't affect recognition itself) — both honor
+the same `preferredDeviceId` device choice as the recording stream. `AudioContext`/`AnalyserNode`/
+the animation loop are torn down in the effect's cleanup whenever the stream changes or recording
+stops, avoiding a hung/leaked audio context.
 
 ### Realtime
 
@@ -292,3 +322,58 @@ Runtime-adjustable behavior an admin might want to change without a redeploy (cu
 transcription provider/keys/settings) is a DB-backed singleton row behind an admin API, not an env
 var — see `TranscriptionSettings` as the reference pattern. Secrets, connection strings, and
 anything needed before the DB connection exists still belong in `.env`/Compose config.
+
+### Customer distribution concept (not yet implemented — reference for future work)
+
+Milepoint currently only has this one Dev docker-compose.yml; nothing below exists yet
+(`docker-compose.prod.yml`, a WiX installer project, `.github/workflows/`). Captured here so the
+plan survives across sessions once the actual build-out starts:
+
+- **MSSQL is no longer part of the everyday dev stack.** It sits behind the `mssql-check` Compose
+  profile (`docker compose --profile mssql-check up -d mssql`, or `start.ps1 -MssqlCheck` — same
+  on/off-by-default pattern as `whisper`/`-NoWhisper`). Postgres alone is the dev default
+  (`DB_PROVIDER=postgres`). The dual-provider architecture (see "Dual EF Core provider setup"
+  above) still needs the MSSQL side actually exercised before it ships — that check is meant to
+  move into the RC/V-Commit build pipeline itself once one exists (an automated CI gate: spin up
+  `mssql`, apply `SqlServerPmDbContext` migrations, run the critical Playwright journeys against
+  it, fail the build on error) — `-MssqlCheck` is the same manual mechanism a human runs locally
+  in the meantime, not a separate concept.
+- **Container minimum for a customer deployment**: 3–5 instead of today's 7–9 — drop the dev-only
+  services (`mailpit`, `adminer`), pick one DB instead of running both in parallel, merge
+  frontend into the backend image (serve the built Vite assets as static files from Kestrel via
+  `UseStaticFiles` + an SPA fallback instead of a separate `frontend` container/Caddy hop for it).
+- **Windows**: no Docker at all. IIS **in-process hosting via the ASP.NET Core Module (ANCM)** —
+  not a standalone Windows Service — is the target (Microsoft's own best-documented pattern;
+  avoids needing the separate ARR module a standalone-service-behind-IIS setup would need for
+  reverse proxying). Installer needs the official ASP.NET Core Hosting Bundle, not a bespoke
+  service wrapper. **Installer: WiX Toolset (Burn/Bootstrapper) for the actual install mechanics,
+  with a custom WPF Managed Bootstrapper Application (MBA) for the UI instead of WiX's stock
+  wizard look** — see the global CLAUDE.md's "Windows installer UI" note under Visual design
+  defaults for why (explicit user preference, applies to every project, not just Milepoint). WiX
+  still does the real work through its built-in extensions (IIS site creation via
+  `WixIisExtension`, certificate import, Windows Feature activation via `WixUtilExtension`) — the
+  WPF layer only replaces what the installer *looks like*, not how it actually installs.
+  Self-hosted Whisper is **not available on
+  Windows** (its Python/PyTorch runtime isn't worth natively re-packaging, and running it via a
+  single Docker container would undercut the whole "no Docker on Windows" point) — Windows
+  installs are limited to the Browser (Web Speech API) and cloud (OpenAI/Google) transcription
+  providers. DB installs natively (Postgres or MSSQL, one choice, no parallel instances). The
+  Docker-Desktop licensing caveat that used to apply to an earlier "bundle Docker Desktop on
+  Windows" idea is moot — neither platform touches Docker Desktop (Windows is IIS-native, Unraid
+  uses the Docker Engine directly).
+- **Unraid**: stays Docker-based, via the **Docker Compose plugin** (one compose stack shows up as
+  one app in the Unraid UI) rather than several separate Community Applications templates for the
+  individual services — closer to the "just install Milepoint, everything else is automatic" goal
+  than a multi-template spread. TLS default is **no bundled Caddy** — Unraid users commonly
+  already run a shared reverse proxy (SWAG or Nginx Proxy Manager) handling Let's Encrypt
+  centrally for every app; Milepoint should slot into that instead of forcing its own TLS. Caddy
+  stays available as an opt-in Compose profile (toggle in the CA template, default off) for users
+  without an existing reverse proxy who want instant HTTPS. Rough CA template field list: DB
+  provider choice (Postgres/MSSQL) + its credentials, Redis toggle (on by default, needed for
+  SignalR), HTTP port, "enable bundled Caddy/HTTPS" toggle (off by default) + its port when on,
+  Whisper toggle (off by default, with a resource-cost hint), data-directory volume mappings.
+- **RC-Commit must also produce an Unraid XML template** (explicit user request) — the user copies
+  it by hand onto their own Unraid box to test it there before anything goes out to the public
+  Community Applications feed. A V-Commit/V-Tag is the point that template actually gets pushed to
+  the public CA repo/feed (see "Test depth by commit word" in the global CLAUDE.md for how this
+  fits the three commit words generally — this is the Unraid-specific artifact for that pipeline).

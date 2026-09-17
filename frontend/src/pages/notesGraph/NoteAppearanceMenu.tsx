@@ -4,14 +4,10 @@ import { COLOR_SCHEMES } from './colorSchemes'
 import { SHAPE_OPTIONS } from './shapeOptions'
 import { ShapePreviewIcon } from './shapePreview'
 
-// Shared "Aussehen anpassen" panel used by both graph views' node context menus - lets the user
-// pick this single note's color (from every defined palette, not just one), shape, and the style/
-// arrowheads of every line drawn FROM this note (to its children and along its outgoing cross-
-// links - see Note.edgeStyle/edgeArrow's doc comments in api/types.ts), plus a "Zurücksetzen auf
-// Standard" action per property. Rendered as a section appended to the existing glass context-menu
-// panel rather than a separate nested hover-submenu, matching the app's existing (flat,
-// click-to-open) menu/popover convention - see TreeGraphView/NoteGraphView's existing context
-// menus and the create-note inline form for the same glass/rounded-xl treatment.
+// "Aussehen anpassen" panel used by the graph view's node side panel - lets the user pick this
+// single note's color (from every defined palette, not just one), shape, and the style/arrowheads
+// of every line drawn FROM this note along its outgoing cross-links (see Note.edgeStyle/edgeArrow's
+// doc comments in api/types.ts), plus a "Zurücksetzen auf Standard" action per property.
 
 const EDGE_STYLE_OPTIONS: { value: NoteEdgeStyle; label: string }[] = [
   { value: 'Solid', label: 'Durchgezogen' },
@@ -38,10 +34,7 @@ interface Props {
   onChangeEdgeArrow: (edgeArrow: NoteEdgeArrow | null) => void
   // Line thickness (px) and color for every edge drawn FROM this note - independent of the
   // node's own `color` above, since the user asked for the line color to be separately
-  // choosable from the node it originates at. Optional: the virtual project-center "note" (see
-  // TreeGraphView's RootAppearance) has no backing Note row and therefore no edgeWidth/edgeColor
-  // concept at all - omitting these three props there hides the two controls entirely rather
-  // than showing them against a value that doesn't really exist.
+  // choosable from the node it originates at.
   edgeWidth?: number | null
   edgeColor?: string | null
   onChangeEdgeWidth?: (edgeWidth: number | null) => void
@@ -63,8 +56,7 @@ const DEFAULT_EDGE_WIDTH_FOR_SLIDER = 1
 function EdgeStylePreviewIcon({ edgeStyle }: { edgeStyle: NoteEdgeStyle }) {
   // Same handwritten-SVG convention as ShapePreviewIcon above - a short horizontal line rendered
   // with the actual strokeDasharray/gradient each style maps to in the real edge rendering (see
-  // TreeGraphView.tsx/NoteGraphView.tsx's edgeStrokeDasharray/edgeGradientStroke), so the preview
-  // matches reality.
+  // NoteGraphView.tsx's edgeStrokeDasharray/edgeGradientStroke), so the preview matches reality.
   const gradientId = useId()
   const dasharray = edgeStyle === 'Dashed' ? '4,2.5' : edgeStyle === 'Dotted' ? '1,2' : undefined
 

@@ -18,6 +18,133 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.76 - 2026-09-17 21:18
+
+🗑️ Removed
+
+- **Notes hierarchy (parent/child tree) and all four tree-layout graph views removed entirely** -
+  explicit user request to go "back to the roots": a plain notes app with cross-linked notes, not
+  a mind-mapping tool. Removed:
+  - **Backend**: `Note.ParentNoteId`/`ParentNote`/`ChildNotes`, the FK/index/`OnDelete(Restrict)`
+    config in `PmDbContextBase`, `NotesController.WouldCreateCycleAsync` and every
+    `ParentNoteId`-touching code path (create/update/delete re-parenting,
+    `ProjectsController`'s bulk-clear-on-project-delete step), `UpdateNoteRequest.ParentNoteId`/
+    `SetParentNoteId`, `NoteDto.ParentNoteId`/`ChildNoteIds`. New EF Core migration
+    `RemoveNoteHierarchy` for **both** providers (Postgres + SqlServer) drops the `ParentNoteId`
+    column/FK/index.
+  - **Frontend**: `notesGraph/TreeGraphView.tsx`, `notesGraph/treeLayouts.ts` (all four layouts -
+    `layoutMindMap`/`layoutTree`/`layoutFishbone` - plus `LayoutGuide`/`GraphLayoutId`/
+    `TreeLayoutId`), `notesGraph/LayoutPickerPanel.tsx` deleted outright. `NotesView.tsx`'s
+    three-button Layout/Farbschema/Form segmented control is now a two-button
+    Farbschema/Form control - no layout concept left to pick between, `NoteGraphView.tsx` (the
+    free/physics graph) is the only graph view now, rendered unconditionally in graph mode
+    instead of behind a `graphLayout === 'free'` branch. `GraphSidePanel.tsx`'s `kind: 'root'`
+    branch (the virtual tree-view center node's own appearance panel, plus its
+    `rootAppearance`/`onChangeRootAppearance`/`onDetachParent`/`showDetachParent` props) is gone -
+    `SelectedNodeInfo` is now just `{ note: Note }`, always a real note. `api/notes.ts`'s
+    `createNote`/`updateNote` lost their `parentNoteId`/`setParentNoteId` parameters;
+    `api/types.ts`'s `Note` lost `parentNoteId`/`childNoteIds`.
+  - `Note.EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor`/`NoteEdgeOverride` and the free
+    `[[Title]]` cross-link graph (`NoteGraphView.tsx`, `NoteLink`, `NoteLinkParser`) are
+    UNCHANGED - those were never part of the hierarchy, they style/drive the free graph view,
+    which stays exactly as it was.
+
+✨ New
+
+- **MSSQL is no longer part of the everyday dev stack.** `docker-compose.yml`'s `mssql` service now
+  sits behind a new `mssql-check` Compose profile (analog to the existing `whisper` profile) -
+  Postgres alone is the dev default. `start.ps1` gained `-MssqlCheck` (starts `mssql` alongside the
+  current provider) and requires it together with `-Db mssql` (`-Db mssql -MssqlCheck`) - using
+  `-Db mssql` alone now fails fast with a clear message instead of silently pointing the backend at
+  a DB that isn't running. `backend`'s hard `depends_on: mssql` (and `adminer`'s) were removed since
+  a `depends_on` on a profile-gated service that isn't started would otherwise block the whole stack
+  from coming up at all. Dev container count: 9 → 8 by default. Rationale: keeping two full DB
+  servers resident for a provider (`SqlServerPmDbContext`) only occasionally exercised was wasted
+  resources for no daily benefit - MSSQL compatibility now gets verified deliberately (manually via
+  `-MssqlCheck` today, intended to become an automated RC/V-Commit CI gate later - see "Customer
+  distribution concept" in CLAUDE.md) rather than by coincidence of the container always being up.
+  Like `-NoWhisper`, `stop`/`restart` without `-MssqlCheck` leaves an already-running `mssql`
+  container alone rather than tearing it down - documented in `start.ps1`'s header comment since
+  MSSQL is notably more RAM-hungry than whisper and isn't meant to just idle in the background.
+- **In-app microphone picker for dictation** (`DictationButton.tsx`) - per explicit user feedback
+  that switching microphones meant going into the browser's own site settings and revoking/
+  re-granting the mic permission every time. A small chevron next to the mic button opens a
+  dropdown listing every Windows audio-input device (`navigator.mediaDevices.enumerateDevices`,
+  filtered to `kind === 'audioinput'`, refreshed live on the `devicechange` event so a
+  plugged-in USB headset shows up without reopening the app). The chosen device is remembered as
+  a DB-backed preference (`dictation.micDeviceId`, via `usePreferences` - never localStorage, per
+  project convention) and requested via `getUserMedia({ audio: { deviceId: { ideal } } })` on the
+  next recording. Only shown for the MediaRecorder-based providers (Whisper/OpenAI/Google) - the
+  Browser provider's Web Speech API has no deviceId concept, it always uses the OS/browser
+  default input, so a picker there would be misleading. The one-time browser permission prompt
+  itself can't be skipped (a Web Platform security boundary, not an app limitation) but switching
+  the requested deviceId once permission is granted does NOT re-trigger it, which is what
+  actually eliminates the revoke/re-grant round-trip.
+- **Live equalizer bars next to the mic button while recording** (`DictationButton.tsx`,
+  `hooks/useMicLevels.ts`) - per explicit user feedback that the existing `animate-ping` red ring
+  alone wasn't enough feedback that the mic is actually listening and reacting to voice ("man
+  sieht immer nur diesen Button, aber man weiß nicht, ob er einen hört"). New `useMicLevels(stream:
+  MediaStream | null)` hook owns a Web Audio API `AudioContext`/`AnalyserNode` (`fftSize = 128`,
+  `smoothingTimeConstant = 0.6`) whose 64 frequency bins get grouped into 9 bars (averaged per
+  group), each further eased frame-to-frame (`EASING = 0.35`, exponential) so the bars glide
+  rather than snap on raw FFT noise - deliberately never connected to `audioContext.destination`,
+  so nothing is ever audibly played back, purely an analysis tap. Rendered as a new
+  `EqualizerBars` component: 9 rounded-cap bars (`rounded-full`, 3px wide) in the same `red-500`/
+  `red-400` (dark) accent already used for the recording state, inside a small bordered pill next
+  to the mic button that animates its own width/opacity in on `state === 'recording'` rather than
+  causing a layout jump.
+  - The two recording paths acquire their `MediaStream` differently, so `useMicLevels` takes an
+    already-acquired stream rather than requesting one itself: the MediaRecorder path (Whisper/
+    OpenAI/Google, `startMediaRecording()`) already holds one in `streamRef` and just mirrors it
+    into a second `visualizerStream` state var for the hook to consume, with no extra
+    `getUserMedia` call. The Web Speech API path (Browser provider, `startBrowserRecognition()`)
+    has no stream of its own at all (`SpeechRecognition` is an opaque browser-internal service) -
+    it fires a second, independent `getUserMedia` call purely for the visualization, best-effort
+    (a failure there doesn't affect recognition itself, which is already running by that point).
+    Both requests honor the same `preferredDeviceId`/`MIC_DEVICE_PREFERENCE_KEY` device choice as
+    the recording stream itself, so the bars reflect whichever mic was actually selected.
+  - `AudioContext`/`AnalyserNode`/`requestAnimationFrame` loop are torn down in the effect's
+    cleanup (`cancelAnimationFrame`, `source.disconnect()`, `analyser.disconnect()`,
+    `audioContext.close()`) whenever the stream changes or recording stops, avoiding a
+    hung/leaked audio context - verified live via Playwright (bar height reads at three points in
+    time while a fake sine-wave test microphone was recording, confirming the rendered heights
+    actually change frame to frame, then confirming zero bar elements remain in the DOM after
+    stopping).
+  - `lib/speechRecognition.d.ts` (the project's existing ambient-typings file for Web Speech API
+    globals TypeScript's own `lib.dom.d.ts` doesn't cover) gained `Window.webkitAudioContext?:
+    typeof AudioContext` for Safari's vendor-prefixed `AudioContext` fallback.
+
+🔧 Fix
+
+- **Dictation error/device popups no longer run off the viewport.** Both now measure the mic
+  button's actual position (`getBoundingClientRect`) before opening and flip to a left- or
+  right-anchored alignment when the default placement would clip against the window edge -
+  previously both were unconditionally centered/left-anchored under the button, which cut the
+  error text off entirely in a narrow toolbar near the window edge (the user's exact complaint:
+  the message ran outside the window and couldn't be read in full).
+- **More specific dictation error messages** distinguishing `NotAllowedError`/`SecurityError`
+  (permission blocked - now tells the user to use the address-bar lock icon to re-allow and
+  reload, instead of a generic "check permission"), `NotFoundError`/`OverconstrainedError` (no
+  mic found), and `NotReadableError` (device already in use by another app) - previously one
+  generic "Mikrofonzugriff nicht möglich" for every `getUserMedia` failure.
+
+🔄 Change
+
+- **Picking a color scheme / shape now closes its popover** in `NotesView.tsx` - each is a
+  one-shot action and the open menu was covering the graph the user wants to see.
+- **`ThemeContext.tsx`'s `toggleTheme` no longer calls `setPreference()` (a different component's
+  state) inside the `setTheme` updater callback** - same "Cannot update a component while
+  rendering a different component" bug already fixed once for `NotesView.tsx`'s
+  `setRootAppearance`, caught live here via a React console warning during this session's
+  end-to-end verification. `theme` is already the current value at the call site, so the next
+  value is computed directly instead of through the updater form.
+
+Note: this version also briefly rewrote the Mind Map and Fishbone tree layouts (radial-sunburst
+overlap fix, a real Ishikawa spine) earlier in the same working session - that work, and the tree
+layouts it improved, were removed again by the "Notes hierarchy removed entirely" entry above
+before this version was ever committed, per a later explicit user request to drop the whole
+tree-layout concept. Not worth its own entry since it never shipped as a committed version.
+
 ## v2026.9.75
 
 🔄 Change
@@ -652,6 +779,143 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.9.76 - 2026-09-17 21:18
+
+🗑️ Entfernt
+
+- **Notizen-Hierarchie (Eltern/Kind-Baum) und alle vier Baum-Layout-Graph-Ansichten komplett
+  entfernt** - auf ausdrücklichen Nutzerwunsch, zurück zu den Wurzeln: eine reine Notizen-App mit
+  querverlinkten Notizen, kein Mindmapping-Tool. Entfernt:
+  - **Backend**: `Note.ParentNoteId`/`ParentNote`/`ChildNotes`, die FK-/Index-/
+    `OnDelete(Restrict)`-Konfiguration in `PmDbContextBase`,
+    `NotesController.WouldCreateCycleAsync` und jeder `ParentNoteId`-berührende Codepfad
+    (Erstellen/Ändern/Löschen-Umhängen, `ProjectsController`s Massen-Zurücksetzen beim
+    Projekt-Löschen), `UpdateNoteRequest.ParentNoteId`/`SetParentNoteId`,
+    `NoteDto.ParentNoteId`/`ChildNoteIds`. Neue EF-Core-Migration `RemoveNoteHierarchy` für
+    **beide** Provider (Postgres + SqlServer) entfernt Spalte/FK/Index von `ParentNoteId`.
+  - **Frontend**: `notesGraph/TreeGraphView.tsx`, `notesGraph/treeLayouts.ts` (alle vier Layouts -
+    `layoutMindMap`/`layoutTree`/`layoutFishbone` - plus `LayoutGuide`/`GraphLayoutId`/
+    `TreeLayoutId`), `notesGraph/LayoutPickerPanel.tsx` komplett gelöscht. Der
+    Dreier-Container Layout/Farbschema/Form in `NotesView.tsx` ist jetzt ein Zweier-Container
+    Farbschema/Form - kein Layout-Konzept mehr zum Auswählen, `NoteGraphView.tsx` (der freie/
+    physikbasierte Graph) ist jetzt die einzige Graph-Ansicht, bedingungslos im Graph-Modus
+    gerendert statt hinter einer `graphLayout === 'free'`-Verzweigung. `GraphSidePanel.tsx`s
+    `kind: 'root'`-Zweig (das eigene Aussehen-Panel des virtuellen Baum-Mittelpunkts, plus dessen
+    `rootAppearance`/`onChangeRootAppearance`/`onDetachParent`/`showDetachParent`-Props) ist weg -
+    `SelectedNodeInfo` ist jetzt nur noch `{ note: Note }`, immer eine echte Notiz. `api/notes.ts`s
+    `createNote`/`updateNote` verloren ihre `parentNoteId`/`setParentNoteId`-Parameter;
+    `api/types.ts`s `Note` verlor `parentNoteId`/`childNoteIds`.
+  - `Note.EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor`/`NoteEdgeOverride` und der freie
+    `[[Titel]]`-Querlink-Graph (`NoteGraphView.tsx`, `NoteLink`, `NoteLinkParser`) sind
+    UNVERÄNDERT - die waren nie Teil der Hierarchie, sie stylen/treiben die freie Graph-Ansicht,
+    die exakt so bleibt wie sie war.
+
+✨ Neu
+
+- **MSSQL ist nicht mehr Teil des täglichen Dev-Stacks.** Der `mssql`-Service in
+  `docker-compose.yml` sitzt jetzt hinter einem neuen `mssql-check`-Compose-Profil (analog zum
+  bestehenden `whisper`-Profil) - Postgres allein ist der Dev-Default. `start.ps1` bekam
+  `-MssqlCheck` (startet `mssql` zusätzlich zum aktuellen Provider) und verlangt es zusammen mit
+  `-Db mssql` (`-Db mssql -MssqlCheck`) - `-Db mssql` allein schlägt jetzt sofort mit einer klaren
+  Meldung fehl statt das Backend still auf eine nicht laufende DB zeigen zu lassen. Das harte
+  `depends_on: mssql` von `backend` (und `adminer`) wurde entfernt, da ein `depends_on` auf einen
+  profil-gebundenen, nicht gestarteten Service sonst den kompletten Stack-Start blockiert hätte.
+  Dev-Container-Zahl: 9 → 8 im Standardfall. Grund: zwei volle DB-Server dauerhaft laufen zu lassen
+  für einen Provider (`SqlServerPmDbContext`), der nur gelegentlich geprüft wird, war verschwendete
+  Ressourcen ohne täglichen Nutzen - die MSSQL-Kompatibilität wird jetzt bewusst geprüft (aktuell
+  manuell über `-MssqlCheck`, später als automatisiertes RC-/V-Commit-CI-Gate gedacht - siehe
+  "Customer distribution concept" in CLAUDE.md) statt zufällig, weil der Container ohnehin lief.
+  Wie bei `-NoWhisper` lässt `stop`/`restart` ohne `-MssqlCheck` einen bereits laufenden
+  `mssql`-Container unberührt statt ihn zu stoppen - im Kopfkommentar von `start.ps1` dokumentiert,
+  da MSSQL spürbar RAM-hungriger als whisper ist und nicht einfach im Hintergrund weiterlaufen soll.
+- **Mikrofon-Auswahl direkt in der App für das Diktieren** (`DictationButton.tsx`) - auf
+  ausdrücklichen Nutzerwunsch, weil das Mikrofonwechseln bisher bedeutete, in die
+  Browser-Website-Einstellungen zu gehen und die Mikrofonberechtigung jedes Mal zu entziehen und
+  neu zu erteilen. Ein kleiner Pfeil neben dem Mikro-Button öffnet ein Dropdown mit allen
+  erkannten Windows-Audio-Eingabegeräten (`navigator.mediaDevices.enumerateDevices`, gefiltert auf
+  `kind === 'audioinput'`, live aktualisiert über das `devicechange`-Event, sodass ein neu
+  angeschlossenes USB-Headset auch ohne App-Neustart erscheint). Das gewählte Gerät wird als
+  DB-gestützte Preference gemerkt (`dictation.micDeviceId`, über `usePreferences` - nie
+  localStorage, gemäß Projektkonvention) und beim nächsten Aufnahmestart über
+  `getUserMedia({ audio: { deviceId: { ideal } } })` angefordert. Nur bei den
+  MediaRecorder-basierten Anbietern (Whisper/OpenAI/Google) sichtbar - die Web Speech API des
+  Browser-Anbieters kennt kein deviceId-Konzept, sie nutzt immer das OS-/Browser-Standardgerät,
+  eine Auswahl dort wäre irreführend. Die einmalige Browser-Berechtigungsabfrage selbst lässt sich
+  nicht überspringen (eine Web-Plattform-Sicherheitsgrenze, keine App-Einschränkung), aber das
+  interne Wechseln der angeforderten deviceId löst sie NICHT erneut aus, sobald die Berechtigung
+  einmal erteilt ist - genau das erspart den Entzugs-/Neuerteilungs-Umweg.
+- **Live-Equalizer-Balken neben dem Mikro-Button während der Aufnahme** (`DictationButton.tsx`,
+  `hooks/useMicLevels.ts`) - auf ausdrücklichen Nutzerwunsch, weil der bisherige rote
+  `animate-ping`-Ring allein nicht genug Feedback gab, dass das Mikrofon wirklich zuhört und auf
+  die Stimme reagiert ("man sieht immer nur diesen Button, aber man weiß nicht, ob er einen
+  hört"). Der neue Hook `useMicLevels(stream: MediaStream | null)` hält einen Web-Audio-API-
+  `AudioContext`/`AnalyserNode` (`fftSize = 128`, `smoothingTimeConstant = 0.6`), dessen 64
+  Frequenz-Bins zu 9 Balken gruppiert werden (Mittelwert je Gruppe), zusätzlich Frame für Frame
+  geglättet (`EASING = 0.35`, exponentiell), damit die Balken gleiten statt auf FFT-Rauschen hart
+  zu springen - bewusst nie mit `audioContext.destination` verbunden, sodass nie tatsächlich Audio
+  hörbar abgespielt wird, rein zur Analyse. Gerendert als neue `EqualizerBars`-Komponente: 9
+  Balken mit abgerundeten Enden (`rounded-full`, 3px breit) im selben `red-500`/`red-400`
+  (Dark-Mode)-Akzent, der schon für den Recording-Zustand verwendet wird, in einer kleinen
+  umrandeten Pille neben dem Mikro-Button, die ihre eigene Breite/Deckkraft bei
+  `state === 'recording'` einblendet statt einen Layout-Sprung zu verursachen.
+  - Die beiden Aufnahme-Pfade beschaffen ihren `MediaStream` unterschiedlich, daher nimmt
+    `useMicLevels` einen bereits vorhandenen Stream entgegen statt selbst einen anzufordern: Der
+    MediaRecorder-Pfad (Whisper/OpenAI/Google, `startMediaRecording()`) hält bereits einen in
+    `streamRef` und spiegelt ihn nur zusätzlich in eine zweite `visualizerStream`-State-Variable
+    für den Hook - ohne weiteren `getUserMedia`-Aufruf. Der Web-Speech-API-Pfad
+    (Browser-Anbieter, `startBrowserRecognition()`) hat gar keinen eigenen Stream
+    (`SpeechRecognition` ist ein intransparenter browserinterner Dienst) - er stößt einen
+    zweiten, unabhängigen `getUserMedia`-Aufruf rein für die Visualisierung an, nach bestem
+    Bemühen (ein Fehlschlag dort beeinträchtigt die eigentliche Spracherkennung nicht, die zu dem
+    Zeitpunkt bereits läuft). Beide Anfragen respektieren dieselbe
+    `preferredDeviceId`/`MIC_DEVICE_PREFERENCE_KEY`-Geräteauswahl wie der Aufnahme-Stream selbst,
+    sodass die Balken das tatsächlich gewählte Mikrofon widerspiegeln.
+  - `AudioContext`/`AnalyserNode`/die `requestAnimationFrame`-Schleife werden im Cleanup des
+    Effects abgebaut (`cancelAnimationFrame`, `source.disconnect()`, `analyser.disconnect()`,
+    `audioContext.close()`), sobald sich der Stream ändert oder die Aufnahme stoppt - so wird ein
+    hängender/leckender Audio-Context vermieden. Live über Playwright verifiziert (Balkenhöhen zu
+    drei Zeitpunkten ausgelesen, während ein simuliertes Sinus-Testmikrofon aufnahm, bestätigt,
+    dass sich die gerenderten Höhen tatsächlich von Frame zu Frame ändern; anschließend bestätigt,
+    dass nach dem Stoppen keine Balken-Elemente mehr im DOM verbleiben).
+  - `lib/speechRecognition.d.ts` (die bestehende Ambient-Typings-Datei des Projekts für
+    Web-Speech-API-Globals, die TypeScripts eigenes `lib.dom.d.ts` nicht abdeckt) bekam
+    `Window.webkitAudioContext?: typeof AudioContext` für Safaris vendor-präfixten
+    `AudioContext`-Fallback.
+
+🔧 Behoben
+
+- **Diktier-Fehler-/Geräte-Popups laufen nicht mehr aus dem sichtbaren Bereich.** Beide messen
+  jetzt vor dem Öffnen die tatsächliche Position des Mikro-Buttons (`getBoundingClientRect`) und
+  wechseln auf links- oder rechtsbündige Ausrichtung, wenn die Standardposition am Fensterrand
+  abgeschnitten würde - vorher waren beide fest zentriert bzw. linksbündig unter dem Button, was
+  den Fehlertext in einer schmalen Toolbar nahe am Fensterrand komplett abschnitt (die genaue
+  Nutzerbeschwerde: die Meldung lief aus dem Fenster und konnte nicht vollständig gelesen werden).
+- **Konkretere Diktier-Fehlermeldungen**, die zwischen `NotAllowedError`/`SecurityError`
+  (Berechtigung blockiert - verweist jetzt auf das Schloss-Symbol in der Adressleiste zum erneuten
+  Erlauben und Neuladen statt eines generischen "Berechtigung prüfen"), `NotFoundError`/
+  `OverconstrainedError` (kein Mikrofon gefunden) und `NotReadableError` (Gerät wird bereits von
+  einer anderen Anwendung verwendet) unterscheiden - vorher eine generische Meldung
+  "Mikrofonzugriff nicht möglich" für jeden `getUserMedia`-Fehler.
+
+🔄 Geändert
+
+- **Ein Farbschema / eine Form auszuwählen schließt jetzt das Popover** in `NotesView.tsx` - jede
+  Aktion ist einmalig, und das offene Menü verdeckte den Graph, den der Nutzer sehen will.
+- **`ThemeContext.tsx`s `toggleTheme` ruft `setPreference()` (Zustand einer anderen Komponente)
+  nicht mehr innerhalb des `setTheme`-Updater-Callbacks auf** - derselbe „Cannot update a
+  component while rendering a different component"-Bug, der schon einmal für
+  `NotesView.tsx`s `setRootAppearance` behoben wurde, hier live über eine React-Konsolenwarnung
+  während der Ende-zu-Ende-Verifikation dieser Session entdeckt. `theme` ist am Aufrufort bereits
+  der aktuelle Wert, daher wird der nächste Wert direkt berechnet statt über die Updater-Form.
+
+Hinweis: Diese Version hatte innerhalb derselben Arbeitssitzung zwischenzeitlich auch die
+Mind-Map- und Fischgräten-Baum-Layouts neu geschrieben (Überlapp-Fix beim radialen Sunburst, eine
+echte Ishikawa-Wirbelsäule) - diese Arbeit, und die Baum-Layouts, die sie verbesserte, wurden
+durch den obigen Eintrag „Notizen-Hierarchie komplett entfernt" wieder rückgängig gemacht, bevor
+diese Version je committet wurde, auf einen späteren ausdrücklichen Nutzerwunsch hin, das ganze
+Baum-Layout-Konzept fallen zu lassen. Kein eigener Eintrag wert, da es nie als committete Version
+ausgeliefert wurde.
 
 ## v2026.9.75
 

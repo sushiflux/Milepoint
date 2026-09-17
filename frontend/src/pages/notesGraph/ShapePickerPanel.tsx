@@ -2,10 +2,9 @@ import type { NoteShape } from '../../api/types'
 import { SHAPE_OPTIONS } from './shapeOptions'
 import { ShapePreviewIcon } from './shapePreview'
 
-// Projektweite Knotenform-Auswahl - eine von drei getrennten Achsen im
-// Layout/Farbschema/Form-Container neben dem Liste/Graph-Umschalter (siehe LayoutPickerPanel /
-// ColorSchemePanel für die anderen beiden). Ein Klick setzt die Form ALLER Notizen (inkl.
-// Mittelpunkt) sofort, ohne Rückfrage. Farbe und Linienstil bleiben unangetastet.
+// Projektweite Knotenform-Auswahl - eine von zwei getrennten Achsen im Farbschema/Form-Container
+// neben dem Liste/Graph-Umschalter (siehe ColorSchemePanel für die andere). Ein Klick setzt die
+// Form ALLER Notizen sofort, ohne Rückfrage. Farbe und Linienstil bleiben unangetastet.
 
 interface Props {
   /** Form, die gerade auf allen Notizen liegt, oder null wenn (noch) keine bewusst projektweit
