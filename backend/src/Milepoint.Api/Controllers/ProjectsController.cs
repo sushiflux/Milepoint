@@ -107,17 +107,11 @@ public class ProjectsController : ControllerBase
         _db.Projects.Add(project);
         await _db.SaveChangesAsync();
 
-        // Every project starts with a root note named after the project itself, so the
-        // Notes graph always has a natural center to link everything else from.
-        _db.Notes.Add(new Note
-        {
-            ProjectId = project.Id,
-            Title = project.Name,
-            Content = string.Empty
-        });
-
-        // ...and a default board, so Timeline task/phase creation always has a column to land
-        // in - no "create a board first" detour before the project is usable.
+        // A default board, so Timeline task/phase creation always has a column to land in - no
+        // "create a board first" detour before the project is usable. No longer auto-creates a
+        // root note named after the project - explicit user request: inside a project's own Notes
+        // graph, a node named after the project itself is redundant (the whole graph already IS
+        // that project), so it just added noise instead of being a useful "natural center".
         var board = new Board
         {
             ProjectId = project.Id,

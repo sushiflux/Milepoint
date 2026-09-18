@@ -18,6 +18,14 @@ frontend/dist/
 frontend/.vite/
 frontend/*.tsbuildinfo
 
+# --- Playwright E2E suite (frontend/e2e/run.mjs npm-installs @playwright/test on demand,
+# inside the on-demand Playwright Docker container - see the suite's own README/comments) ---
+frontend/e2e/node_modules/
+frontend/e2e/package.json
+frontend/e2e/package-lock.json
+frontend/e2e/test-results/
+frontend/e2e/playwright-report/
+
 # --- Editor ---
 .vs/
 .idea/

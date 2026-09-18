@@ -1,7 +1,8 @@
 <#
   Milepoint Dev-Stack - Start/Stopp/Status in einer Datei.
 
-  .\start.ps1                  Startet den Stack (erstellt .env falls nötig, prüft Ports, wartet auf Healthchecks)
+  .\start.ps1                  Startet den Stack (erstellt .env falls nötig, liest feste Ports aus
+                                der globalen Registry ~/.claude/ports.json, wartet auf Healthchecks)
   .\start.ps1 -Action stop     Stoppt den Stack (Docker-Volumes/Daten bleiben erhalten)
   .\start.ps1 -Action restart  Stoppt und startet neu
   .\start.ps1 -Action status   Zeigt den Container-Status
@@ -178,34 +179,55 @@ function Test-TcpPortFree([int]$Port) {
     return -not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
-function Find-FreePort([int]$StartPort, [System.Collections.Generic.HashSet[int]]$ReservedPorts) {
-    $port = $StartPort
-    while ((-not (Test-TcpPortFree $port)) -or $ReservedPorts.Contains($port)) {
-        $port++
-    }
-    return $port
-}
+# Feste Ports aus der globalen Registry (~/.claude/ports.json, projektübergreifend) statt
+# stillem Auto-Fallback auf den nächsten freien Port - siehe "Port registry" in der globalen
+# CLAUDE.md. Ports ändern sich dadurch nie von selbst zwischen Läufen, damit vom Nutzer
+# gespeicherte Links (https://localhost:8445 etc.) stabil bleiben. Ein belegter Port ist ein
+# echter Konflikt und wird laut abgebrochen statt stillschweigend verschoben.
+$PortRegistryFile = 'C:\Users\Flux\.claude\ports.json'
 
 function Resolve-Ports {
-    $portKeys = @(
-        'CADDY_PORT', 'CADDY_HTTPS_PORT', 'FRONTEND_PORT', 'BACKEND_PORT', 'POSTGRES_PORT',
-        'MSSQL_PORT', 'REDIS_PORT', 'MAILPIT_SMTP_PORT', 'MAILPIT_UI_PORT', 'ADMINER_PORT',
-        'WHISPER_PORT'
-    )
-    # Belegte Ports auch untereinander erkennen: ein Port, der bei OS-Check gerade frei
-    # aussieht (weil der eigene Container mit diesem Port noch nicht läuft), darf trotzdem
-    # nicht zweimal an verschiedene Milepoint-Dienste im selben Lauf vergeben werden.
-    $reservedPorts = [System.Collections.Generic.HashSet[int]]::new()
-    foreach ($key in $portKeys) {
-        $current = [int](Get-EnvValue -Path $EnvFile -Key $key)
-        if ((Test-TcpPortFree $current) -and -not $reservedPorts.Contains($current)) {
-            [void]$reservedPorts.Add($current)
-            continue
+    $portMap = @{
+        'CADDY_PORT'         = 'caddy'
+        'CADDY_HTTPS_PORT'   = 'caddy-https'
+        'FRONTEND_PORT'      = 'frontend'
+        'BACKEND_PORT'       = 'backend'
+        'POSTGRES_PORT'      = 'postgres'
+        'MSSQL_PORT'         = 'mssql'
+        'REDIS_PORT'         = 'redis'
+        'MAILPIT_SMTP_PORT'  = 'mailpit-smtp'
+        'MAILPIT_UI_PORT'    = 'mailpit-ui'
+        'ADMINER_PORT'       = 'adminer'
+        'WHISPER_PORT'       = 'whisper'
+    }
+
+    if (-not (Test-Path $PortRegistryFile)) {
+        throw "Port-Registry nicht gefunden: $PortRegistryFile - siehe 'Port registry' in der globalen CLAUDE.md."
+    }
+    $registry = Get-Content $PortRegistryFile -Raw | ConvertFrom-Json
+    if (-not $registry.milepoint) {
+        throw "Kein 'milepoint'-Eintrag in $PortRegistryFile gefunden."
+    }
+    $projectPorts = $registry.milepoint
+
+    # Läuft erst NACH "docker compose down --remove-orphans" (siehe Aufrufstelle unten) - zu
+    # diesem Zeitpunkt sind Milepoints eigene Container bereits gestoppt, ihre Ports also schon
+    # freigegeben. Ein hier noch belegter registrierter Port ist deshalb immer ein echter externer
+    # Konflikt (fremder Prozess, oder ein anderes Projekt, das denselben Port ohne Registry-Eintrag
+    # nutzt) - kein Fall, der zwischen "eigenem" und "fremdem" Belegtsein unterscheiden müsste.
+    foreach ($key in $portMap.Keys) {
+        $regKey = $portMap[$key]
+        $port = $projectPorts.$regKey
+        if (-not $port) {
+            throw "Kein Port für '$regKey' ($key) in $PortRegistryFile hinterlegt."
         }
-        $free = Find-FreePort ($current + 1) $reservedPorts
-        Write-Host "Port $current ($key) ist belegt (fremder Prozess oder anderer Milepoint-Dienst) - weiche auf $free aus." -ForegroundColor Yellow
-        Set-EnvValue -Path $EnvFile -Key $key -Value $free
-        [void]$reservedPorts.Add($free)
+        $port = [int]$port
+
+        if (-not (Test-TcpPortFree $port)) {
+            throw "Port $port ($key) ist belegt (fremder Prozess oder ein anderes Projekt). Registrierter Port laut $PortRegistryFile - Konflikt bitte manuell auflösen (belegenden Prozess stoppen, oder Registry-Eintrag bewusst ändern), keine automatische Ausweichung mehr."
+        }
+
+        Set-EnvValue -Path $EnvFile -Key $key -Value $port
     }
 }
 
@@ -467,7 +489,7 @@ Start-Job -ScriptBlock {
 } -ArgumentList $appUrl, 180 | Out-Null
 
 Write-Host "`nMilepoint-Stack läuft ($appVersion):" -ForegroundColor Green
-Write-Host "  App:      https://localhost:$caddyHttpsPort  (http://localhost:$caddyPort leitet automatisch um)"
+Write-Host "  App:      https://localhost:$caddyHttpsPort  (auch: https://milepoint.localhost:$caddyHttpsPort oder https://milepoint.sushifluxdevelop:$caddyHttpsPort - http://localhost:$caddyPort leitet automatisch um)"
 Write-Host "  Adminer:  http://localhost:$adminerPort"
 Write-Host "  Mailpit:  http://localhost:$mailpitPort"
 if ($WithWhisper) {

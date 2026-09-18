@@ -982,7 +982,8 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                               <path d="M4 6h12M8 6V4a1 1 0 011-1h2a1 1 0 011 1v2m3 0-.7 10.5a1.5 1.5 0 01-1.5 1.5H6.2a1.5 1.5 0 01-1.5-1.5L4 6h12z" />
                             </svg>
                           </button>
-                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-slate-400 opacity-60 group-hover:opacity-100 dark:text-slate-400 transition-opacity" title="Ziehen zum Verschieben">
+                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-slate-400 opacity-60 group-hover:opacity-100 dark:text-slate-400 transition-opacity">
+                            <title>Ziehen zum Verschieben</title>
                             <path d="M7 4a1 1 0 11-2 0 1 1 0 012 0zM7 10a1 1 0 11-2 0 1 1 0 012 0zM7 16a1 1 0 11-2 0 1 1 0 012 0zM13 4a1 1 0 11-2 0 1 1 0 012 0zM13 10a1 1 0 11-2 0 1 1 0 012 0zM13 16a1 1 0 11-2 0 1 1 0 012 0z" />
                           </svg>
                           <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-mono font-bold text-slate-600 dark:bg-slate-700/80 dark:text-slate-300">

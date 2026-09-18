@@ -11,7 +11,14 @@
 # Hostname must be explicit (not a bare ":443") - "tls internal" only auto-issues
 # a certificate for names it actually knows about from the site address, so a
 # hostless block left every TLS ClientHello unmatched ("no certificate available").
-localhost:443 {
+# milepoint.localhost is a more memorable alias - ".localhost" is a browser/OS-reserved TLD
+# (RFC 6761) that resolves straight to 127.0.0.1 with zero DNS lookup, works with no setup at
+# all. milepoint.sushifluxdevelop is a second alias resolved via this user's own Pi-hole (a
+# wildcard "address=/sushifluxdevelop/127.0.0.1" entry in its misc.dnsmasq_lines config answers
+# every *.sushifluxdevelop name directly, configured once on the Pi-hole itself - see the global
+# CLAUDE.md's "A memorable per-project hostname" note). The port still has to be in the URL
+# either way, since host ports 80/443 are already taken by this machine's own IIS.
+localhost:443, milepoint.localhost:443, milepoint.sushifluxdevelop:443 {
 	# No public domain here (this is a local dev stack), so Caddy issues its own
 	# locally-trusted certificate instead of requesting one from Let's Encrypt.
 	# The browser will only show a green padlock once that internal CA root is

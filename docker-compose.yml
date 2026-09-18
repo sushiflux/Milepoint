@@ -143,16 +143,21 @@ services:
     image: onerahmet/openai-whisper-asr-webservice:v1.10.0
     profiles: ["whisper"]
     environment:
-      # openai_whisper | faster_whisper | whisperx - openai_whisper is the reference engine and
-      # needs no extra setup (faster_whisper/whisperx need extra deps/HF tokens for some features).
-      ASR_ENGINE: ${WHISPER_ASR_ENGINE:-openai_whisper}
-      # Model size trades accuracy for speed/memory - "base" is a reasonable default for CPU-only
-      # inference (small/fast, good-enough accuracy for dictation). Bump to "small" for noticeably
-      # better accuracy at ~2x the compute, or "medium"/"large-v3" for near-best accuracy if this
-      # machine has the CPU headroom (or a GPU, see below) - large models are multiple GB and slow
-      # on CPU. Whisper is multilingual out of the box, so German works with any of these sizes
-      # without a separate language-specific model.
-      ASR_MODEL: ${WHISPER_ASR_MODEL:-base}
+      # openai_whisper | faster_whisper | whisperx - faster_whisper (CTranslate2 backend) is the
+      # default: openai_whisper (the plain PyTorch reference engine) was noticeably slow on
+      # CPU-only hardware even on a strong 16-core machine (several seconds per short dictation),
+      # confirmed by a real user report. faster_whisper gives the same accuracy considerably
+      # faster on CPU and needs no extra setup (already bundled in this image, no HF token
+      # required for the standard models used here).
+      ASR_ENGINE: ${WHISPER_ASR_ENGINE:-faster_whisper}
+      # Model size trades accuracy for speed/memory - "large-v3-turbo" is the default (explicit
+      # user preference after "base" mis-recognized too many words during dictation, then
+      # "large-v3" was noticeably slow even with faster_whisper). large-v3-turbo is a distilled
+      # large-v3 with fewer decoder layers - near-identical accuracy at roughly 8x the inference
+      # speed, the better tradeoff for dictation latency than full large-v3. Whisper is
+      # multilingual out of the box, so German works with any of these sizes without a separate
+      # language-specific model.
+      ASR_MODEL: ${WHISPER_ASR_MODEL:-large-v3-turbo}
       # cuda | cpu - stays cpu by default since this machine may not have a GPU exposed to Docker.
       # To enable GPU acceleration (noticeably faster transcription):
       #   1) switch the image tag above to the "-gpu" variant, e.g. v1.10.0-gpu

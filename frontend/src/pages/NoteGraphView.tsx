@@ -42,6 +42,16 @@ const CENTER_STRENGTH = 0.02
 const VELOCITY_DECAY = 0.35
 const ALPHA_DECAY = 0.02
 const ALPHA_MIN = 0.001
+// Hard cap on per-tick velocity - without this, notes loaded with unusually large initial
+// distances between them (e.g. freshly imported/positioned data, or several conflicting link
+// forces pulling the same node at once) can make the simulation numerically explode: a single
+// tick's combined repulsion/link force overshoots, the next tick's forces are computed from that
+// already-huge distance and overshoot further, compounding every frame until positions reach
+// astronomical values and the graph silently renders as empty (everything is transformed far
+// outside the viewBox). Clamping velocity keeps every tick's movement bounded regardless of how
+// extreme the input distances are, so the simulation always damps toward a stable layout instead
+// of occasionally diverging.
+const MAX_VELOCITY = 40
 const MIN_ZOOM = 0.15
 const MAX_ZOOM = 5
 
@@ -78,6 +88,62 @@ function buildEdges(notes: Note[]): [string, string][] {
   return edges
 }
 
+// Standard segment-segment intersection test via orientation/cross products - true only for a
+// genuine crossing (two segments that actually cut through each other), not for segments that
+// merely share an endpoint (every pair of edges meeting at the same note would otherwise register
+// as "crossing", which isn't the visual clutter this is meant to catch).
+function segmentsIntersect(p1: Point, p2: Point, p3: Point, p4: Point): boolean {
+  function cross(o: Point, a: Point, b: Point): number {
+    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+  }
+  const d1 = cross(p3, p4, p1)
+  const d2 = cross(p3, p4, p2)
+  const d3 = cross(p1, p2, p3)
+  const d4 = cross(p1, p2, p4)
+  return (d1 > 0) !== (d2 > 0) && (d3 > 0) !== (d4 > 0) && d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0
+}
+
+// For every pair of edges that actually crosses on screen, marks the geometrically LONGER one as
+// "should be dashed" - explicit user request: an unavoidable crossing (the physics layout can't
+// always reach zero crossings, especially in a dense graph) should read as "this connection passes
+// behind/through others" rather than looking like a clean, uninterrupted line through unrelated
+// nodes. The shorter, more local connection stays solid so the immediate neighborhood around a
+// note stays easy to read. Keyed by the same "a-b" string buildEdges()/the render loop already use.
+function computeCrossedEdges(edges: [string, string][], positions: Map<string, GraphNode>): Set<string> {
+  const crossed = new Set<string>()
+  const lengthOf = ([a, b]: [string, string]): number => {
+    const na = positions.get(a)
+    const nb = positions.get(b)
+    if (!na || !nb) return 0
+    return Math.hypot(nb.x - na.x, nb.y - na.y)
+  }
+
+  for (let i = 0; i < edges.length; i++) {
+    const [a1, b1] = edges[i]
+    const n1a = positions.get(a1)
+    const n1b = positions.get(b1)
+    if (!n1a || !n1b) continue
+
+    for (let j = i + 1; j < edges.length; j++) {
+      const [a2, b2] = edges[j]
+      // Edges sharing an endpoint (fan out from/into the same note) meet there by construction -
+      // that's not the crossing this is meant to flag.
+      if (a1 === a2 || a1 === b2 || b1 === a2 || b1 === b2) continue
+
+      const n2a = positions.get(a2)
+      const n2b = positions.get(b2)
+      if (!n2a || !n2b) continue
+
+      if (segmentsIntersect(n1a, n1b, n2a, n2b)) {
+        const longer = lengthOf(edges[i]) >= lengthOf(edges[j]) ? edges[i] : edges[j]
+        crossed.add(`${longer[0]}-${longer[1]}`)
+      }
+    }
+  }
+
+  return crossed
+}
+
 // One simulation step; forces scale with alpha so movement naturally settles (d3-force style).
 function computeFitTransform(nodes: GraphNode[], width: number, height: number): Transform {
   if (nodes.length === 0) return { x: 0, y: 0, k: 1 }
@@ -105,7 +171,18 @@ function computeFitTransform(nodes: GraphNode[], width: number, height: number):
   return { k: clampedK, x: width / 2 - centerX * clampedK, y: height / 2 - centerY * clampedK }
 }
 
-function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, width: number, height: number, pinnedId: string | null) {
+// centerScale lets handleArrange() temporarily pull harder toward the center for a from-scratch
+// reflow (see its own doc comment) without touching the constant that governs the everyday case
+// (dragging a note, a new note joining the graph) - defaults to 1 (no change).
+function tick(
+  nodes: GraphNode[],
+  edges: [string, string][],
+  alpha: number,
+  width: number,
+  height: number,
+  pinnedId: string | null,
+  centerScale = 1,
+) {
   const byId = new Map(nodes.map((n) => [n.id, n]))
 
   for (const n of nodes) {
@@ -122,8 +199,8 @@ function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, widt
       fx += (dx / dist) * force
       fy += (dy / dist) * force
     }
-    fx += (width / 2 - n.x) * CENTER_STRENGTH * alpha
-    fy += (height / 2 - n.y) * CENTER_STRENGTH * alpha
+    fx += (width / 2 - n.x) * CENTER_STRENGTH * centerScale * alpha
+    fy += (height / 2 - n.y) * CENTER_STRENGTH * centerScale * alpha
     n.vx = (n.vx + fx) * (1 - VELOCITY_DECAY)
     n.vy = (n.vy + fy) * (1 - VELOCITY_DECAY)
   }
@@ -150,6 +227,12 @@ function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, widt
 
   for (const n of nodes) {
     if (n.id === pinnedId) continue
+    const speed = Math.hypot(n.vx, n.vy)
+    if (speed > MAX_VELOCITY) {
+      const scale = MAX_VELOCITY / speed
+      n.vx *= scale
+      n.vy *= scale
+    }
     n.x += n.vx
     n.y += n.vy
   }
@@ -179,6 +262,10 @@ export default function NoteGraphView({ projectId, notes, onSelectNote, onCreate
   const positionsRef = useRef<Map<string, GraphNode>>(new Map())
   const alphaRef = useRef(0)
   const rafRef = useRef<number | null>(null)
+  // Set for the duration of a handleArrange() reflow only - see tick()'s repulsionScale/
+  // centerScale params and handleArrange()'s own doc comment for why a from-scratch reflow needs
+  // a different force balance than the everyday drag/new-note case.
+  const arrangingRef = useRef(false)
   const draggingRef = useRef<{ id: string; moved: boolean } | null>(null)
   const panRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
   const pendingSpawnRef = useRef<Point | null>(null)
@@ -302,7 +389,12 @@ export default function NoteGraphView({ projectId, notes, onSelectNote, onCreate
   function step() {
     const nodes = Array.from(positionsRef.current.values())
     const { width, height } = sizeRef.current
-    tick(nodes, edgesRef.current, alphaRef.current, width, height, draggingRef.current?.id ?? null)
+    // Arrange mode: a stronger pull to center - a from-scratch reflow starts every node on a
+    // tight spiral, and the everyday force balance (tuned for nudging an already roughly-settled
+    // layout) lets repulsion fling loosely-connected nodes off-screen before the center force can
+    // ever pull them back in. See handleArrange()'s own doc comment.
+    const centerScale = arrangingRef.current ? 1.6 : 1
+    tick(nodes, edgesRef.current, alphaRef.current, width, height, draggingRef.current?.id ?? null, centerScale)
     alphaRef.current *= 1 - ALPHA_DECAY
 
     // Keep the camera fit to the current spread of nodes while the layout is still settling
@@ -321,6 +413,11 @@ export default function NoteGraphView({ projectId, notes, onSelectNote, onCreate
     }
 
     rafRef.current = null
+    arrangingRef.current = false
+    // Persists whatever handleArrange() queued once the re-simulation has actually settled -
+    // saving at the initial spiral spawn point (before the physics forces even ran) would
+    // persist the pre-layout positions, not the arranged result.
+    savePendingPositions()
   }
 
   function wake(amount: number) {
@@ -330,9 +427,41 @@ export default function NoteGraphView({ projectId, notes, onSelectNote, onCreate
     }
   }
 
+  // "Anordnen" - re-derives a clean, uncrossed-as-possible network layout on demand, rather than
+  // just nudging the current (possibly tangled) positions with a stronger wake(). Discards every
+  // node's current position and reseeds them all on the golden-angle spiral (same helper used for
+  // brand-new notes), then runs the physics simulation from scratch - repulsion/link forces settle
+  // much more reliably into a low-crossing layout from a symmetric starting spread than from
+  // whatever ad hoc state a lot of manual dragging left behind. Explicit user decision: this trades
+  // away previously-dragged positions (FreeViewX/Y) in exchange for a layout that's reliably clean
+  // regardless of how tangled the graph currently looks - a pure "boost alpha" re-simulation can get
+  // stuck in the same tangled local minimum it started in.
+  function handleArrange() {
+    const { width, height } = sizeRef.current
+    const known = positionsRef.current
+    let index = 0
+    for (const note of notes) {
+      const spawn = spiralSpawnPosition(width, height, index)
+      index += 1
+      known.set(note.id, { id: note.id, x: spawn.x, y: spawn.y, vx: 0, vy: 0 })
+    }
+    autoFitRef.current = true
+    arrangingRef.current = true
+    wake(1)
+    pendingPositionSaveRef.current = new Set(notes.map((n) => n.id))
+  }
+
   useEffect(() => {
     return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
+      // Must null this out, not just cancel the frame - otherwise a StrictMode dev double-mount
+      // (mount -> cleanup -> mount) leaves rafRef.current holding a stale, already-cancelled ID.
+      // wake() then sees "rafRef.current !== null" forever after and never schedules a new frame
+      // again for the component's real lifetime - the physics loop silently stops responding to
+      // any future wake() call (e.g. from handleArrange()) while everything else looks normal.
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current)
+        rafRef.current = null
+      }
       // Safety net, not the primary save path (handleSvgPointerUp saves immediately on release
       // now) - covers the edge case of navigating away/unmounting mid-drag before pointerup ever
       // fires (e.g. switching the List/Graph tab while a node is still held down).
@@ -599,17 +728,27 @@ export default function NoteGraphView({ projectId, notes, onSelectNote, onCreate
         onContextMenu={handleContextMenu}
         className="relative min-w-0 flex-1 overflow-hidden"
       >
-        <button
-          onClick={() => {
-            autoFitRef.current = true
-            const fitted = computeFitTransform(Array.from(positionsRef.current.values()), sizeRef.current.width, sizeRef.current.height)
-            transformRef.current = fitted
-            setTransform(fitted)
-          }}
-          className="absolute right-4 top-4 z-10 rounded-lg border border-slate-200/50 glass px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100/50 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50"
-        >
-          Ansicht anpassen
-        </button>
+        <div className="absolute right-4 top-4 z-10 flex gap-2">
+          <button
+            onClick={handleArrange}
+            disabled={notes.length === 0}
+            title="Notizen neu anordnen, damit Verbindungslinien sich möglichst wenig kreuzen"
+            className="rounded-lg border border-slate-200/50 glass px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100/50 disabled:opacity-40 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50"
+          >
+            Anordnen
+          </button>
+          <button
+            onClick={() => {
+              autoFitRef.current = true
+              const fitted = computeFitTransform(Array.from(positionsRef.current.values()), sizeRef.current.width, sizeRef.current.height)
+              transformRef.current = fitted
+              setTransform(fitted)
+            }}
+            className="rounded-lg border border-slate-200/50 glass px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-100/50 dark:border-slate-700/50 dark:text-slate-300 dark:hover:bg-slate-800/50"
+          >
+            Ansicht anpassen
+          </button>
+        </div>
 
         {connectMode && (
           <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded border border-amber-500/50 bg-white/90 px-3 py-1.5 text-xs text-slate-700 dark:bg-slate-900/90 dark:text-slate-300">
@@ -701,27 +840,35 @@ export default function NoteGraphView({ projectId, notes, onSelectNote, onCreate
                 are a deliberate, understood exception, not an oversight the rule is correctly
                 catching elsewhere. */}
             {/* eslint-disable-next-line react-hooks/refs */}
-            {edges.map(([a, b]) => {
-              const na = positionsRef.current.get(a)
-              const nb = positionsRef.current.get(b)
-              if (!na || !nb) return null
-              const highlighted = hoveredId !== null && (a === hoveredId || b === hoveredId)
-              const dimmed = hoveredId !== null && !highlighted
-              const strokeClass = highlighted ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'
-              const opacity = dimmed ? 0.12 : highlighted ? 0.9 : 0.35
-              return (
-                <line
-                  key={`${a}-${b}`}
-                  x1={na.x}
-                  y1={na.y}
-                  x2={nb.x}
-                  y2={nb.y}
-                  className={strokeClass}
-                  strokeWidth={1}
-                  opacity={opacity}
-                />
-              )
-            })}
+            {(() => {
+              const crossedEdges = computeCrossedEdges(edges, positionsRef.current)
+              return edges.map(([a, b]) => {
+                const na = positionsRef.current.get(a)
+                const nb = positionsRef.current.get(b)
+                if (!na || !nb) return null
+                const highlighted = hoveredId !== null && (a === hoveredId || b === hoveredId)
+                const dimmed = hoveredId !== null && !highlighted
+                const strokeClass = highlighted ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'
+                const opacity = dimmed ? 0.12 : highlighted ? 0.9 : 0.35
+                // A crossing is unavoidable sometimes (see computeCrossedEdges' doc comment) - the
+                // longer of the two crossing edges is dashed instead of solid, so it visibly reads
+                // as "passing behind" the shorter, more local connection it cuts through.
+                const isDashed = crossedEdges.has(`${a}-${b}`)
+                return (
+                  <line
+                    key={`${a}-${b}`}
+                    x1={na.x}
+                    y1={na.y}
+                    x2={nb.x}
+                    y2={nb.y}
+                    className={strokeClass}
+                    strokeWidth={1}
+                    strokeDasharray={isDashed ? '4 3' : undefined}
+                    opacity={opacity}
+                  />
+                )
+              })
+            })()}
 
             {/* Same deliberate exception as the edges.map() block above - see its comment. */}
             {/* eslint-disable-next-line react-hooks/refs */}

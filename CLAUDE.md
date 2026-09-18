@@ -183,12 +183,40 @@ still offers "Neue Notiz erstellen"/"Notizen verbinden". A note can freely have 
 outgoing `[[Title]]` links to different notes** (not limited to one) — that's what makes the graph
 read as a real network once several notes cross-link each other, not a one-off feature to build.
 
-**Requested next (not yet implemented)**: an "Anordnen" (arrange) button that re-triggers
-`NoteGraphView.tsx`'s existing force simulation (`wake(1)`, the same one that already runs on
-mount/note-added) on demand, so the graph re-settles into the physics layout instead of staying
-wherever notes were last dragged — explicit request for a "neural network" look once a graph has
-enough cross-links, without locking the user out of free dragging afterward (the simulation only
-runs once on trigger, drag-and-persist behavior stays exactly as it is).
+**"Anordnen" button** (top-right of the graph canvas, next to "Ansicht anpassen") re-derives a
+clean, low-crossing layout from scratch on demand — `handleArrange()` in `NoteGraphView.tsx`
+discards every node's current position, reseeds them all on the golden-angle spiral (same helper
+new notes without a saved position use), then re-runs the physics simulation. A from-scratch
+reflow needs a different force balance than the everyday drag/new-note case: `tick()` takes an
+optional `centerScale` (only `handleArrange()` passes `1.6`, everything else stays at the default
+`1`) since the everyday repulsion/center-force balance otherwise flings loosely-connected nodes
+off-screen before the center force can pull them back in when starting from a tight spiral. New
+positions persist to the backend once the simulation actually settles (`step()`'s `rafRef.current
+= null` branch), not at the initial spiral spawn point.
+
+**Crossing edges render dashed.** `computeCrossedEdges()` in `NoteGraphView.tsx` runs a standard
+segment-intersection test (orientation/cross-product, ignoring pairs that merely share an
+endpoint) over every pair of edges each render, using the live `positionsRef` coordinates; for
+each actual crossing, the geometrically *longer* of the two edges gets `stroke-dasharray` — the
+shorter, more local connection stays solid so a note's immediate neighborhood stays easy to read.
+Explicit user request: the physics layout can't always reach zero crossings (especially in a dense
+graph), and an unavoidable crossing should read as "this connection passes behind another" rather
+than looking like a clean, uninterrupted line cutting through unrelated nodes.
+
+**`tick()`'s per-frame velocity is hard-capped (`MAX_VELOCITY = 40`).** Found while building the
+above: notes loaded with unusually large initial distances between them (e.g. several notes
+freshly positioned far apart, or conflicting link-force pulls) could make the simulation
+numerically explode — each tick's overshoot compounds into the next tick's already-larger
+distance, positions reach astronomical values within a few frames, and the graph silently renders
+empty (everything transformed far outside the viewBox). Clamping velocity keeps every tick's
+movement bounded regardless of how extreme the input distances are.
+
+**No more auto-created "root note" per project.** `ProjectsController.Create` used to add a note
+named after the project itself as a "natural center" to link everything else from — removed per
+explicit user request: inside a project's own Notes graph, a node named after the project is
+redundant (the whole graph already *is* that project), so it was just noise, not a genuinely
+useful hub. Existing auto-created root notes (title == project name) were deleted from every
+project's data as part of this change. Don't reintroduce this without being asked again.
 
 Removed entirely, backend and frontend, per this request (do not reintroduce without being asked
 again): `Note.Shape`/`NoteShape` enum, `Note.EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor` and
@@ -199,9 +227,11 @@ clicking a line), `notesGraph/GraphSidePanel.tsx`, `NoteAppearanceMenu.tsx`,
 Core migration `RemoveNoteAppearanceExtras` (both providers) drops the `NoteEdgeOverrides` table
 and the `Shape`/`EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor` columns. The "Gradient" edge style
 and the "Glow" style it replaced (see prior CLAUDE.md history if this ever needs archaeology) are
-both gone along with the rest of per-note edge styling — lines in the graph are now always a
-single plain, uniform gray/highlighted stroke, no dash pattern, no arrowheads, no per-note or
-per-connection override of any kind.
+both gone along with the rest of per-note edge styling — lines in the graph are a single plain,
+uniform gray/highlighted stroke, no arrowheads, no per-note or per-connection override of any
+kind. The one exception: a dashed stroke on edges that geometrically cross another edge (see
+"Crossing edges render dashed" above) — that's computed automatically from live layout geometry,
+not a stored per-note/per-connection style choice, so it doesn't reintroduce the removed concept.
 
 ### `UpdateNoteRequest`/`CreateNoteRequest`: only `Color` remains, no tri-state flag
 

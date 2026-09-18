@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { createNote, deleteNote, updateNote, type NoteAppearanceFields } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note } from '../api/types'
@@ -31,11 +31,6 @@ const VIEW_MODE_PREFERENCE_KEY = 'notesViewMode'
 // be reverse-derived (different notes hold different values), so this is just a remembered "what
 // did I last apply to everything" marker. Frontend-only preference, no backend field.
 const GRAPH_SCHEME_PREFERENCE_KEY = 'notesGraphScheme'
-// Kein modul-globales RegExp mit 'g'-Flag (dessen lastIndex müsste zwischen Aufrufen mutiert
-// werden, was react-hooks/immutability zurecht als Render-unsichere Mutation eines außerhalb der
-// Komponente definierten Werts ablehnt) - stattdessen die reine Pattern-Quelle halten und in
-// renderContent() pro Aufruf ein frisches RegExp-Objekt erzeugen.
-const LINK_PATTERN_SOURCE = '\\[\\[([^[\\]]+)]]'
 
 function isViewMode(value: string): value is ViewMode {
   return value === 'list' || value === 'graph'
@@ -104,12 +99,6 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   const [newTitle, setNewTitle] = useState('')
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const notesByTitle = useMemo(() => {
-    const map = new Map<string, Note>()
-    for (const note of notes) map.set(note.title, note)
-    return map
-  }, [notes])
 
   const activeTab = tabs.find((t) => t.noteId === activeTabId) ?? null
   const activeNote = notes.find((n) => n.id === activeTabId) ?? null
@@ -228,48 +217,6 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     await deleteNote(projectId, id)
     onNotesChange(notes.filter((n) => n.id !== id))
     closeTab(id)
-  }
-
-  function renderContent(content: string): ReactNode[] {
-    const parts: ReactNode[] = []
-    let lastIndex = 0
-    let match: RegExpExecArray | null
-    // Frisches RegExp pro Aufruf statt ein geteiltes lastIndex zu mutieren (siehe LINK_PATTERN_SOURCE).
-    const linkPattern = new RegExp(LINK_PATTERN_SOURCE, 'g')
-
-    while ((match = linkPattern.exec(content))) {
-      if (match.index > lastIndex) {
-        parts.push(content.slice(lastIndex, match.index))
-      }
-
-      const title = match[1].trim()
-      const target = notesByTitle.get(title)
-      if (target) {
-        parts.push(
-          <button
-            key={match.index}
-            onClick={() => openNote(target)}
-            className="text-brand-primary underline hover:text-brand-primary-light transition-colors font-medium"
-          >
-            {title}
-          </button>,
-        )
-      } else {
-        parts.push(
-          <span key={match.index} className="text-slate-500">
-            [[{title}]]
-          </span>,
-        )
-      }
-
-      lastIndex = match.index + match[0].length
-    }
-
-    if (lastIndex < content.length) {
-      parts.push(content.slice(lastIndex))
-    }
-
-    return parts
   }
 
   // Ein Klick auf eine Notiz im Graph öffnet sie direkt im Listen-Editor - genau wie ein Klick in
@@ -508,11 +455,6 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                   <div className="absolute right-3 top-3">
                     <DictationButton onTranscribed={insertDictatedText} />
                   </div>
-                </div>
-
-                <div className="glass-panel rounded-xl p-5">
-                  <h3 className="mb-3 text-xs font-bold uppercase tracking-wider text-brand-primary-light">Vorschau</h3>
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed">{renderContent(activeTab.draftContent)}</p>
                 </div>
 
                 <div>

@@ -18,6 +18,83 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.78 - 2026-09-18 22:22
+
+✨ New
+
+- **"Anordnen" button in the Notes graph view** (`NoteGraphView.tsx`'s `handleArrange()`) -
+  re-derives a clean, low-crossing network layout from scratch on demand: discards every node's
+  current position, reseeds them on the golden-angle spiral, then re-runs the physics simulation
+  with a temporarily stronger center pull (`tick()`'s new `centerScale` param, `1.6` only during
+  arrange, `1` everywhere else) so loosely-connected nodes don't fly off-screen starting from a
+  tight spiral. New positions persist once the simulation actually settles.
+- **Crossing edges render dashed** - `computeCrossedEdges()` runs a segment-intersection test over
+  every edge pair each render; for an actual crossing, the geometrically longer edge gets
+  `stroke-dasharray` so it visibly reads as "passing behind" the shorter, more local connection.
+- **Fixed, registry-based ports instead of silent per-run auto-fallback** - `start.ps1`'s
+  `Resolve-Ports` now reads every service's port from a new global registry
+  (`~/.claude/ports.json`, outside this repo) instead of picking the next free port at start time;
+  a registered port that's genuinely occupied now fails loudly instead of silently reassigning
+  (bookmarked URLs no longer break between runs).
+- **Two extra, more memorable hostnames alongside `https://localhost:<port>`** - Caddy's site
+  address now also matches `milepoint.localhost` (a browser/OS-reserved TLD, resolves to
+  `127.0.0.1` with zero DNS lookup, works instantly) and `milepoint.sushifluxdevelop` (resolved via
+  a wildcard `address=/sushifluxdevelop/127.0.0.1` entry configured on this user's own Pi-hole -
+  see the global CLAUDE.md for the setup). `vite.config.ts`'s `server.allowedHosts` had to list
+  both, or Vite's DNS-rebinding protection 403s the request.
+
+🔄 Change
+
+- **Whisper dictation switched from the `openai_whisper` reference engine to `faster_whisper`**
+  (CTranslate2 backend) - same accuracy, considerably faster on CPU-only hardware, confirmed by a
+  real user report of multi-second latency per short dictation even on a 16-core machine.
+- **Whisper model bumped `base` → `large-v3-turbo`** (via two intermediate steps, `medium` and
+  `large-v3`, during the same session) - explicit user preference after `base` mis-recognized too
+  many words; `large-v3-turbo` (a distilled `large-v3` with fewer decoder layers) gives
+  near-identical accuracy to full `large-v3` at roughly 8x the inference speed, the better tradeoff
+  for dictation latency.
+
+🔧 Fix
+
+- **`tick()`'s per-frame velocity is now hard-capped (`MAX_VELOCITY = 40`)** - notes loaded with
+  unusually large initial distances between them (e.g. several notes freshly positioned far apart)
+  could make the physics simulation numerically explode: each tick's overshoot compounded into the
+  next tick's already-larger distance until positions reached astronomical values and the graph
+  silently rendered empty (everything transformed far outside the viewBox). Found while building
+  the "Anordnen" button above.
+- **React StrictMode's dev double-mount left `NoteGraphView`'s RAF loop permanently stuck** -
+  the cleanup effect called `cancelAnimationFrame` but never reset `rafRef.current` back to
+  `null`, so after the guaranteed mount→cleanup→mount cycle StrictMode does in dev, every future
+  `wake()` call (including from the new "Anordnen" button) saw a stale non-null ref and never
+  scheduled a new frame - the physics loop silently stopped responding to anything for the rest of
+  the component's real lifetime.
+- **`KanbanBoard.tsx`: an `svg` element's bare `title` prop** (not valid on `SVGSVGElement` per
+  current React types) **replaced with a `<title>` child element** - was blocking `tsc -b` for the
+  whole frontend, unrelated to this session's other changes but found while running the full
+  typecheck.
+
+🗑️ Removed
+
+- **The "Vorschau" (preview) block under the Notes list editor's textarea removed** - explicit
+  user request ("doppelt gemoppelt", felt redundant next to the raw-text textarea directly above
+  it). This was also the only place `[[Links]]` were clickable directly from the editor (jumping to
+  the linked note) - no replacement added; use the notes list or the Graph view to navigate
+  instead. `renderContent()`, `notesByTitle`, and the now-unused `LINK_PATTERN_SOURCE` removed from
+  `NotesView.tsx` along with it.
+- **No more auto-created "root note" per project** - `ProjectsController.Create` used to add a
+  note named after the project itself as a "natural center" for the graph to link from; removed
+  per explicit user request (redundant inside a project's own Notes graph, since the whole graph
+  already *is* that project). Existing auto-created root notes (title == project name) were
+  deleted from Milepoint's, Fluxo's, and PrimeSource's project data as part of this change
+  (PrimeSource's had real `[[links]]` content by then - deleted anyway per explicit user
+  confirmation).
+
+Also added, then fully reverted within the same session after it turned out to conflict with this
+user's own Pi-hole router (see the "Change" section above for what actually shipped instead): a
+project-local shared `infra` Docker stack (dnsmasq + a central Caddy) meant to resolve
+`*.sushifluxdevelop` without touching the Pi-hole - abandoned once the Pi-hole itself turned out to
+already support the same wildcard natively.
+
 ## v2026.9.76 - 2026-09-17 21:18
 
 🗑️ Removed
@@ -815,6 +892,88 @@ Platzhalters.
   - Verifiziert: Typecheck/Lint/Backend-Build alle sauber, Migration angewendet und per psql
     bestätigt, Playwright-Live-Lauf 5/5 PASS (kein Form-Button mehr, Farbschema-Button + Optionen
     vorhanden, Klick auf Notiz wechselt zur Listenansicht, kein Aussehen-Seitenpanel mehr).
+
+## v2026.9.78 - 2026-09-18 22:22
+
+✨ Neu
+
+- **"Anordnen"-Button in der Notizen-Graph-Ansicht** (`NoteGraphView.tsx`s `handleArrange()`) -
+  leitet auf Knopfdruck ein sauberes, möglichst kreuzungsarmes Netzwerk-Layout neu her: verwirft
+  alle aktuellen Knoten-Positionen, setzt sie neu auf die goldene-Winkel-Spirale und lässt die
+  Physik-Simulation dann mit temporär verstärkter Zentrum-Kraft neu laufen (`tick()`s neuer
+  `centerScale`-Parameter, `1.6` nur während des Anordnens, sonst `1`), damit schwach verbundene
+  Knoten beim Start von der engen Spirale nicht aus dem Bild fliegen. Die neuen Positionen werden
+  erst gespeichert, sobald die Simulation tatsächlich zur Ruhe kommt.
+- **Sich kreuzende Verbindungslinien werden gestrichelt dargestellt** - `computeCrossedEdges()`
+  prüft bei jedem Render alle Kantenpaare auf geometrische Überschneidung; bei einer echten
+  Kreuzung bekommt die geometrisch längere Linie `stroke-dasharray`, damit sie sichtbar als "läuft
+  hinter der anderen durch" erkennbar ist, statt wie eine durchgehende Linie zu wirken.
+- **Feste, registry-basierte Ports statt stillem Auto-Fallback pro Lauf** - `start.ps1`s
+  `Resolve-Ports` liest jeden Service-Port jetzt aus einer neuen globalen Registry
+  (`~/.claude/ports.json`, außerhalb dieses Repos) statt beim Start selbst den nächsten freien Port
+  zu wählen; ein tatsächlich belegter registrierter Port bricht jetzt laut ab statt still
+  umzuschwenken (gespeicherte Links brechen zwischen Läufen nicht mehr).
+- **Zwei zusätzliche, einprägsamere Hostnamen neben `https://localhost:<port>`** - Caddys
+  Site-Adresse matched jetzt auch `milepoint.localhost` (eine vom Browser/Betriebssystem
+  reservierte TLD, löst ohne jede DNS-Anfrage direkt auf `127.0.0.1` auf, funktioniert sofort) und
+  `milepoint.sushifluxdevelop` (aufgelöst über einen Wildcard-Eintrag
+  `address=/sushifluxdevelop/127.0.0.1`, direkt im Pi-hole dieses Nutzers konfiguriert - siehe
+  globale CLAUDE.md für das Setup). `vite.config.ts`s `server.allowedHosts` musste beide listen,
+  sonst blockt Vites DNS-Rebinding-Schutz die Anfrage mit 403.
+
+🔄 Geändert
+
+- **Whisper-Diktat von der `openai_whisper`-Referenz-Engine auf `faster_whisper` umgestellt**
+  (CTranslate2-Backend) - gleiche Genauigkeit, deutlich schneller auf reiner CPU-Hardware,
+  bestätigt durch eine reale Nutzer-Rückmeldung über mehrere Sekunden Latenz pro kurzem Diktat,
+  selbst auf einer 16-Kern-Maschine.
+- **Whisper-Modell von `base` auf `large-v3-turbo` hochgestuft** (über zwei Zwischenschritte,
+  `medium` und `large-v3`, in derselben Session) - explizite Nutzerpräferenz, nachdem `base` zu
+  viele Wörter falsch erkannte; `large-v3-turbo` (ein destilliertes `large-v3` mit weniger
+  Decoder-Layern) liefert nahezu dieselbe Genauigkeit wie das volle `large-v3` bei ca. 8x schnellerer
+  Inferenz - der bessere Kompromiss für die Diktier-Latenz.
+
+🔧 Behoben
+
+- **`tick()`s Geschwindigkeit pro Simulationsschritt ist jetzt hart begrenzt
+  (`MAX_VELOCITY = 40`)** - Notizen mit ungewöhnlich großen Anfangsabständen (z.B. mehrere frisch
+  weit auseinander positionierte Notizen) konnten die Physik-Simulation numerisch explodieren
+  lassen: jeder Simulationsschritt überschoss weiter, bis die Positionen astronomische Werte
+  erreichten und der Graph optisch leer wirkte (alles lag weit außerhalb des sichtbaren Bereichs).
+  Gefunden beim Bau des "Anordnen"-Buttons oben.
+- **React StrictModes doppelter Dev-Mount ließ `NoteGraphView`s Simulationsschleife dauerhaft
+  hängen** - der Cleanup-Effect rief `cancelAnimationFrame` auf, setzte `rafRef.current` aber nie
+  wieder auf `null` zurück - nach dem garantierten Mount→Cleanup→Mount-Zyklus, den StrictMode im
+  Dev-Modus durchführt, sah jeder spätere `wake()`-Aufruf (auch vom neuen "Anordnen"-Button) einen
+  veralteten, nicht-null Ref und startete nie einen neuen Frame - die Physik-Schleife reagierte für
+  den Rest der Komponenten-Lebensdauer auf nichts mehr.
+- **`KanbanBoard.tsx`: ein rohes `title`-Prop auf einem `svg`-Element** (laut aktuellen
+  React-Typen nicht gültig auf `SVGSVGElement`) **durch ein `<title>`-Kindelement ersetzt** -
+  blockierte den kompletten `tsc -b`-Lauf fürs Frontend, unabhängig vom Rest dieser Session,
+  aber beim vollständigen Typecheck gefunden.
+
+🗑️ Entfernt
+
+- **Der "Vorschau"-Block unter der Textarea im Notizen-Listen-Editor komplett entfernt** -
+  expliziter Nutzerwunsch ("doppelt gemoppelt", wirkte redundant neben dem rohen Text direkt
+  darüber). Das war zugleich die einzige Stelle, an der `[[Links]]` direkt im Editor klickbar
+  waren (Sprung zur verlinkten Notiz) - kein Ersatz dafür, stattdessen Notizenliste oder
+  Graph-Ansicht zum Navigieren nutzen. `renderContent()`, `notesByTitle` und das jetzt ungenutzte
+  `LINK_PATTERN_SOURCE` wurden aus `NotesView.tsx` mit entfernt.
+- **Keine automatisch angelegte "Root-Notiz" pro Projekt mehr** - `ProjectsController.Create` legte
+  bisher eine nach dem Projekt selbst benannte Notiz als "natürliches Zentrum" für den Graphen an;
+  entfernt auf ausdrücklichen Nutzerwunsch (redundant innerhalb des eigenen Notizen-Graphen eines
+  Projekts, da der ganze Graph ja bereits dieses Projekt *ist*). Bestehende automatisch angelegte
+  Root-Notizen (Titel == Projektname) wurden aus Milepoints, Fluxos und PrimeSources
+  Projektdaten im Zuge dieser Änderung gelöscht (PrimeSources hatte zu dem Zeitpunkt bereits echten
+  `[[Link]]`-Inhalt - trotzdem gelöscht, nach expliziter Nutzerbestätigung).
+
+Zusätzlich probiert und innerhalb derselben Session wieder vollständig zurückgebaut, nachdem sich
+herausstellte, dass es mit dem eigenen Pi-hole-Router dieses Nutzers kollidiert (siehe den
+"Geändert"-Abschnitt oben für das, was stattdessen tatsächlich geshippt wurde): ein
+projekt-lokaler, geteilter `infra`-Docker-Stack (dnsmasq + ein zentraler Caddy), der
+`*.sushifluxdevelop` auflösen sollte, ohne das Pi-hole anzufassen - verworfen, nachdem sich zeigte,
+dass das Pi-hole dieselbe Wildcard-Funktion bereits selbst nativ unterstützt.
 
 ## v2026.9.76 - 2026-09-17 21:18
 

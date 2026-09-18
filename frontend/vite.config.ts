@@ -8,6 +8,11 @@ export default defineConfig({
     host: true,
     port: 5173,
     strictPort: true,
+    // Vite's own DNS-rebinding protection otherwise 403s any request whose Host header isn't
+    // "localhost"/an IP - this project's Caddy (see Caddyfile) proxies through with the actual
+    // hostname the browser used intact, so every hostname Caddy is configured to accept needs
+    // to be listed here too.
+    allowedHosts: ['localhost', 'milepoint.localhost', 'milepoint.sushifluxdevelop'],
     hmr: {
       clientPort: Number(process.env.VITE_HMR_CLIENT_PORT) || 5173,
       // The primary access path is now https:// through Caddy, so the HMR upgrade request
