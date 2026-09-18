@@ -1,10 +1,9 @@
-import { useCallback, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { createNote, deleteNote, updateNote, setNoteEdgeOverride, getNotes, type NoteAppearanceFields } from '../api/notes'
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { createNote, deleteNote, updateNote, type NoteAppearanceFields } from '../api/notes'
 import { ApiError } from '../api/client'
-import type { Note, NoteShape } from '../api/types'
+import type { Note } from '../api/types'
 import NoteGraphView from './NoteGraphView'
 import ColorSchemePanel from './notesGraph/ColorSchemePanel'
-import ShapePickerPanel from './notesGraph/ShapePickerPanel'
 import { assignSchemeColors } from './notesGraph/colorSchemes'
 import AddButton from '../components/AddButton'
 import DictationButton from '../components/DictationButton'
@@ -27,13 +26,11 @@ interface OpenTab {
 type ViewMode = 'list' | 'graph'
 
 const VIEW_MODE_PREFERENCE_KEY = 'notesViewMode'
-// The last project-wide color scheme / node shape applied via the standalone "Farbschema"/"Form"
-// buttons. Purely for the active-item highlight in those menus - the actual per-note colors/shapes
-// live on each Note and can't be reverse-derived (different notes hold different values), so this
-// is just a remembered "what did I last apply to everything" marker. Frontend-only preference, no
-// backend field.
+// The last project-wide color scheme applied via the standalone "Farbschema" button. Purely for
+// the active-item highlight in that menu - the actual per-note colors live on each Note and can't
+// be reverse-derived (different notes hold different values), so this is just a remembered "what
+// did I last apply to everything" marker. Frontend-only preference, no backend field.
 const GRAPH_SCHEME_PREFERENCE_KEY = 'notesGraphScheme'
-const GRAPH_SHAPE_PREFERENCE_KEY = 'notesGraphShape'
 // Kein modul-globales RegExp mit 'g'-Flag (dessen lastIndex müsste zwischen Aufrufen mutiert
 // werden, was react-hooks/immutability zurecht als Render-unsichere Mutation eines außerhalb der
 // Komponente definierten Werts ablehnt) - stattdessen die reine Pattern-Quelle halten und in
@@ -44,26 +41,15 @@ function isViewMode(value: string): value is ViewMode {
   return value === 'list' || value === 'graph'
 }
 
-function isNoteShape(value: string): value is NoteShape {
-  return value === 'Rounded' || value === 'Rectangle' || value === 'Diamond' || value === 'Underline' || value === 'Ellipse'
-}
-
-// Pulls the appearance fields updateNote()/createNote() always need re-sent (see
-// NoteAppearanceFields' doc comment on why there's no tri-state flag for these) out of an existing
-// Note - avoids repeating all six field names at every call site that just wants "this note's
-// current appearance, unchanged".
+// Pulls the appearance field updateNote()/createNote() always need re-sent (see
+// NoteAppearanceFields' doc comment on why there's no tri-state flag for it) out of an existing
+// Note - avoids repeating the field name at every call site that just wants "this note's current
+// color, unchanged".
 function appearanceOf(note: Note): NoteAppearanceFields {
-  return {
-    color: note.color,
-    shape: note.shape,
-    edgeStyle: note.edgeStyle,
-    edgeArrow: note.edgeArrow,
-    edgeWidth: note.edgeWidth,
-    edgeColor: note.edgeColor,
-  }
+  return { color: note.color }
 }
 
-const DEFAULT_APPEARANCE: NoteAppearanceFields = { color: null, shape: null, edgeStyle: null, edgeArrow: null, edgeWidth: null, edgeColor: null }
+const DEFAULT_APPEARANCE: NoteAppearanceFields = { color: null }
 
 export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   const { loaded: preferencesLoaded, getPreference, setPreference } = usePreferences()
@@ -71,10 +57,8 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   const [viewMode, setViewModeState] = useState<ViewMode>(isViewMode(storedViewMode) ? storedViewMode : 'list')
   const storedScheme = getPreference(GRAPH_SCHEME_PREFERENCE_KEY, '')
   const [appliedSchemeId, setAppliedSchemeIdState] = useState<string | null>(storedScheme || null)
-  const storedShape = getPreference(GRAPH_SHAPE_PREFERENCE_KEY, '')
-  const [appliedShape, setAppliedShapeState] = useState<NoteShape | null>(isNoteShape(storedShape) ? storedShape : null)
-  const [applyingPreset, setApplyingPreset] = useState(false)
-  const [presetError, setPresetError] = useState<string | null>(null)
+  const [applyingScheme, setApplyingScheme] = useState(false)
+  const [schemeError, setSchemeError] = useState<string | null>(null)
 
   // useState's initializer above only ever runs once, on this component's very first mount - but
   // PreferencesContext loads the real DB values asynchronously (see PreferencesContext.tsx), so if
@@ -96,9 +80,6 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
       if (isViewMode(dbViewMode) && dbViewMode !== viewMode) setViewModeState(dbViewMode)
       const dbScheme = getPreference(GRAPH_SCHEME_PREFERENCE_KEY, '')
       if ((dbScheme || null) !== appliedSchemeId) setAppliedSchemeIdState(dbScheme || null)
-      const dbShape = getPreference(GRAPH_SHAPE_PREFERENCE_KEY, '')
-      const dbShapeValue = isNoteShape(dbShape) ? dbShape : null
-      if (dbShapeValue !== appliedShape) setAppliedShapeState(dbShapeValue)
     }
   }
 
@@ -112,20 +93,11 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     setPreference(GRAPH_SCHEME_PREFERENCE_KEY, schemeId)
   }
 
-  function setAppliedShape(shape: NoteShape) {
-    setAppliedShapeState(shape)
-    setPreference(GRAPH_SHAPE_PREFERENCE_KEY, shape)
-  }
-
-  // Two standalone popovers in one segmented container next to the List/Graph toggle -
-  // "Farbschema" (ColorSchemePanel, pure palette) and "Form" (ShapePickerPanel, node shape), each
-  // applied immediately without a confirm dialog. useClickOutside on the whole group closes
-  // whichever popover is open when a pointerdown/Escape lands anywhere outside it. Only one
-  // popover open at a time.
-  const [openMenu, setOpenMenu] = useState<'scheme' | 'shape' | null>(null)
-  const graphMenuRef = useRef<HTMLDivElement>(null)
-  const closeGraphMenu = useCallback(() => setOpenMenu(null), [])
-  useClickOutside(graphMenuRef, openMenu !== null, closeGraphMenu)
+  // Standalone "Farbschema"-Popover neben dem List/Graph-Umschalter, angewendet sofort ohne
+  // Rückfrage. useClickOutside schließt es, wenn ein pointerdown/Escape außerhalb landet.
+  const [schemeMenuOpen, setSchemeMenuOpen] = useState(false)
+  const schemeMenuRef = useRef<HTMLDivElement>(null)
+  useClickOutside(schemeMenuRef, schemeMenuOpen, () => setSchemeMenuOpen(false))
 
   const [tabs, setTabs] = useState<OpenTab[]>([])
   const [activeTabId, setActiveTabId] = useState<string | null>(null)
@@ -300,6 +272,8 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     return parts
   }
 
+  // Ein Klick auf eine Notiz im Graph öffnet sie direkt im Listen-Editor - genau wie ein Klick in
+  // der Liste selbst, kein Seitenpanel/Zwischenschritt mehr (siehe CLAUDE.md "Notes").
   function handleGraphSelect(note: Note) {
     openNote(note)
     setViewMode('list')
@@ -322,62 +296,18 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
   }
 
-  // Changes only the note's own appearance fields, always re-sending the note's current
-  // title/content so neither is accidentally touched (updateNote always applies title/content as
-  // given, same as the appearance fields themselves).
-  async function handleNoteAppearanceChange(
-    noteId: string,
-    patch: {
-      color?: string | null
-      shape?: Note['shape']
-      edgeStyle?: Note['edgeStyle']
-      edgeArrow?: Note['edgeArrow']
-      edgeWidth?: number | null
-      edgeColor?: string | null
-    },
-  ) {
-    const note = notes.find((n) => n.id === noteId)
-    if (!note) return
-    const nextAppearance: NoteAppearanceFields = {
-      color: 'color' in patch ? patch.color ?? null : note.color,
-      shape: 'shape' in patch ? patch.shape ?? null : note.shape,
-      edgeStyle: 'edgeStyle' in patch ? patch.edgeStyle ?? null : note.edgeStyle,
-      edgeArrow: 'edgeArrow' in patch ? patch.edgeArrow ?? null : note.edgeArrow,
-      edgeWidth: 'edgeWidth' in patch ? patch.edgeWidth ?? null : note.edgeWidth,
-      edgeColor: 'edgeColor' in patch ? patch.edgeColor ?? null : note.edgeColor,
-    }
-    const updated = await updateNote(projectId, note.id, note.title, note.content, nextAppearance)
-    onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
-  }
-
-  // Sets or clears (width/color both null) the style override for ONE connection FROM sourceNoteId
-  // TO targetNoteId - distinct from handleNoteAppearanceChange above, which restyles every
-  // connection a note draws outward. See setNoteEdgeOverride's/NoteEdgeOverride's doc comments.
-  // Refetches the source note afterward (rather than optimistically patching edgeOverrides
-  // client-side) since the endpoint returns 204 No Content, not the updated note - simplest way to
-  // stay in sync with the server's actual state (delete-vs-upsert decision, existing-row update).
-  async function handleEdgeOverrideChange(sourceNoteId: string, targetNoteId: string, width: number | null, color: string | null) {
-    await setNoteEdgeOverride(projectId, sourceNoteId, targetNoteId, width, color)
-    const refreshed = await getNotes(projectId)
-    onNotesChange(refreshed)
-  }
-
   // Verteilt die Palette eines Farbschemas (colorSchemes.ts) reihum auf ALLE Notizen im Projekt -
-  // nur die FARBE, sonst nichts. Ohne Rückfrage, sofort. Form und Linienstil bleiben unangetastet.
-  // Läuft sequenziell statt Promise.all, damit ein einzelner Fehlschlag mitten im Durchlauf nicht
-  // dutzende parallele Requests im unbestimmten Zustand hinterlässt und der Nutzer eine konkrete
-  // Fehlermeldung sieht.
+  // ohne Rückfrage, sofort. Läuft sequenziell statt Promise.all, damit ein einzelner Fehlschlag
+  // mitten im Durchlauf nicht dutzende parallele Requests im unbestimmten Zustand hinterlässt und
+  // der Nutzer eine konkrete Fehlermeldung sieht.
   async function handleApplyScheme(schemeId: string) {
-    setApplyingPreset(true)
-    setPresetError(null)
+    setApplyingScheme(true)
+    setSchemeError(null)
     try {
       const colorByNoteId = assignSchemeColors(notes.map((n) => n.id), schemeId)
       const updatedNotes: Note[] = []
       for (const note of notes) {
-        // Only `color` changes; everything else is re-sent unchanged via appearanceOf (updateNote
-        // has no tri-state flag - see NoteAppearanceFields).
         const updated = await updateNote(projectId, note.id, note.title, note.content, {
-          ...appearanceOf(note),
           color: colorByNoteId.get(note.id) ?? null,
         })
         updatedNotes.push(updated)
@@ -385,32 +315,9 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
       onNotesChange(notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n))
       setAppliedSchemeId(schemeId)
     } catch (err) {
-      setPresetError(err instanceof ApiError ? err.message : 'Farbschema konnte nicht vollständig angewendet werden.')
+      setSchemeError(err instanceof ApiError ? err.message : 'Farbschema konnte nicht vollständig angewendet werden.')
     } finally {
-      setApplyingPreset(false)
-    }
-  }
-
-  // Setzt eine Knotenform auf ALLE Notizen im Projekt - nur die FORM, sonst nichts. Ohne
-  // Rückfrage, sofort. Farbe und Linienstil bleiben unangetastet.
-  async function handleApplyShape(shape: NoteShape) {
-    setApplyingPreset(true)
-    setPresetError(null)
-    try {
-      const updatedNotes: Note[] = []
-      for (const note of notes) {
-        const updated = await updateNote(projectId, note.id, note.title, note.content, {
-          ...appearanceOf(note),
-          shape,
-        })
-        updatedNotes.push(updated)
-      }
-      onNotesChange(notes.map((n) => updatedNotes.find((u) => u.id === n.id) ?? n))
-      setAppliedShape(shape)
-    } catch (err) {
-      setPresetError(err instanceof ApiError ? err.message : 'Form konnte nicht vollständig angewendet werden.')
-    } finally {
-      setApplyingPreset(false)
+      setApplyingScheme(false)
     }
   }
 
@@ -433,44 +340,38 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
         </div>
 
         {viewMode === 'graph' && (
-          // Farbschema / Form as one segmented control, same glass-panel/rounded-lg treatment as
-          // the List/Graph toggle above so they read as one related group. Each button toggles its
-          // own popover (openMenu, only one open at a time); useClickOutside on the whole group
-          // closes whichever popover is open when a pointerdown/Escape lands anywhere outside it.
-          <div className="relative z-30 flex w-fit rounded-lg p-1 glass-panel" ref={graphMenuRef}>
-            {(
-              [
-                // Each panel's apply callback also closes the popover - picking a scheme/shape is
-                // a one-shot action, and leaving the menu open over the graph just hides the
-                // result the user wants to see.
-                { key: 'scheme', label: 'Farbschema', panel: <ColorSchemePanel currentSchemeId={appliedSchemeId} onApplyScheme={async (id) => { await handleApplyScheme(id); setOpenMenu(null) }} applying={applyingPreset} /> },
-                { key: 'shape', label: 'Form', panel: <ShapePickerPanel currentShape={appliedShape} onApplyShape={async (s) => { await handleApplyShape(s); setOpenMenu(null) }} applying={applyingPreset} /> },
-              ] as const
-            ).map((item) => (
-              <div key={item.key} className="relative">
-                <button
-                  onClick={() => setOpenMenu((prev) => (prev === item.key ? null : item.key))}
-                  className={`relative z-30 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
-                    openMenu === item.key
-                      ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light'
-                      : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                >
-                  {item.label}
-                </button>
-                {openMenu === item.key && (
-                  <div className="absolute left-0 top-full z-30 mt-1.5 max-h-[70vh] w-72 overflow-y-auto rounded-xl border border-slate-200/50 glass-panel shadow-xl dark:border-slate-700/50">
-                    {item.panel}
-                  </div>
-                )}
+          // Standalone "Farbschema"-Button neben dem List/Graph-Umschalter, gleiches
+          // glass-panel/rounded-lg Aussehen. Angewendet sofort ohne Rückfrage; useClickOutside
+          // schließt das Popover bei Klick/Escape außerhalb.
+          <div className="relative" ref={schemeMenuRef}>
+            <button
+              onClick={() => setSchemeMenuOpen((prev) => !prev)}
+              className={`rounded-lg p-1 px-3 py-1.5 text-xs font-medium transition-colors glass-panel ${
+                schemeMenuOpen
+                  ? 'bg-white text-brand-primary shadow-sm dark:bg-slate-700 dark:text-brand-primary-light'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+              }`}
+            >
+              Farbschema
+            </button>
+            {schemeMenuOpen && (
+              <div className="absolute left-0 top-full z-30 mt-1.5 max-h-[70vh] w-72 overflow-y-auto rounded-xl border border-slate-200/50 glass-panel shadow-xl dark:border-slate-700/50">
+                <ColorSchemePanel
+                  currentSchemeId={appliedSchemeId}
+                  onApplyScheme={async (id) => {
+                    await handleApplyScheme(id)
+                    setSchemeMenuOpen(false)
+                  }}
+                  applying={applyingScheme}
+                />
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
-      {presetError && <p className="text-sm text-red-400">{presetError}</p>}
+      {schemeError && <p className="text-sm text-red-400">{schemeError}</p>}
 
       {viewMode === 'graph' ? (
         <NoteGraphView
@@ -479,8 +380,6 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
           onSelectNote={handleGraphSelect}
           onCreateNote={handleGraphCreateNote}
           onConnectNotes={handleGraphConnect}
-          onChangeAppearance={handleNoteAppearanceChange}
-          onChangeEdgeOverride={handleEdgeOverrideChange}
         />
       ) : (
         <div className="flex gap-6">

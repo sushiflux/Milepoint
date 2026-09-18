@@ -162,65 +162,53 @@ reintroduce a hierarchy/tree-layout concept without being asked again.
 
 `NotesView.tsx` has two tabs: **List** (the traditional editor) and **Graph** — the latter is
 `NoteGraphView.tsx`, a physics-simulated force layout over the free cross-links (a hand-rolled
-simulation, not d3-force, to keep the bundle small). There is no layout picker anymore — the free
-graph is the only graph view. A two-button segmented control (same glass-panel/rounded-lg look as
-the List/Graph toggle, `openMenu` state, only one popover open at a time) sits next to the
-List/Graph toggle in `NotesView.tsx`:
-- **"Farbschema"** (`ColorSchemePanel.tsx`) — **pure palette**, the 6 `COLOR_SCHEMES` from
-  `colorSchemes.ts`, each previewed as its own swatches. Applying one distributes that palette
-  round-robin across every note (`assignSchemeColors`). Nothing but `color` changes.
-- **"Form"** (`ShapePickerPanel.tsx`) — the 5 `NoteShape` values (`SHAPE_OPTIONS` in
-  `shapeOptions.ts`, preview icon in `shapePreview.tsx` — split into two files so each stays a
-  single-export module for Fast Refresh), applied project-wide. Nothing but `shape` changes.
+simulation, not d3-force, to keep the bundle small). There is no layout picker — the free graph is
+the only graph view. Each note renders as a small fixed-radius circle ("Punkt", `NODE_RADIUS` in
+`notesGraph/NoteNodeShape.tsx`) with its title as a label underneath, the classic network-graph
+look — **no per-note shape choice, no per-note/per-connection edge styling, no side panel**, all
+removed entirely per explicit user request ("Formen wieder nur als Punkt machen", "das komische
+Seitenmenü kann komplett rausgelöscht werden"). A single **"Farbschema"** button next to the
+List/Graph toggle (`ColorSchemePanel.tsx`, `useClickOutside`-closed popover) is the only visual
+customization left — **pure palette**, the 6 `COLOR_SCHEMES` from `colorSchemes.ts`, each
+previewed as its own swatches. Applying one distributes that palette round-robin across every note
+(`assignSchemeColors`), changes only `color`, applies **immediately with no confirm dialog**, and
+closes its own popover afterward (one-shot action). The last-applied scheme is remembered only as
+a preference (`notesGraphScheme`) for the active-item highlight — the real per-note colors can't
+be reverse-derived since notes can hold different values.
 
-Both apply **immediately, no confirm dialog** (removed per explicit user feedback), and picking an
-option **closes its popover** (one-shot action, and the open menu covered the graph). The
-last-applied scheme/shape is remembered only as a preference (`notesGraphScheme`/`notesGraphShape`)
-for the active-item highlight — the real per-note values can't be reverse-derived since notes can
-hold different values.
+**Clicking a note in the graph opens it directly in the List editor** (`onSelectNote`, same as
+clicking it in the list itself) — there is no intermediate panel/menu anymore. Dragging still
+free-positions and persists a note's spot (`FreeViewX`/`FreeViewY`, unchanged), and right-click
+still offers "Neue Notiz erstellen"/"Notizen verbinden". A note can freely have **any number of
+outgoing `[[Title]]` links to different notes** (not limited to one) — that's what makes the graph
+read as a real network once several notes cross-link each other, not a one-off feature to build.
 
-`Note.Color`/`Note.Shape` (hex color, `NoteShape` enum) control per-node appearance in the graph
-view; color palettes/schemes are a frontend-only concept, the backend only ever stores a resolved
-hex value. `Note.EdgeStyle`/`Note.EdgeArrow`/`Note.EdgeWidth`/`Note.EdgeColor` style every line an
-edge draws *from* that note (never the target's) — dash pattern, arrowheads, stroke width (px),
-and stroke color, independent of the node's own `Color`. A specific connection can further
-override just its own width/color via `NoteEdgeOverride` (composite-keyed on
-`SourceNoteId`+`TargetNoteId`) — reachable by clicking the line itself directly in the graph view
-(a wide invisible hit-area path/line sits under every rendered edge), opening `EdgeOverridePanel`
-instead of the usual node panel. `edgeStyles.tsx` centralizes all of this shared rendering logic
-(anchor-point box-edge clipping, marker/gradient defs, width/color resolution) —
-`resolveEdgeWidth`/`resolveEdgeColor` implement the override-beats-note-default priority.
+**Requested next (not yet implemented)**: an "Anordnen" (arrange) button that re-triggers
+`NoteGraphView.tsx`'s existing force simulation (`wake(1)`, the same one that already runs on
+mount/note-added) on demand, so the graph re-settles into the physics layout instead of staying
+wherever notes were last dragged — explicit request for a "neural network" look once a graph has
+enough cross-links, without locking the user out of free dragging afterward (the simulation only
+runs once on trigger, drag-and-persist behavior stays exactly as it is).
 
-`NoteGraphView.tsx` has a permanent right-side panel (`notesGraph/GraphSidePanel.tsx`, flex
-sibling with an animated width, not absolutely positioned — this is what makes the canvas visibly
-shrink alongside it) that swaps content based on what's selected: a note node →
-`NoteAppearanceMenu.tsx` (color/shape/edge style/arrowheads/width/color); a clicked edge →
-`EdgeOverridePanel.tsx`. Selection state (`selectedNoteId`/`selectedEdge`, mutually exclusive) and
-panel open/close live in `NoteGraphView.tsx` itself, not lifted up — `NotesView.tsx` only supplies
-the data callbacks (`onChangeAppearance`, `onChangeEdgeOverride`, etc.).
+Removed entirely, backend and frontend, per this request (do not reintroduce without being asked
+again): `Note.Shape`/`NoteShape` enum, `Note.EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor` and
+their enums, the `NoteEdgeOverride` table/endpoint (per-connection style overrides, reachable by
+clicking a line), `notesGraph/GraphSidePanel.tsx`, `NoteAppearanceMenu.tsx`,
+`EdgeOverridePanel.tsx`, `ShapePickerPanel.tsx`, `shapeOptions.ts`/`shapePreview.tsx`,
+`edgeStyles.tsx` (the shared anchor-clipping/marker/gradient rendering logic those needed). New EF
+Core migration `RemoveNoteAppearanceExtras` (both providers) drops the `NoteEdgeOverrides` table
+and the `Shape`/`EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor` columns. The "Gradient" edge style
+and the "Glow" style it replaced (see prior CLAUDE.md history if this ever needs archaeology) are
+both gone along with the rest of per-note edge styling — lines in the graph are now always a
+single plain, uniform gray/highlighted stroke, no dash pattern, no arrowheads, no per-note or
+per-connection override of any kind.
 
-A "Glow" edge style (blurred halo behind the line) was tried and removed again after live user
-feedback rejected the visual outright — don't reintroduce it without being asked. Its replacement,
-"Gradient" (fades opacity toward transparent at both endpoints), needed a per-edge
-`gradientUnits="userSpaceOnUse"` `<linearGradient>` (not a small fixed set) since the default
-`objectBoundingBox` gradient space assumes a fixed horizontal angle, which visibly skews on any
-angled edge — see `edgeGradientDefFor`'s doc comment. Building an SVG opacity fade with a `<mask>`
-has its own sharp edges: a `<mask>` defaults to *luminance* masking (white = visible, black =
-invisible, not simply "opacity") and its own region defaults to `objectBoundingBox`, which
-degenerates to zero on a perfectly horizontal/vertical line's zero-height/-width bounding box —
-both bit the small gradient preview icon in `NoteAppearanceMenu.tsx` before being fixed.
+### `UpdateNoteRequest`/`CreateNoteRequest`: only `Color` remains, no tri-state flag
 
-### `UpdateNoteRequest`/`CreateNoteRequest` apply every field exactly as given
-
-`Color`/`Shape`/`EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor` have no tri-state flag — every
-`PUT`/`POST` applies them exactly as given (`null` = revert to default). This means every caller
-of `updateNote()`/`createNote()` on the frontend, including plain title/content-only saves, must
-always pass the note's *current* appearance fields through (see `NoteAppearanceFields`/
-`appearanceOf()` in `NotesView.tsx`), or they get silently reset. `NoteEdgeOverride` rows use a
-*separate* convention: `PUT .../edge-overrides/{targetNoteId}` with both `Width` and `Color` null
-**deletes** the row (falls back to the source note's own `EdgeWidth`/`EdgeColor`) rather than
-storing a no-op override — there's no separate delete endpoint, a caller resets by sending both
-fields null.
+`Color` has no tri-state flag — every `PUT`/`POST` applies it exactly as given (`null` = revert to
+default). This means every caller of `updateNote()`/`createNote()` on the frontend, including
+plain title/content-only saves, must always pass the note's *current* color through (see
+`NoteAppearanceFields`/`appearanceOf()` in `NotesView.tsx`), or it gets silently reset.
 
 ### Voice dictation: three transcription providers behind one interface
 

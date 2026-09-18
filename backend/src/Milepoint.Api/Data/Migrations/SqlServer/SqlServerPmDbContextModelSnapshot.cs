@@ -403,19 +403,6 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
-                    b.Property<int?>("EdgeArrow")
-                        .HasColumnType("int");
-
-                    b.Property<string>("EdgeColor")
-                        .HasMaxLength(9)
-                        .HasColumnType("nvarchar(9)");
-
-                    b.Property<int?>("EdgeStyle")
-                        .HasColumnType("int");
-
-                    b.Property<double?>("EdgeWidth")
-                        .HasColumnType("float");
-
                     b.Property<double?>("FreeViewX")
                         .HasColumnType("float");
 
@@ -426,9 +413,6 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .IsRequired()
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
-
-                    b.Property<int?>("Shape")
-                        .HasColumnType("int");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -444,37 +428,6 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                         .IsUnique();
 
                     b.ToTable("Notes");
-                });
-
-            modelBuilder.Entity("Milepoint.Api.Models.NoteEdgeOverride", b =>
-                {
-                    b.Property<string>("SourceNoteId")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("TargetNoteId")
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<string>("Color")
-                        .HasMaxLength(9)
-                        .HasColumnType("nvarchar(9)");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(40)
-                        .HasColumnType("nvarchar(40)");
-
-                    b.Property<double?>("Width")
-                        .HasColumnType("float");
-
-                    b.HasKey("SourceNoteId", "TargetNoteId");
-
-                    b.HasIndex("ProjectId");
-
-                    b.HasIndex("TargetNoteId");
-
-                    b.ToTable("NoteEdgeOverrides");
                 });
 
             modelBuilder.Entity("Milepoint.Api.Models.NoteLink", b =>
@@ -871,33 +824,6 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
                     b.Navigation("Project");
                 });
 
-            modelBuilder.Entity("Milepoint.Api.Models.NoteEdgeOverride", b =>
-                {
-                    b.HasOne("Milepoint.Api.Models.Project", "Project")
-                        .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("Milepoint.Api.Models.Note", "SourceNote")
-                        .WithMany("OutgoingEdgeOverrides")
-                        .HasForeignKey("SourceNoteId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.HasOne("Milepoint.Api.Models.Note", "TargetNote")
-                        .WithMany()
-                        .HasForeignKey("TargetNoteId")
-                        .OnDelete(DeleteBehavior.NoAction)
-                        .IsRequired();
-
-                    b.Navigation("Project");
-
-                    b.Navigation("SourceNote");
-
-                    b.Navigation("TargetNote");
-                });
-
             modelBuilder.Entity("Milepoint.Api.Models.NoteLink", b =>
                 {
                     b.HasOne("Milepoint.Api.Models.Note", "SourceNote")
@@ -1054,8 +980,6 @@ namespace Milepoint.Api.Data.Migrations.SqlServer
             modelBuilder.Entity("Milepoint.Api.Models.Note", b =>
                 {
                     b.Navigation("IncomingLinks");
-
-                    b.Navigation("OutgoingEdgeOverrides");
 
                     b.Navigation("OutgoingLinks");
                 });

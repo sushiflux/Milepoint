@@ -780,6 +780,42 @@ lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses 
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
 
+## v2026.9.77 - 2026-09-18 15:20
+
+🗑️ Entfernt
+
+- **Notiz-Erscheinungsbild-Extras (Form/Linienstil/Pfeilspitzen/Linienbreite/-farbe,
+  Pro-Verbindung-Overrides) komplett entfernt - Graph-Knoten sind wieder schlichte farbige Kreise
+  mit Titel-Label darunter.** Vervollständigt den rein backend-seitigen Rückbau des vorherigen
+  Commits um die dazugehörige Frontend-Anpassung (beide waren durch eine Session-Limit-
+  Unterbrechung auseinandergelaufen - das Frontend rief noch einen Vertrag auf, den das Backend
+  nicht mehr implementierte; `npx tsc -b` deckte das mit `TS2739`-Fehlern auf dem verschlankten
+  `NoteAppearanceFields` auf).
+  - **Backend**: `Models/NoteShape.cs`, `NoteEdgeStyle.cs`, `NoteEdgeArrow.cs`,
+    `NoteEdgeOverride.cs` gelöscht; `Note`/`NoteDto`/`UpdateNoteRequest`/`CreateNoteRequest`
+    behalten nur noch `Color`. Neue EF-Core-Migration `RemoveNoteAppearanceExtras` für beide
+    Provider (Postgres + SqlServer) entfernt die Spalten `Shape`/`EdgeStyle`/`EdgeArrow`/
+    `EdgeWidth`/`EdgeColor` sowie die Tabelle `NoteEdgeOverrides` - live angewendet und per
+    `psql \d "Notes"` verifiziert.
+  - **Frontend**: `api/notes.ts`s `NoteAppearanceFields` verschlankt auf
+    `{ color: string | null }`; `api/types.ts`s `Note` verliert `shape`/`edgeStyle`/`edgeArrow`/
+    `edgeWidth`/`edgeColor` sowie die nun ungenutzten Typen `NoteShape`/`NoteEdgeStyle`/
+    `NoteEdgeArrow`/`NoteEdgeOverride`. `notesGraph/GraphSidePanel.tsx`, `NoteAppearanceMenu.tsx`,
+    `EdgeOverridePanel.tsx`, `ShapePickerPanel.tsx`, `edgeStyles.tsx`, `shapeOptions.ts`,
+    `shapePreview.tsx` komplett gelöscht. `notesGraph/NoteNodeShape.tsx` neu geschrieben: fester
+    Kreis-Radius + Titel-Label darunter (keine Form-Varianten mehr). `NoteGraphView.tsx` neu
+    geschrieben: Verbindungslinien jetzt als schlichte `<line>`-Elemente Mittelpunkt-zu-
+    Mittelpunkt (keine Anker-Box-Clipping-Logik/Marker/Gradienten mehr), Klick auf einen Knoten
+    ruft direkt `onSelectNote` auf statt ein Seitenpanel zu öffnen. `NotesView.tsx`s
+    Farbschema/Form-Segmented-Control ist jetzt ein einzelner Farbschema-Button;
+    `appearanceOf()`/`DEFAULT_APPEARANCE` auf nur noch `color` verschlankt.
+  - Dabei bestätigt: Notizen waren nie auf eine einzige Graph-Verbindung limitiert -
+    `buildEdges()` iteriert bereits über das komplette `outgoingLinks`-Array jeder Notiz, der
+    „neuronales Netzwerk"-Look mit beliebig vielen Querverlinkungen bleibt also voll unterstützt.
+  - Verifiziert: Typecheck/Lint/Backend-Build alle sauber, Migration angewendet und per psql
+    bestätigt, Playwright-Live-Lauf 5/5 PASS (kein Form-Button mehr, Farbschema-Button + Optionen
+    vorhanden, Klick auf Notiz wechselt zur Listenansicht, kein Aussehen-Seitenpanel mehr).
+
 ## v2026.9.76 - 2026-09-17 21:18
 
 🗑️ Entfernt

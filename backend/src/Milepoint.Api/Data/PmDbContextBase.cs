@@ -34,7 +34,6 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
     public DbSet<MilestoneDependency> MilestoneDependencies => Set<MilestoneDependency>();
     public DbSet<Note> Notes => Set<Note>();
     public DbSet<NoteLink> NoteLinks => Set<NoteLink>();
-    public DbSet<NoteEdgeOverride> NoteEdgeOverrides => Set<NoteEdgeOverride>();
     public DbSet<TranscriptionSettings> TranscriptionSettings => Set<TranscriptionSettings>();
 
     // IDataProtectionKeyContext requires a settable DbSet property (not just Set<T>()) named
@@ -253,7 +252,6 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
             // 9 chars covers the longest valid value (#RRGGBBAA); the actually-accepted formats
             // (#fff / #3b82f6, validated in NotesController) are shorter still.
             entity.Property(n => n.Color).HasMaxLength(9);
-            entity.Property(n => n.EdgeColor).HasMaxLength(9);
         });
 
         builder.Entity<NoteLink>(entity =>
@@ -271,33 +269,6 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
             entity.HasOne(l => l.TargetNote)
                 .WithMany(n => n.IncomingLinks)
                 .HasForeignKey(l => l.TargetNoteId)
-                .OnDelete(DeleteBehavior.NoAction);
-        });
-
-        builder.Entity<NoteEdgeOverride>(entity =>
-        {
-            entity.HasKey(o => new { o.SourceNoteId, o.TargetNoteId });
-            entity.Property(o => o.ProjectId).HasMaxLength(40);
-            entity.Property(o => o.SourceNoteId).HasMaxLength(40);
-            entity.Property(o => o.TargetNoteId).HasMaxLength(40);
-            entity.Property(o => o.Color).HasMaxLength(9);
-
-            entity.HasOne(o => o.Project)
-                .WithMany()
-                .HasForeignKey(o => o.ProjectId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            // NoAction on both sides, same reasoning as NoteLink above (Note already has a cascade
-            // path via Project, adding a second cascade source from here would risk the same SQL
-            // Server multi-cascade-path rejection).
-            entity.HasOne(o => o.SourceNote)
-                .WithMany(n => n.OutgoingEdgeOverrides)
-                .HasForeignKey(o => o.SourceNoteId)
-                .OnDelete(DeleteBehavior.NoAction);
-
-            entity.HasOne(o => o.TargetNote)
-                .WithMany()
-                .HasForeignKey(o => o.TargetNoteId)
                 .OnDelete(DeleteBehavior.NoAction);
         });
 

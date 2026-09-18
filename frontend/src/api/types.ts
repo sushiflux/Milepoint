@@ -123,57 +123,21 @@ export interface NoteLinkRef {
   title: string
 }
 
-// Mirrors backend Models/NoteShape.cs (serialized as a string by the default System.Text.Json
-// enum behavior used across this API). Null means "no explicit shape chosen" - rendered the same
-// as 'Rounded' but distinct so a future default change doesn't silently reinterpret existing data.
-export type NoteShape = 'Rounded' | 'Rectangle' | 'Diamond' | 'Underline' | 'Ellipse'
-
-// Mirrors backend Models/NoteEdgeStyle.cs / NoteEdgeArrow.cs. Both are per-note settings that
-// style every line drawn FROM this note - both its edges to its own ChildNotes (tree/mindmap
-// layouts) and its outgoing free cross-links (NoteGraphView) - never a per-connection setting.
-// Null means "no explicit choice" - rendered the same as 'Solid'/'None' but distinct, same
-// reasoning as NoteShape's null.
-export type NoteEdgeStyle = 'Solid' | 'Dashed' | 'Dotted' | 'Gradient'
-export type NoteEdgeArrow = 'None' | 'End' | 'Start' | 'Both'
-
-// Mirrors backend Dtos/Notes/NoteDtos.cs's NoteEdgeOverrideDto - a style override for ONE specific
-// connection from this note (a tree edge to a ChildNote, or a free-view OutgoingLink), distinct
-// from the note-wide edgeWidth/edgeColor below which apply to every outgoing connection. See
-// backend's NoteEdgeOverride model doc comment for why this is a separate concept.
-export interface NoteEdgeOverride {
-  targetNoteId: string
-  width: number | null
-  color: string | null
-}
-
 export interface Note {
   id: string
   title: string
   content: string
   outgoingLinks: NoteLinkRef[]
   incomingLinks: NoteLinkRef[]
-  // Concrete hex color (e.g. "#3b82f6") for this note's node in the graph/tree views, or null to
-  // use the view's default neutral color. Palette/"scheme" selection is a frontend-only concept
-  // (see notesGraph/colorSchemes.ts) - the backend only ever stores/returns the resolved color.
+  // Concrete hex color (e.g. "#3b82f6") for this note's node in the graph view, or null to use
+  // the view's default neutral color. Palette/"scheme" selection is a frontend-only concept (see
+  // notesGraph/colorSchemes.ts) - the backend only ever stores/returns the resolved color. The
+  // only per-note visual left - per-note shape/edge style/edge overrides were removed entirely
+  // per explicit user request ("Formen wieder nur als Punkt machen"), see CLAUDE.md "Notes".
   color: string | null
-  shape: NoteShape | null
-  // Line style/arrowhead applied to every edge drawn FROM this note - see the type doc comments
-  // above. Null = use the view's default (solid, no arrowhead).
-  edgeStyle: NoteEdgeStyle | null
-  edgeArrow: NoteEdgeArrow | null
-  // Stroke width (px)/color for every edge drawn FROM this note - null = use the view's default
-  // (1px, normal/highlighted gray-or-brand-accent). A specific connection's own entry in
-  // edgeOverrides below takes priority over these for that one connection only.
-  edgeWidth: number | null
-  edgeColor: string | null
-  // Per-connection overrides for this note's own outgoing connections - see NoteEdgeOverride's
-  // doc comment. Empty when none of this note's outgoing connections have been individually
-  // restyled.
-  edgeOverrides: NoteEdgeOverride[]
   // Last manually-saved position in the free (physics-simulated) graph view (NoteGraphView), or
   // null if the note has never been dragged there yet - see the backend's dedicated
-  // PUT .../position endpoint. Independent of any tree-layout position, which is always
-  // recomputed from the parent/child hierarchy and never persisted.
+  // PUT .../position endpoint.
   freeViewX: number | null
   freeViewY: number | null
   createdAt: string

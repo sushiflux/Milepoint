@@ -28,7 +28,6 @@ public class NotesController : ControllerBase
             .Where(n => n.ProjectId == projectId)
             .Include(n => n.OutgoingLinks).ThenInclude(l => l.TargetNote)
             .Include(n => n.IncomingLinks).ThenInclude(l => l.SourceNote)
-            .Include(n => n.OutgoingEdgeOverrides)
             .OrderBy(n => n.Title)
             .ToListAsync();
 
@@ -62,27 +61,12 @@ public class NotesController : ControllerBase
             return BadRequest("Farbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
         }
 
-        if (!IsValidColor(request.EdgeColor))
-        {
-            return BadRequest("Linienfarbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
-        }
-
-        if (!IsValidEdgeWidth(request.EdgeWidth))
-        {
-            return BadRequest($"Linienstärke muss zwischen {MinEdgeWidth} und {MaxEdgeWidth} px liegen.");
-        }
-
         var note = new Note
         {
             ProjectId = projectId,
             Title = request.Title,
             Content = request.Content,
             Color = request.Color,
-            Shape = request.Shape,
-            EdgeStyle = request.EdgeStyle,
-            EdgeArrow = request.EdgeArrow,
-            EdgeWidth = request.EdgeWidth,
-            EdgeColor = request.EdgeColor
         };
 
         _db.Notes.Add(note);
@@ -115,26 +99,10 @@ public class NotesController : ControllerBase
             return BadRequest("Farbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
         }
 
-        if (!IsValidColor(request.EdgeColor))
-        {
-            return BadRequest("Linienfarbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
-        }
-
-        if (!IsValidEdgeWidth(request.EdgeWidth))
-        {
-            return BadRequest($"Linienstärke muss zwischen {MinEdgeWidth} und {MaxEdgeWidth} px liegen.");
-        }
-
         note.Title = request.Title;
         note.Content = request.Content;
-        // Color/Shape/EdgeStyle/EdgeArrow/EdgeWidth/EdgeColor are always applied as given; null
-        // clears back to "use the default".
+        // Color is always applied as given; null clears back to "use the default".
         note.Color = request.Color;
-        note.Shape = request.Shape;
-        note.EdgeStyle = request.EdgeStyle;
-        note.EdgeArrow = request.EdgeArrow;
-        note.EdgeWidth = request.EdgeWidth;
-        note.EdgeColor = request.EdgeColor;
         note.UpdatedAt = DateTimeOffset.UtcNow;
 
         await SyncOutgoingLinksAsync(projectId, note);
@@ -178,15 +146,6 @@ public class NotesController : ControllerBase
             .ToListAsync();
         _db.NoteLinks.RemoveRange(links);
 
-        // NoteEdgeOverride rows are NoAction on both the source and target FK (see
-        // PmDbContextBase's comment) - unlike NoteLink they're not always removed via the
-        // Project's own cascade path either, since a project delete's cascade already covers this
-        // table directly, but a single note's delete here still needs to clear both directions
-        // explicitly or the FK constraint rejects the delete.
-        await _db.NoteEdgeOverrides
-            .Where(o => o.SourceNoteId == noteId || o.TargetNoteId == noteId)
-            .ExecuteDeleteAsync();
-
         _db.Notes.Remove(note);
         await _db.SaveChangesAsync();
 
@@ -223,7 +182,6 @@ public class NotesController : ControllerBase
             .Where(n => n.ProjectId == projectId && n.Id == noteId)
             .Include(n => n.OutgoingLinks).ThenInclude(l => l.TargetNote)
             .Include(n => n.IncomingLinks).ThenInclude(l => l.SourceNote)
-            .Include(n => n.OutgoingEdgeOverrides)
             .FirstOrDefaultAsync();
 
         return note is null ? null : ToDto(note);
@@ -236,16 +194,6 @@ public class NotesController : ControllerBase
 
     private static bool IsValidColor(string? color) => color is null || HexColorPattern.IsMatch(color);
 
-    // Sensible clamp on the user-facing "how thick" slider - not a hard technical limit, just
-    // guards against a garbage/out-of-range value reaching the database (e.g. a manually crafted
-    // request). 0.5 keeps a line visible at all (0 or negative would vanish/error in SVG); 12
-    // comfortably covers "very thick, still clearly a line" without needing an unbounded range the
-    // UI slider would have to accommodate.
-    private const double MinEdgeWidth = 0.5;
-    private const double MaxEdgeWidth = 12;
-
-    private static bool IsValidEdgeWidth(double? width) => width is null || (width >= MinEdgeWidth && width <= MaxEdgeWidth);
-
     private static NoteDto ToDto(Note note) => new(
         note.Id,
         note.Title,
@@ -253,76 +201,8 @@ public class NotesController : ControllerBase
         note.OutgoingLinks.Select(l => new NoteLinkRefDto(l.TargetNoteId, l.TargetNote.Title)).ToList(),
         note.IncomingLinks.Select(l => new NoteLinkRefDto(l.SourceNoteId, l.SourceNote.Title)).ToList(),
         note.Color,
-        note.Shape,
-        note.EdgeStyle,
-        note.EdgeArrow,
-        note.EdgeWidth,
-        note.EdgeColor,
-        note.OutgoingEdgeOverrides.Select(o => new NoteEdgeOverrideDto(o.TargetNoteId, o.Width, o.Color)).ToList(),
         note.FreeViewX,
         note.FreeViewY,
         note.CreatedAt,
         note.UpdatedAt);
-
-    // Creates or replaces the style override for one specific outgoing [[Title]] link from this
-    // note (see NoteEdgeOverride's doc comment). A request with both Width and Color null deletes
-    // the row instead of storing a no-op override, so "reset to the note's own EdgeWidth/EdgeColor"
-    // is a single call either way rather than a separate delete-vs-upsert decision the frontend
-    // has to make itself.
-    [HttpPut("{noteId}/edge-overrides/{targetNoteId}")]
-    public async Task<IActionResult> UpsertEdgeOverride(string projectId, string noteId, string targetNoteId, UpdateNoteEdgeOverrideRequest request)
-    {
-        var sourceExists = await _db.Notes.AnyAsync(n => n.Id == noteId && n.ProjectId == projectId);
-        if (!sourceExists)
-        {
-            return NotFound();
-        }
-
-        var targetExists = await _db.Notes.AnyAsync(n => n.Id == targetNoteId && n.ProjectId == projectId);
-        if (!targetExists)
-        {
-            return BadRequest("Ziel-Notiz gehört nicht zu diesem Projekt.");
-        }
-
-        if (!IsValidColor(request.Color))
-        {
-            return BadRequest("Linienfarbe muss ein gültiger Hex-Code sein (z.B. #3b82f6).");
-        }
-
-        if (!IsValidEdgeWidth(request.Width))
-        {
-            return BadRequest($"Linienstärke muss zwischen {MinEdgeWidth} und {MaxEdgeWidth} px liegen.");
-        }
-
-        if (request.Width is null && request.Color is null)
-        {
-            await _db.NoteEdgeOverrides
-                .Where(o => o.SourceNoteId == noteId && o.TargetNoteId == targetNoteId && o.ProjectId == projectId)
-                .ExecuteDeleteAsync();
-            return NoContent();
-        }
-
-        var existing = await _db.NoteEdgeOverrides
-            .FirstOrDefaultAsync(o => o.SourceNoteId == noteId && o.TargetNoteId == targetNoteId && o.ProjectId == projectId);
-
-        if (existing is null)
-        {
-            _db.NoteEdgeOverrides.Add(new NoteEdgeOverride
-            {
-                ProjectId = projectId,
-                SourceNoteId = noteId,
-                TargetNoteId = targetNoteId,
-                Width = request.Width,
-                Color = request.Color
-            });
-        }
-        else
-        {
-            existing.Width = request.Width;
-            existing.Color = request.Color;
-        }
-
-        await _db.SaveChangesAsync();
-        return NoContent();
-    }
 }

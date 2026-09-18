@@ -1,23 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { ApiError } from '../api/client'
 import { updateNotePosition } from '../api/notes'
-import type { Note, NoteEdgeArrow, NoteEdgeStyle, NoteShape } from '../api/types'
-import { NoteNodeVisual, measureNodeBox } from './notesGraph/NoteNodeShape'
-import {
-  EdgeMarkerDefs,
-  edgeMarkerRefs,
-  edgeStrokeDasharray,
-  edgeGradientStroke,
-  edgeGradientDefFor,
-  clipPointToBoxEdge,
-  resolveEdgeWidth,
-  resolveEdgeColor,
-  EDGE_COLOR_NORMAL,
-  EDGE_COLOR_HIGHLIGHT,
-  DEFAULT_EDGE_WIDTH,
-} from './notesGraph/edgeStyles'
-import GraphSidePanel from './notesGraph/GraphSidePanel'
-import EdgeOverridePanel from './notesGraph/EdgeOverridePanel'
+import type { Note } from '../api/types'
+import { NoteNodeVisual } from './notesGraph/NoteNodeShape'
 import { useClickOutside } from '../hooks/useClickOutside'
 
 interface Props {
@@ -26,18 +11,6 @@ interface Props {
   onSelectNote: (note: Note) => void
   onCreateNote: (title: string) => Promise<void>
   onConnectNotes: (sourceId: string, targetId: string) => Promise<void>
-  onChangeAppearance: (
-    noteId: string,
-    patch: {
-      color?: string | null
-      shape?: NoteShape | null
-      edgeStyle?: NoteEdgeStyle | null
-      edgeArrow?: NoteEdgeArrow | null
-      edgeWidth?: number | null
-      edgeColor?: string | null
-    },
-  ) => Promise<void>
-  onChangeEdgeOverride: (sourceNoteId: string, targetNoteId: string, width: number | null, color: string | null) => Promise<void>
 }
 
 interface Point {
@@ -59,12 +32,9 @@ interface Transform {
   k: number
 }
 
-// REPULSION/LINK_DISTANCE were tuned for the previous small fixed-radius circle nodes. Node boxes
-// now grow to fit their title text (see notesGraph/NoteNodeShape.tsx's measureNodeBox, up to
-// ~160px wide for a long title, vs. the previous ~9-26px circle diameter) - both are increased so
-// nodes with real text content don't settle overlapping each other. Still a good fit alongside the
-// spiral spawn placement below (SPAWN_RADIUS_STEP): the spiral gives new nodes a reasonable
-// starting spread, REPULSION only needs to fine-tune from there instead of untangling a stack.
+// Nodes are small fixed-radius circles (see notesGraph/NoteNodeShape.tsx) with a label
+// underneath, so a fairly tight REPULSION/LINK_DISTANCE keeps the graph compact instead of
+// spreading circles far apart the way wider text-box nodes once needed.
 const REPULSION = 5500
 const LINK_DISTANCE = 160
 const LINK_STRENGTH = 0.05
@@ -185,15 +155,15 @@ function tick(nodes: GraphNode[], edges: [string, string][], alpha: number, widt
   }
 }
 
-export default function NoteGraphView({
-  projectId,
-  notes,
-  onSelectNote,
-  onCreateNote,
-  onConnectNotes,
-  onChangeAppearance,
-  onChangeEdgeOverride,
-}: Props) {
+/**
+ * Freie, physik-simulierte Graph-Ansicht der Notizen - zeigt nur die [[Titel]]-Querlinks, kein
+ * Seitenpanel mehr für Aussehen-Anpassung (Form/Linienstil/Pfeilspitzen/Liniendicke/Linienfarbe/
+ * Pro-Verbindung-Overrides wurden komplett entfernt, siehe CLAUDE.md "Notes"). Ein Klick auf eine
+ * Notiz öffnet direkt den Listen-Editor (onSelectNote), genau wie ein Klick in der Liste selbst -
+ * kein Zwischenschritt über ein Panel mehr. Farbe bleibt als einzige visuelle Stellschraube
+ * (project-weite Farbschema-Buttons in NotesView.tsx, siehe assignSchemeColors).
+ */
+export default function NoteGraphView({ projectId, notes, onSelectNote, onCreateNote, onConnectNotes }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ width: 900, height: 600 })
@@ -246,14 +216,8 @@ export default function NoteGraphView({
 
   const [contextMenu, setContextMenu] = useState<{ screen: Point; world: Point } | null>(null)
   const contextMenuRef = useRef<HTMLDivElement>(null)
-  const closeContextMenu = useCallback(() => setContextMenu(null), [])
+  const closeContextMenu = () => setContextMenu(null)
   useClickOutside(contextMenuRef, contextMenu !== null, closeContextMenu)
-  // Rechtes Seitenpanel statt Popup-Kontextmenü.
-  const [panelOpen, setPanelOpen] = useState(false)
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
-  // A clicked EDGE (not node) opens EdgeOverridePanel instead of GraphSidePanel - mutually
-  // exclusive with selectedNoteId.
-  const [selectedEdge, setSelectedEdge] = useState<{ sourceNoteId: string; targetNoteId: string } | null>(null)
   const [createNoteAt, setCreateNoteAt] = useState<{ screen: Point; world: Point } | null>(null)
   const [newNodeTitle, setNewNodeTitle] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
@@ -267,8 +231,6 @@ export default function NoteGraphView({
   useEffect(() => {
     edgesRef.current = edges
   }, [edges])
-  // Lookup for edge styling: each edge is styled by its SOURCE note (the first tuple element from
-  // buildEdges, i.e. the note whose outgoingLinks produced it) - see edgeStyles.tsx's doc comment.
   const notesById = useMemo(() => new Map(notes.map((n) => [n.id, n])), [notes])
 
   const degree = useMemo(() => {
@@ -373,7 +335,7 @@ export default function NoteGraphView({
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
       // Safety net, not the primary save path (handleSvgPointerUp saves immediately on release
       // now) - covers the edge case of navigating away/unmounting mid-drag before pointerup ever
-      // fires (e.g. switching the List/Graph tab or graph layout while a node is still held down).
+      // fires (e.g. switching the List/Graph tab while a node is still held down).
       savePendingPositions()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -447,55 +409,8 @@ export default function NoteGraphView({
     }
   }
 
-  // Rechtsklick auf einen Knoten bleibt als Schnellzugriff bestehen: öffnet das Panel direkt mit
-  // diesem Knoten ausgewählt, statt (wie zuvor) ein eigenes Popup an der Klickposition zu zeigen.
-  function handleNodeContextMenu(noteId: string) {
-    return (event: React.MouseEvent<SVGGElement>) => {
-      event.preventDefault()
-      event.stopPropagation()
-      setContextMenu(null)
-      selectNote(noteId)
-    }
-  }
-
-  function selectNote(noteId: string) {
-    setSelectedEdge(null)
-    setSelectedNoteId(noteId)
-    setPanelOpen(true)
-  }
-
-  function selectEdge(sourceNoteId: string, targetNoteId: string) {
-    setSelectedNoteId(null)
-    setSelectedEdge({ sourceNoteId, targetNoteId })
-    setPanelOpen(true)
-  }
-
-  async function changeNodeAppearance(
-    noteId: string,
-    patch: {
-      color?: string | null
-      shape?: NoteShape | null
-      edgeStyle?: NoteEdgeStyle | null
-      edgeArrow?: NoteEdgeArrow | null
-      edgeWidth?: number | null
-      edgeColor?: string | null
-    },
-  ) {
-    try {
-      await onChangeAppearance(noteId, patch)
-      setActionError(null)
-    } catch (err) {
-      setActionError(err instanceof ApiError ? err.message : 'Aussehen konnte nicht geändert werden.')
-    }
-  }
-
   function handleBackgroundPointerDown(event: React.PointerEvent<SVGSVGElement>) {
     if (event.button !== 0) return
-    // Klick auf leere Canvas-Fläche schließt das Panel komplett - es gibt keinen permanent
-    // sichtbaren "globalen" Panel-Zustand mehr.
-    setPanelOpen(false)
-    setSelectedNoteId(null)
-    setSelectedEdge(null)
     if (connectMode) {
       setConnectMode(false)
       setConnectFirstId(null)
@@ -629,12 +544,11 @@ export default function NoteGraphView({
         handleConnectClick(drag.id)
         return
       }
-      // A plain click (no drag, not in connect mode) opens the right side panel with this node
-      // selected - previously this jumped straight to opening the note, which made a quick
-      // color/shape change require a right-click every time. "Notiz öffnen" is still one click
-      // away as the panel's first entry.
+      // A plain click (no drag, not in connect mode) opens the note directly in the List editor -
+      // no side panel/appearance menu anymore, see this component's doc comment.
       setContextMenu(null)
-      selectNote(drag.id)
+      const note = notesById.get(drag.id)
+      if (note) onSelectNote(note)
       return
     }
 
@@ -778,29 +692,6 @@ export default function NoteGraphView({
             onPointerUp={handleSvgPointerUp}
           >
           <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.k})`}>
-            <EdgeMarkerDefs />
-            {/* Per-edge Gradient <linearGradient> defs, collected in one place - see
-                edgeGradientDefFor's doc comment for why each Gradient-styled edge needs its own
-                geometry+color-specific def rather than a small fixed set like EdgeMarkerDefs. Same
-                ref-read exception as the edges.map() block below - see its comment. */}
-            <defs>
-              {/* eslint-disable-next-line react-hooks/refs */}
-              {edges.map(([a, b]) => {
-                const na = positionsRef.current.get(a)
-                const nb = positionsRef.current.get(b)
-                if (!na || !nb) return null
-                const sourceNote = notesById.get(a)
-                if (sourceNote?.edgeStyle !== 'Gradient') return null
-                const boxA = measureNodeBox(notesById.get(a)?.title ?? '', notesById.get(a)?.shape ?? null)
-                const boxB = measureNodeBox(notesById.get(b)?.title ?? '', notesById.get(b)?.shape ?? null)
-                const p1 = clipPointToBoxEdge(nb, na, boxA.width, boxA.height)
-                const p2 = clipPointToBoxEdge(na, nb, boxB.width, boxB.height)
-                const highlighted = hoveredId !== null && (a === hoveredId || b === hoveredId)
-                const override = sourceNote.edgeOverrides.find((o) => o.targetNoteId === b)
-                const resolvedColor = resolveEdgeColor(sourceNote.edgeColor, override) ?? (highlighted ? EDGE_COLOR_HIGHLIGHT : EDGE_COLOR_NORMAL)
-                return <g key={`${a}-${b}`}>{edgeGradientDefFor(sourceNote.edgeStyle, p1.x, p1.y, p2.x, p2.y, resolvedColor)}</g>
-              })}
-            </defs>
             {/* positionsRef intentionally holds the live physics-simulation state outside of
                 useState - the RAF loop (step(), see above) mutates node coordinates up to 60x/s,
                 and forceRender() alone (not a real state update per node) is what triggers React
@@ -808,9 +699,7 @@ export default function NoteGraphView({
                 update + reconciliation per simulation tick, which would noticeably hurt the
                 drag/physics performance this view depends on - so these ref reads during render
                 are a deliberate, understood exception, not an oversight the rule is correctly
-                catching elsewhere. Each edge is also wrapped in an invisible wider hit-area line +
-                click handler so a single connection can be clicked to open EdgeOverridePanel,
-                independent of clicking either endpoint's node. */}
+                catching elsewhere. */}
             {/* eslint-disable-next-line react-hooks/refs */}
             {edges.map(([a, b]) => {
               const na = positionsRef.current.get(a)
@@ -819,61 +708,18 @@ export default function NoteGraphView({
               const highlighted = hoveredId !== null && (a === hoveredId || b === hoveredId)
               const dimmed = hoveredId !== null && !highlighted
               const strokeClass = highlighted ? 'stroke-brand-primary dark:stroke-brand-primary-light' : 'stroke-slate-400 dark:stroke-slate-500'
-              // Styled by the source note (a) - see the notesById comment above.
-              const sourceNote = notesById.get(a)
-              const { markerStart, markerEnd } = edgeMarkerRefs(sourceNote?.edgeArrow, highlighted)
-              // Pull both endpoints back from the node centers to the actual box edges - nodes
-              // render as text-sized boxes now (see NoteNodeShape.tsx), not small fixed dots, so a
-              // line (and any arrowhead marker on it) drawn to the raw center coordinate would run
-              // into the box and end up hidden underneath it instead of visible at its rim.
-              const boxA = measureNodeBox(notesById.get(a)?.title ?? '', notesById.get(a)?.shape ?? null)
-              const boxB = measureNodeBox(notesById.get(b)?.title ?? '', notesById.get(b)?.shape ?? null)
-              const p1 = clipPointToBoxEdge(nb, na, boxA.width, boxA.height)
-              const p2 = clipPointToBoxEdge(na, nb, boxB.width, boxB.height)
-              const override = sourceNote?.edgeOverrides.find((o) => o.targetNoteId === b)
-              const resolvedWidth = resolveEdgeWidth(sourceNote?.edgeWidth, override, highlighted)
-              const resolvedColor = resolveEdgeColor(sourceNote?.edgeColor, override)
-              // Gradient overrides the plain stroke-slate-400/stroke-brand-primary class (or a
-              // resolved custom color) with an inline url() stroke (see edgeGradientStroke's doc
-              // comment) - only the className/color is affected, width/dasharray/markers/opacity
-              // stay the same either way.
-              const gradientStroke = edgeGradientStroke(sourceNote?.edgeStyle, p1.x, p1.y, p2.x, p2.y, resolvedColor ?? (highlighted ? EDGE_COLOR_HIGHLIGHT : EDGE_COLOR_NORMAL))
               const opacity = dimmed ? 0.12 : highlighted ? 0.9 : 0.35
-              const isSelected = selectedEdge?.sourceNoteId === a && selectedEdge.targetNoteId === b
               return (
-                <g key={`${a}-${b}`}>
-                  <line
-                    x1={p1.x}
-                    y1={p1.y}
-                    x2={p2.x}
-                    y2={p2.y}
-                    className={`${gradientStroke ? '' : strokeClass} ${isSelected ? 'drop-shadow-[0_0_2px_rgba(99,102,241,0.6)]' : ''}`}
-                    style={gradientStroke ? { stroke: gradientStroke } : resolvedColor ? { stroke: resolvedColor } : undefined}
-                    strokeWidth={resolvedWidth}
-                    strokeDasharray={edgeStrokeDasharray(sourceNote?.edgeStyle)}
-                    markerStart={markerStart}
-                    markerEnd={markerEnd}
-                    opacity={opacity}
-                  />
-                  {sourceNote && (
-                    <line
-                      x1={p1.x}
-                      y1={p1.y}
-                      x2={p2.x}
-                      y2={p2.y}
-                      stroke="transparent"
-                      strokeWidth={Math.max(resolvedWidth + 10, 14)}
-                      className="cursor-pointer"
-                      onPointerDown={(event) => {
-                        event.stopPropagation()
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        selectEdge(a, b)
-                      }}
-                    />
-                  )}
-                </g>
+                <line
+                  key={`${a}-${b}`}
+                  x1={na.x}
+                  y1={na.y}
+                  x2={nb.x}
+                  y2={nb.y}
+                  className={strokeClass}
+                  strokeWidth={1}
+                  opacity={opacity}
+                />
               )
             })}
 
@@ -905,13 +751,11 @@ export default function NoteGraphView({
                   onPointerDown={handleNodePointerDown(note.id)}
                   onPointerEnter={() => setHoveredId(note.id)}
                   onPointerLeave={() => setHoveredId((prev) => (prev === note.id ? null : prev))}
-                  onContextMenu={handleNodeContextMenu(note.id)}
                 >
                   <NoteNodeVisual
                     x={pos.x}
                     y={pos.y}
                     title={note.title}
-                    shape={note.shape}
                     color={note.color}
                     emphasized={emphasized}
                     emphasisClassName={emphasisClassName}
@@ -922,51 +766,6 @@ export default function NoteGraphView({
           </g>
           </svg>
         )}
-      </div>
-
-      {/* Flex sibling with an animated width, not absolutely positioned over the canvas - this is
-          what makes the canvas visibly shrink/grow alongside the panel instead of the panel just
-          appearing on top. */}
-      <div className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-in-out ${panelOpen ? 'w-72' : 'w-0'}`}>
-        <div className="h-full w-72">
-          {panelOpen && selectedEdge ? (
-            (() => {
-              const sourceNote = notesById.get(selectedEdge.sourceNoteId)
-              const targetNote = notesById.get(selectedEdge.targetNoteId)
-              const override = sourceNote?.edgeOverrides.find((o) => o.targetNoteId === selectedEdge.targetNoteId) ?? null
-              if (!sourceNote || !targetNote) return null
-              return (
-                <EdgeOverridePanel
-                  sourceTitle={sourceNote.title}
-                  targetTitle={targetNote.title}
-                  width={override?.width ?? null}
-                  color={override?.color ?? null}
-                  fallbackWidth={sourceNote.edgeWidth ?? DEFAULT_EDGE_WIDTH}
-                  fallbackColor={sourceNote.edgeColor ?? EDGE_COLOR_NORMAL}
-                  onChangeWidth={(width) => onChangeEdgeOverride(selectedEdge.sourceNoteId, selectedEdge.targetNoteId, width, override?.color ?? null)}
-                  onChangeColor={(color) => onChangeEdgeOverride(selectedEdge.sourceNoteId, selectedEdge.targetNoteId, override?.width ?? null, color)}
-                  onClose={() => {
-                    setPanelOpen(false)
-                    setSelectedEdge(null)
-                  }}
-                />
-              )
-            })()
-          ) : panelOpen ? (
-            <GraphSidePanel
-              selected={(() => {
-                const note = selectedNoteId ? notes.find((n) => n.id === selectedNoteId) : undefined
-                return note ? { note } : null
-              })()}
-              onClose={() => {
-                setPanelOpen(false)
-                setSelectedNoteId(null)
-              }}
-              onOpenNote={onSelectNote}
-              onChangeNoteAppearance={changeNodeAppearance}
-            />
-          ) : null}
-        </div>
       </div>
     </div>
   )
