@@ -14,7 +14,7 @@ that matters to you as a Milepoint user since the last entry in [CHANGELOG.md](C
 (v2026.8.66). A release candidate is a test build, not a final release: when it is released, this
 summary moves into `CHANGELOG.md` under the release's version number.
 
-## v2026.9.80-rc2 (Unraid)
+## v2026.9.82-rc2 (Unraid)
 
 ✨ New
 
@@ -67,7 +67,7 @@ alles, was für dich als Milepoint-Nutzer seit dem letzten Eintrag in
 kein fertiges Release: Beim Release wandert diese Übersicht unter der Versionsnummer des Releases
 in die `CHANGELOG.md`.
 
-## v2026.9.80-rc2 (Unraid)
+## v2026.9.82-rc2 (Unraid)
 
 ✨ Neu
 

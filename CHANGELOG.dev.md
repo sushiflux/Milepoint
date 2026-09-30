@@ -18,6 +18,15 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.82 - 2026-09-30 20:25
+
+🔧 Fixed
+- RC versioning: an RC tag now always carries the version of the commit it sits on (precomputed
+  from the commit count, like the dev changelog heading); only the `-rcN` counter counts up.
+  `v2026.9.80-rc2` had kept the old `.80` prefix although its commit was `.81`, so
+  `CHANGELOG.dev.md` and `CHANGELOG.rc.md` disagreed. `CHANGELOG.rc.md` heading is now
+  `v2026.9.82-rc2`; the old tag `v2026.9.80-rc2` and its draft release were removed.
+
 ## v2026.9.81 - 2026-09-30 20:15
 
 ✨ New
@@ -999,6 +1008,16 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.9.82 - 2026-09-30 20:25
+
+🔧 Behoben
+- RC-Versionierung: Ein RC-Tag trägt jetzt immer die Version des Commits, auf dem er sitzt (vorab aus
+  der Commit-Anzahl berechnet, wie die Überschrift im Dev-Changelog); nur der `-rcN`-Zähler zählt
+  hoch. `v2026.9.80-rc2` hatte den alten Präfix `.80` behalten, obwohl sein Commit `.81` war, sodass
+  `CHANGELOG.dev.md` und `CHANGELOG.rc.md` voneinander abwichen. Die Überschrift in
+  `CHANGELOG.rc.md` lautet jetzt `v2026.9.82-rc2`; der alte Tag `v2026.9.80-rc2` und sein Draft
+  wurden entfernt.
 
 ## v2026.9.81 - 2026-09-30 20:15
 
