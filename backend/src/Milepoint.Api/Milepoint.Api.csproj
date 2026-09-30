@@ -23,4 +23,13 @@
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
   </ItemGroup>
 
+  <!-- version.txt is git-ignored and (re)written by the post-commit hook / start.ps1 in dev and by
+       the release workflow from the tag in CI. Program.cs reads it from ContentRootPath, which in a
+       published image is the publish folder - without this it was never copied there and
+       GET /api/version fell back to "v0.0.0". Conditioned on existence so a checkout that never ran
+       either writer still builds. -->
+  <ItemGroup>
+    <Content Include="version.txt" Condition="Exists('version.txt')" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

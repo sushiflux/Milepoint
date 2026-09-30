@@ -248,6 +248,25 @@ function Invoke-Compose([string[]]$ComposeArgs) {
     }
 }
 
+function Invoke-DbBackupNow {
+    # Triggert eine Sicherung im laufenden db-backup-Dienst (scripts/db-backup.sh, docker-compose.yml)
+    # unmittelbar vor jedem Herunterfahren des Stacks - der Stack wird zu zufälligen Zeiten
+    # gestartet/gestoppt, der 6-Stunden-Takt allein würde die letzten Änderungen vor einem Stopp
+    # verpassen. Best effort: läuft der Dienst nicht (z.B. erster Start), passiert nichts, und ein
+    # Fehler hier darf das Stoppen nie verhindern. $ErrorActionPreference lokal auf 'Continue', weil
+    # PS 5.1 native stderr-Zeilen sonst als Fehler wertet (siehe Install-CaddyRootCertificate).
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $id = (& docker compose -p $ProjectName ps -q db-backup 2>$null | Select-Object -First 1)
+        if (-not $id) { return }
+        Write-Host "Sichere Datenbank vor dem Stoppen..." -ForegroundColor Cyan
+        & docker exec $id sh /tmp/db-backup.sh once 2>&1 | ForEach-Object { Write-Host "  $_" }
+    }
+    catch { Write-Warning "Vorab-Sicherung nicht möglich: $($_.Exception.Message)" }
+    finally { $ErrorActionPreference = $prev }
+}
+
 function Get-ComposeContainers {
     try {
         $raw = (& docker compose -p $ProjectName ps --format json 2>$null) -join "`n"
@@ -383,6 +402,7 @@ function Install-CaddyRootCertificate {
 }
 
 if ($Action -eq 'restart') {
+    Invoke-DbBackupNow
     Invoke-Compose @('down')
     $Action = 'start'
 }
@@ -390,6 +410,7 @@ if ($Action -eq 'restart') {
 switch ($Action) {
     'stop' {
         Write-Host "Stoppe Milepoint-Stack..." -ForegroundColor Cyan
+        Invoke-DbBackupNow
         Invoke-Compose @('down')
         Write-Host "Gestoppt. Datenbank-Volumes bleiben erhalten." -ForegroundColor Green
         exit 0
@@ -432,6 +453,7 @@ if ($Db) {
 }
 
 Write-Host "Beende evtl. laufende eigene PM-Container..." -ForegroundColor Cyan
+Invoke-DbBackupNow
 Invoke-Compose @('down', '--remove-orphans')
 
 Write-Host "Prüfe Ports..." -ForegroundColor Cyan

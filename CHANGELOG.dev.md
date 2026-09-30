@@ -18,6 +18,39 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.80 - 2026-09-30 18:45
+
+✨ New
+- **Automatic DB backups as a sidecar**: new `db-backup` service in `docker-compose.yml`
+  (`postgres:18.6-alpine`, script `scripts/db-backup.sh`). Dumps right after every stack start,
+  then every `BACKUP_INTERVAL_HOURS` (default 6 h); `start.ps1` additionally triggers
+  `Invoke-DbBackupNow` before every stop/restart/re-start (best effort). Target `./.backups/auto`
+  (host bind mount, not a volume): `recent/` (20 dumps) and `daily/` (60 days). A dump is only kept
+  if the content changed (hash of a plain dump without pg_dump 18's random
+  `\restrict`/`\unrestrict` lines) and `pg_restore --list` can read it. PID 1 traps TERM/INT
+  (`sleep &` + `wait`), CRs are stripped at start, plus `scripts/*.sh text eol=lf` in
+  `.gitattributes`.
+- **`scripts/restore-db.ps1`**: restore from `recent\` or `-File`; takes a safety dump first, stops
+  the backend, recreates the DB, `pg_restore`, starts the backend (which applies missing
+  migrations itself), prints row counts. SQL goes via stdin (PowerShell 5.1 strips quotes in native
+  arguments).
+- `CHANGELOG.rc.md`: new customer-readable summary for release candidates (`v2026.9.80-rc1`).
+
+🔧 Fixed
+- `Milepoint.Api.csproj`: `version.txt` is now published too (`CopyToPublishDirectory`). The prod
+  image used to report `v0.0.0`.
+- `release.yml`: the tag is always the plain version (`v2026.9.80-rc1`). The platform scope
+  ("RC Unraid"/"RC Windows") is no longer a tag suffix but a `platform: unraid` line in the
+  annotated tag's message; the job re-fetches the tag first (`git fetch`) because
+  `actions/checkout` flattens annotated tags. No line = all platforms. `version.txt` therefore
+  carries exactly the tag name.
+- `docker-compose.prod.yml`: Compose project name `milepoint-prod`. A prod smoke test running
+  `down -v` under the shared name `milepoint` had deleted the dev Postgres volume; dev data was
+  largely restored from an 28 Aug backup plus forensics (raw heap pages from the VM disk).
+- `frontend/.dockerignore` (new): `node_modules`, `dist`, `*.tsbuildinfo` don't belong in the build
+  context. Otherwise `docker compose build` fails with "invalid file request node_modules/.bin/…"
+  as soon as the host has a `node_modules`.
+
 ## v2026.9.79 - 2026-09-30 17:43
 
 ✨ New
@@ -950,6 +983,40 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.9.80 - 2026-09-30 18:45
+
+✨ Neu
+- **Automatische DB-Sicherung als Sidecar**: neuer Dienst `db-backup` in `docker-compose.yml`
+  (`postgres:18.6-alpine`, Skript `scripts/db-backup.sh`). Sichert direkt nach jedem Stack-Start,
+  dann alle `BACKUP_INTERVAL_HOURS` (Standard 6 h); `start.ps1` löst zusätzlich vor jedem
+  stop/restart/Neustart `Invoke-DbBackupNow` aus (best effort). Ziel `./.backups/auto` (Bind-Mount
+  auf den Host, nicht in einem Volume): `recent/` (20 Stück) und `daily/` (60 Tage). Wird nur
+  behalten, wenn sich der Inhalt geändert hat (Hash eines Plain-Dumps ohne die zufälligen
+  `\restrict`/`\unrestrict`-Zeilen von pg_dump 18) und wenn `pg_restore --list` den Dump lesen kann.
+  PID 1 fängt TERM/INT ab (`sleep &` + `wait`), CRs werden beim Start entfernt, dazu
+  `scripts/*.sh text eol=lf` in `.gitattributes`.
+- **`scripts/restore-db.ps1`**: Wiederherstellung aus `recent\` oder `-File`; sichert vorher den
+  aktuellen Stand, stoppt das Backend, legt die DB neu an, `pg_restore`, startet das Backend
+  (wendet fehlende Migrationen selbst an), gibt Zeilenzahlen aus. SQL läuft über stdin
+  (PowerShell 5.1 entfernt Anführungszeichen in nativen Argumenten).
+- `CHANGELOG.rc.md`: neue kundenlesbare Zusammenfassung für Release-Kandidaten (`v2026.9.80-rc1`).
+
+🔧 Behoben
+- `Milepoint.Api.csproj`: `version.txt` wird jetzt mit veröffentlicht (`CopyToPublishDirectory`).
+  Das Prod-Image zeigte bisher `v0.0.0`.
+- `release.yml`: Der Tag ist immer die reine Version (`v2026.9.80-rc1`). Der Plattform-Scope
+  ("RC Unraid"/"RC Windows") steht nicht mehr als Tag-Suffix, sondern als Zeile `platform: unraid`
+  in der Nachricht des annotierten Tags; der Job holt den Tag vorher neu (`git fetch`), weil
+  `actions/checkout` annotierte Tags glattzieht. Keine Zeile = alle Plattformen. `version.txt`
+  enthält dadurch exakt den Tag-Namen.
+- `docker-compose.prod.yml`: Compose-Projektname `milepoint-prod`. Ein Prod-Smoke-Test mit
+  `down -v` unter dem gemeinsamen Namen `milepoint` hatte das Dev-Postgres-Volume gelöscht; Dev-Daten
+  wurden aus einem Backup vom 28.08. plus Forensik (Rohdaten-Seiten der VM-Platte) weitgehend
+  wiederhergestellt.
+- `frontend/.dockerignore` (neu): `node_modules`, `dist`, `*.tsbuildinfo` gehören nicht in den
+  Build-Kontext. Sonst bricht `docker compose build` mit „invalid file request
+  node_modules/.bin/…" ab, sobald auf dem Host ein `node_modules` liegt.
 
 ## v2026.9.79 - 2026-09-30 17:43
 

@@ -14,7 +14,10 @@
 #
 # Usage: docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 #        (add --profile caddy to also start the bundled Caddy for users without their own proxy)
-name: milepoint
+# Must differ from the dev stack's "milepoint": Compose derives volume/network names from this, so
+# sharing it made a `down -v` on a prod test wipe the DEV database volume (milepoint_postgres_data)
+# - see the global CLAUDE.md's "distinct Compose project name per environment" rule.
+name: milepoint-prod
 
 services:
   postgres:

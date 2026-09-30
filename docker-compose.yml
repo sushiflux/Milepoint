@@ -20,6 +20,31 @@ services:
       timeout: 5s
       retries: 10
 
+  # Automatic Postgres backups (scripts/db-backup.sh). The stack is started at random times, so
+  # this isn't a cron schedule: it dumps right after the database is reachable (= every stack
+  # start), then every BACKUP_INTERVAL_HOURS while up; start.ps1 also triggers one before stopping.
+  # Backups go to ./.backups/auto on the HOST (a bind mount, git-ignored via .backups/), never into
+  # a Docker volume - a deleted volume (docker compose down -v) must not take its backups with it.
+  # Restore with scripts/restore-db.ps1. See the global CLAUDE.md, "Database backups for local
+  # Docker Compose stacks". The entrypoint strips CRs first so a CRLF checkout can't break the script.
+  db-backup:
+    image: postgres:18.6-alpine
+    entrypoint: ["sh", "-c", "tr -d '\\r' < /scripts/db-backup.sh > /tmp/db-backup.sh && exec sh /tmp/db-backup.sh"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-milepoint}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD fehlt in .env}
+      PGDATABASE: ${POSTGRES_DB:-milepoint}
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-6}
+      BACKUP_PREFIX: milepoint
+    volumes:
+      - ./scripts/db-backup.sh:/scripts/db-backup.sh:ro
+      - ./.backups/auto:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   # MSSQL is NOT part of the everyday dev stack anymore - it only starts via the "mssql-check"
   # profile (docker compose --profile mssql-check up -d mssql, or start.ps1 -MssqlCheck), spun up
   # deliberately before an RC-Commit/V-Commit to verify the SqlServerPmDbContext provider still

@@ -51,7 +51,19 @@ Backend:
 docker exec milepoint-backend-1 dotnet build --no-restore
 ```
 
-No test suite exists yet in either project.
+**Database backups are automatic.** The `db-backup` service in `docker-compose.yml`
+(`scripts/db-backup.sh`) dumps Postgres right after every stack start, then every 6 h while it
+runs; `start.ps1` triggers one more before every stop/restart/re-start (`Invoke-DbBackupNow`).
+Dumps go to `.backups/auto/recent` (newest 20) and `.backups/auto/daily` (first of each day, 60
+days) **on the host, outside the Docker volumes**, and only when the data actually changed. Restore
+with `.\scripts\restore-db.ps1` (newest by default, or `-File <dump>`; it takes a safety dump of the
+current state first, and the backend applies any missing migrations on start). Background: on
+2026-09-30 the dev DB volume was deleted by a `down -v` from a prod smoke test that shared this
+stack's Compose project name — `docker-compose.prod.yml` is now `milepoint-prod`. See the global
+CLAUDE.md, "Database backups for local Docker Compose stacks".
+
+No test suite exists yet in either project (the Playwright E2E suite in `frontend/e2e/`, run with
+`npm run test:e2e`, is the only automated check).
 
 ### EF Core migrations — must be added carefully
 
@@ -357,12 +369,12 @@ opt-in `caddy` profile, `Caddyfile.prod`), `.env.prod.example`, `unraid/milepoin
 (the actual Unraid Community Applications template — see the Unraid bullet below for why it's a
 single-container XML with an external DB, not a Compose stack) and `.github/workflows/release.yml`
 (tag-triggered: builds/pushes `ghcr.io/sushiflux-develop/milepoint`, renders the XML, publishes a
-draft GitHub Release for `-rcN` tags and a public one for plain tags; a `-unraid`/`-windows`
-suffix on the tag scopes the build to one platform, see the global CLAUDE.md's "Platform-scoped
-RC"). The repo lives at `github.com/SushiFlux-Develop/Milepoint` (moved from the old
+draft GitHub Release for `-rcN` tags and a public one for plain tags; tag names are always the
+plain version, the platform scope ("RC Unraid"/"RC Windows") is a `platform: unraid` line in the
+annotated tag's message, see the global CLAUDE.md's "Platform-scoped RC"). The repo lives at `github.com/SushiFlux-Develop/Milepoint` (moved from the old
 `SynShiftLabs` org). **Not yet exercised live:** the workflow has only been YAML-validated and its
 pieces (image build, XML render, `Program.cs` behaviour against an external Postgres) run locally —
-the first real `-rcN-unraid` tag push is its first actual GitHub Actions run.
+the first real `-rcN` tag push is its first actual GitHub Actions run.
 
 **Still only a plan:** the WiX installer project below. Captured here so the plan survives across
 sessions once that build-out starts:

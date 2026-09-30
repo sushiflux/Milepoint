@@ -4,11 +4,8 @@ name: Release
 #   v2026.9.80            -> plain tag, never pushed by this workflow's trigger shape (a real
 #                            release tag always carries "-rcN" or nothing extra - see below)
 #   v2026.9.80-rc1         -> RC push: builds the image, publishes a DRAFT GitHub Release
-#   v2026.9.80-rc1-unraid  -> platform-scoped RC push: same as above, but explicitly scoped to
-#                            the Unraid/Docker artifact only (only platform this project ships to
-#                            today, so functionally identical to the unscoped RC tag for now - the
-#                            "-unraid" suffix exists so a later Windows-installer tag shape, e.g.
-#                            "-windows", can coexist without ambiguity)
+#   platform scope         -> NOT part of the tag name; an annotated tag message line
+#                            "platform: unraid" (or "windows") scopes the build to one platform
 #   v2026.9.80             -> Release push (no "-rc" suffix at all): same build, published as a
 #                            normal PUBLIC GitHub Release
 on:
@@ -32,26 +29,22 @@ jobs:
       - name: Versionsschema aus Tag ableiten
         id: version
         run: |
-          # v2026.9.80-rc1-unraid -> version=2026.9.80, rc_suffix=-rc1, platform=unraid
-          # (see the global CLAUDE.md's "Platform-scoped RC" - no platform segment means "build
-          # every platform", which for Milepoint today just means "build" since Unraid/Docker is
-          # the only platform that exists yet; the parsing below is future-proofed for when a
-          # second platform, e.g. "-windows", is added rather than actually branching on it now.)
+          # The tag is only ever the plain version (v2026.9.80-rc1 / v2026.9.80). The build scope
+          # ("RC Unraid" / "RC Windows") lives in the annotated tag's message as a line
+          # "platform: unraid" or "platform: windows"; no such line means "build every platform",
+          # which for Milepoint today just means the Unraid/Docker artifact.
           tag="${GITHUB_REF_NAME}"
           is_rc=false
           if [[ "$tag" == *-rc* ]]; then is_rc=true; fi
 
-          platform=""
-          if [[ "$tag" == *-unraid ]]; then platform="unraid"; fi
-          if [[ "$tag" == *-windows ]]; then platform="windows"; fi
+          # actions/checkout may have flattened the annotated tag - re-fetch the real tag object.
+          git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" || true
+          platform="$(git tag -l --format='%(contents)' "$tag" | sed -n 's/^platform:[[:space:]]*//p' | head -n1 | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
           builds_unraid=true
           if [[ -n "$platform" && "$platform" != "unraid" ]]; then builds_unraid=false; fi
+          echo "Build-Scope: platform='${platform:-alle}' builds_unraid=$builds_unraid"
 
-          # Strip the platform suffix (if any) before deriving the Docker image tag - it's a
-          # build-scope instruction to this workflow, not part of the actual version string.
           docker_tag="${tag#v}"
-          docker_tag="${docker_tag%-unraid}"
-          docker_tag="${docker_tag%-windows}"
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "is_rc=$is_rc" >> "$GITHUB_OUTPUT"
@@ -62,7 +55,8 @@ jobs:
         # Dieselbe Datei, die scripts/git-hooks/post-commit lokal pflegt - beim CI-Build wird sie
         # stattdessen direkt aus dem Tag-Namen gesetzt (kein .git-Verlaufszugriff auf den
         # Jahres-Commit-Zähler nötig, der Tag selbst trägt schon die endgültige Versionsnummer).
-        run: echo "${{ steps.version.outputs.tag }}" > backend/src/Milepoint.Api/version.txt
+        # Der Tag ist immer die reine Version (z.B. v2026.9.80-rc1), die App zeigt genau das an.
+        run: echo "v${{ steps.version.outputs.docker_tag }}" > backend/src/Milepoint.Api/version.txt
 
       - name: Docker Buildx einrichten
         if: steps.version.outputs.builds_unraid == 'true'
