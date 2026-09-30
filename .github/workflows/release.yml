@@ -1,0 +1,112 @@
+name: Release
+
+# Three-tier push model (see the global CLAUDE.md's "Three-tier push model" / "Platform-scoped RC"):
+#   v2026.9.80            -> plain tag, never pushed by this workflow's trigger shape (a real
+#                            release tag always carries "-rcN" or nothing extra - see below)
+#   v2026.9.80-rc1         -> RC push: builds the image, publishes a DRAFT GitHub Release
+#   v2026.9.80-rc1-unraid  -> platform-scoped RC push: same as above, but explicitly scoped to
+#                            the Unraid/Docker artifact only (only platform this project ships to
+#                            today, so functionally identical to the unscoped RC tag for now - the
+#                            "-unraid" suffix exists so a later Windows-installer tag shape, e.g.
+#                            "-windows", can coexist without ambiguity)
+#   v2026.9.80             -> Release push (no "-rc" suffix at all): same build, published as a
+#                            normal PUBLIC GitHub Release
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  IMAGE_NAME: ghcr.io/sushiflux-develop/milepoint
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Repo auschecken
+        uses: actions/checkout@v5
+
+      - name: Versionsschema aus Tag ableiten
+        id: version
+        run: |
+          # v2026.9.80-rc1-unraid -> version=2026.9.80, rc_suffix=-rc1, platform=unraid
+          # (see the global CLAUDE.md's "Platform-scoped RC" - no platform segment means "build
+          # every platform", which for Milepoint today just means "build" since Unraid/Docker is
+          # the only platform that exists yet; the parsing below is future-proofed for when a
+          # second platform, e.g. "-windows", is added rather than actually branching on it now.)
+          tag="${GITHUB_REF_NAME}"
+          is_rc=false
+          if [[ "$tag" == *-rc* ]]; then is_rc=true; fi
+
+          platform=""
+          if [[ "$tag" == *-unraid ]]; then platform="unraid"; fi
+          if [[ "$tag" == *-windows ]]; then platform="windows"; fi
+          builds_unraid=true
+          if [[ -n "$platform" && "$platform" != "unraid" ]]; then builds_unraid=false; fi
+
+          # Strip the platform suffix (if any) before deriving the Docker image tag - it's a
+          # build-scope instruction to this workflow, not part of the actual version string.
+          docker_tag="${tag#v}"
+          docker_tag="${docker_tag%-unraid}"
+          docker_tag="${docker_tag%-windows}"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "is_rc=$is_rc" >> "$GITHUB_OUTPUT"
+          echo "builds_unraid=$builds_unraid" >> "$GITHUB_OUTPUT"
+          echo "docker_tag=$docker_tag" >> "$GITHUB_OUTPUT"
+
+      - name: version.txt schreiben
+        # Dieselbe Datei, die scripts/git-hooks/post-commit lokal pflegt - beim CI-Build wird sie
+        # stattdessen direkt aus dem Tag-Namen gesetzt (kein .git-Verlaufszugriff auf den
+        # Jahres-Commit-Zähler nötig, der Tag selbst trägt schon die endgültige Versionsnummer).
+        run: echo "${{ steps.version.outputs.tag }}" > backend/src/Milepoint.Api/version.txt
+
+      - name: Docker Buildx einrichten
+        if: steps.version.outputs.builds_unraid == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Bei GHCR anmelden
+        if: steps.version.outputs.builds_unraid == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image bauen und pushen
+        if: steps.version.outputs.builds_unraid == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile.prod
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.docker_tag }}
+            ${{ steps.version.outputs.is_rc == 'false' && format('{0}:latest', env.IMAGE_NAME) || '' }}
+
+      - name: Unraid Community-Applications-Template rendern
+        if: steps.version.outputs.builds_unraid == 'true'
+        run: |
+          sed "s/__VERSION__/${{ steps.version.outputs.docker_tag }}/g" \
+            unraid/milepoint.xml.template > unraid/milepoint.xml
+
+      - name: Unraid-Template als Artefakt anhängen (nur zum Selbst-Herunterladen, kein Feed-Push)
+        if: steps.version.outputs.builds_unraid == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unraid-template
+          path: unraid/milepoint.xml
+
+      - name: GitHub Release erstellen
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          draft: ${{ steps.version.outputs.is_rc }}
+          prerelease: ${{ steps.version.outputs.is_rc }}
+          # Nur anhängen, wenn der Unraid-Build oben tatsächlich lief - sonst existiert die Datei
+          # nicht (z.B. bei einem künftigen rein-Windows-scoped Tag).
+          files: ${{ steps.version.outputs.builds_unraid == 'true' && 'unraid/milepoint.xml' || '' }}
+          generate_release_notes: true

@@ -1,0 +1,144 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Milepoint</Name>
+  <Repository>ghcr.io/sushiflux-develop/milepoint:__VERSION__</Repository>
+  <Registry>https://github.com/SushiFlux-Develop/Milepoint/pkgs/container/milepoint</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/SushiFlux-Develop/Milepoint</Support>
+  <Project>https://github.com/SushiFlux-Develop/Milepoint</Project>
+  <Overview>Milepoint – Selbst gehostetes Projekt-Management-Tool (Issue-Tracking, Kanban, Gantt-Timeline, Notizen). ASP.NET Core Backend mit integriertem React-Frontend. Benötigt eine externe PostgreSQL-Datenbank; Redis und der optionale Whisper-Spracherkennungs-Dienst können ebenfalls extern betrieben werden.</Overview>
+  <Category>Productivity: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/SushiFlux-Develop/Milepoint/main/unraid/milepoint.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/SushiFlux-Develop/Milepoint/main/branding/logo/logo_light_mode.svg</Icon>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <DateInstalled></DateInstalled>
+
+  <!-- Web-Port -->
+  <Config
+    Name="Web UI Port"
+    Target="8080"
+    Default="8080"
+    Mode="tcp"
+    Description="Port über den Milepoint im Browser erreichbar ist."
+    Type="Port"
+    Display="always"
+    Required="true"
+    Mask="false">8080</Config>
+
+  <!-- Datenbank (extern - z.B. der offizielle Postgres-Container aus Community Applications) -->
+  <Config
+    Name="Datenbank Host"
+    Target="ConnectionStrings__Postgres_Host"
+    Default=""
+    Description="IP-Adresse oder Hostname des PostgreSQL-Containers, z.B. 192.168.178.115"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"></Config>
+
+  <Config
+    Name="Datenbank Port"
+    Target="ConnectionStrings__Postgres_Port"
+    Default="5432"
+    Description="PostgreSQL Port. Standard: 5432"
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">5432</Config>
+
+  <Config
+    Name="Datenbank Name"
+    Target="ConnectionStrings__Postgres_Database"
+    Default="milepoint"
+    Description="Name der Datenbank - muss vorher auf dem Postgres-Server angelegt sein."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">milepoint</Config>
+
+  <Config
+    Name="Datenbank Benutzer"
+    Target="ConnectionStrings__Postgres_Username"
+    Default="milepoint"
+    Description="PostgreSQL Benutzername."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">milepoint</Config>
+
+  <Config
+    Name="Datenbank Passwort"
+    Target="ConnectionStrings__Postgres_Password"
+    Default=""
+    Description="PostgreSQL Passwort."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"></Config>
+
+  <!-- Redis (extern - z.B. der offizielle Redis-Container aus Community Applications) -->
+  <Config
+    Name="Redis Host:Port"
+    Target="ConnectionStrings__Redis"
+    Default=""
+    Description="Adresse des Redis-Containers, z.B. 192.168.178.115:6379 - wird für SignalR (Live-Sync des Kanban-Boards) benötigt."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"></Config>
+
+  <!-- JWT / Auth -->
+  <Config
+    Name="JWT Signing Key"
+    Target="JWT_SIGNING_KEY"
+    Default=""
+    Description="Mindestens 32 zufällige Zeichen zum Signieren der Login-Tokens - z.B. mit 'openssl rand -base64 32' erzeugen. Einmal gesetzt nicht mehr ändern, sonst werden alle bestehenden Logins ungültig."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"></Config>
+
+  <Config
+    Name="CORS Erlaubte Origins"
+    Target="CORS_ALLOWED_ORIGINS"
+    Default=""
+    Description="Die URL, unter der du Milepoint im Browser aufrufst, z.B. https://milepoint.example.com oder http://192.168.178.115:8080 - mehrere Adressen kommagetrennt."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false"></Config>
+
+  <!-- Admin-Konto (nur beim allerersten Start verwendet) -->
+  <Config
+    Name="Admin Benutzername"
+    Target="ADMIN_USERNAME"
+    Default="admin"
+    Description="Wird beim allerersten Start als Login-Konto angelegt, falls dieser Username noch nicht existiert."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="false">admin</Config>
+
+  <Config
+    Name="Admin Initial-Passwort"
+    Target="ADMIN_INITIAL_PASSWORD"
+    Default=""
+    Description="Nur für den allerersten Login - danach im Profil selbst ändern."
+    Type="Variable"
+    Display="always"
+    Required="true"
+    Mask="true"></Config>
+
+</Container>
+
+<!--
+  Sprachdiktat (Whisper/OpenAI/Google): keine Container-Einstellung. Der Transkriptionsanbieter
+  und alle zugehörigen Zugangsdaten (Whisper-Endpoint-URL, OpenAI-/Google-API-Key) werden nach der
+  Installation im Admin-Bereich der laufenden App selbst konfiguriert - datenbankgestützt (siehe
+  TranscriptionSettings in Milepoints CLAUDE.md), nicht per Umgebungsvariable. Ein separat
+  laufender onerahmet/openai-whisper-asr-webservice-Container (z.B. ebenfalls über Community
+  Applications) wird dort per URL eingetragen, falls gewünscht.
+-->
+

@@ -12,6 +12,27 @@ using Milepoint.Api.Services.Transcription;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// The Unraid Community Applications template (unraid/milepoint.xml.template) exposes the
+// Postgres connection as separate, individually-labeled fields (Host/Port/Database/Username/
+// Password) rather than one raw connection-string field - clearer for a non-technical CA user
+// filling in a form than a single opaque string. Docker Compose (dev and docker-compose.prod.yml)
+// keeps setting ConnectionStrings__Postgres directly, which always wins if present - this only
+// assembles the string when that direct value is absent, so neither path needs to know about the
+// other.
+if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Postgres")))
+{
+    var pgHost = builder.Configuration["ConnectionStrings:Postgres_Host"];
+    if (!string.IsNullOrWhiteSpace(pgHost))
+    {
+        var pgPort = builder.Configuration["ConnectionStrings:Postgres_Port"] ?? "5432";
+        var pgDatabase = builder.Configuration["ConnectionStrings:Postgres_Database"] ?? "milepoint";
+        var pgUsername = builder.Configuration["ConnectionStrings:Postgres_Username"] ?? "milepoint";
+        var pgPassword = builder.Configuration["ConnectionStrings:Postgres_Password"] ?? string.Empty;
+        builder.Configuration["ConnectionStrings:Postgres"] =
+            $"Host={pgHost};Port={pgPort};Database={pgDatabase};Username={pgUsername};Password={pgPassword}";
+    }
+}
+
 var dbProvider = (builder.Configuration["DB_PROVIDER"] ?? "postgres").ToLowerInvariant();
 var jwtSigningKey = builder.Configuration["JWT_SIGNING_KEY"]
     ?? throw new InvalidOperationException("JWT_SIGNING_KEY ist nicht gesetzt.");
@@ -263,5 +284,18 @@ app.MapGet("/api/version", () =>
     var version = File.Exists(versionFilePath) ? File.ReadAllText(versionFilePath).Trim() : "v0.0.0";
     return Results.Ok(new { version });
 });
+
+// Serves the built frontend (frontend/dist, copied to wwwroot by Dockerfile.prod's multi-stage
+// build) directly from this same Kestrel process - the customer-facing distribution shape from
+// CLAUDE.md's "Customer distribution concept" (no separate frontend/Caddy container needed just
+// to serve static files). Dev keeps using the separate Vite dev-server container instead (see
+// docker-compose.yml) - wwwroot simply doesn't exist there, so this block is a no-op in dev.
+// Placed after every API/hub/healthcheck route above: MapFallbackToFile only ever runs for a
+// request that didn't match any of those, so it can never shadow /api/*, /hubs/*, or /healthz.
+if (Directory.Exists(Path.Combine(app.Environment.WebRootPath ?? "wwwroot", string.Empty)))
+{
+    app.UseStaticFiles();
+    app.MapFallbackToFile("index.html");
+}
 
 app.Run();

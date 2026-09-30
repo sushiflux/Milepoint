@@ -18,6 +18,67 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.79 - 2026-09-30 17:43
+
+✨ New
+
+- **Unraid/Docker distribution path** - first real build-out of the "Customer distribution
+  concept" from CLAUDE.md (Unraid/Docker side only; the Windows installer is still a plan):
+  - `backend/Dockerfile.prod`: multi-stage build (Node builds the frontend, .NET publishes the
+    backend, the frontend's `dist/` is copied into the runtime image as `wwwroot`). The runtime
+    stage installs `libgssapi-krb5-2` - Npgsql loads it at connection time even for plain password
+    auth, and the slim `aspnet:10.0` image lacks it (surfaced as `libgssapi_krb5.so.2: cannot open
+    shared object file` right at the startup migration).
+  - `Program.cs`: `UseStaticFiles()` + `MapFallbackToFile("index.html")`, registered after every
+    API/hub/`/healthz` route so it can never shadow them; guarded by `wwwroot` existing, so it is a
+    no-op in the dev stack (which keeps the separate Vite container).
+  - `docker-compose.prod.yml` (generic self-host path with a bundled Postgres; optional `whisper`
+    and `caddy` profiles), `Caddyfile.prod` (`tls internal { on_demand }`, single upstream),
+    `.env.prod.example`, and a root `.dockerignore` (the repo-root build context otherwise sent
+    `frontend/node_modules` to the daemon and failed with `invalid file request`).
+  - `unraid/milepoint.xml.template`: single-container Community Applications template following
+    Fluxo's pattern, expecting an external Postgres and Redis. Research showed Unraid's Compose
+    Manager plugin has no standardized CA manifest format for multi-container stacks, so the
+    originally planned "one compose stack = one app" is not a real one-click path. Whisper/OpenAI/
+    Google settings are deliberately not container fields - they are DB-backed admin settings.
+  - `Program.cs`: if `ConnectionStrings:Postgres` is absent, it is assembled from
+    `ConnectionStrings:Postgres_Host/_Port/_Database/_Username/_Password` (the template's separate
+    labeled fields). Compose keeps setting the full string directly and wins if present.
+  - `.github/workflows/release.yml`: tag-triggered (`v*`); builds and pushes
+    `ghcr.io/sushiflux-develop/milepoint`, writes `version.txt` from the tag, renders the XML
+    (`__VERSION__` placeholder), attaches it to the release, `-rcN` tags publish a draft +
+    prerelease, plain tags a public release and move `latest`. A trailing `-unraid`/`-windows` tag
+    segment scopes the build to one platform (the "RC Unraid / RC Windows / RC = both" convention
+    from the global CLAUDE.md). Not yet run on GitHub Actions - only YAML-validated and its pieces
+    tested locally (image build, XML render, external-Postgres startup, static files + SPA
+    fallback all returning 200).
+- **Repository moved to `github.com/SushiFlux-Develop/Milepoint`** (fresh repo + push of the full
+  history; the old `SynShiftLabs` account was not accessible via the `gh` login, so a GitHub
+  transfer was not possible). `origin` now uses SSH with a new personal key.
+
+🔧 Fix
+
+- **`frontend/package-lock.json` was out of sync with `package.json`** (`@playwright/test` had been
+  added to `package.json` without updating the lock file), so `npm ci` - which Dockerfile.prod
+  uses - failed with `Missing: @playwright/test@1.63.0 from lock file`. Regenerated, and `npm audit
+  fix` resolved a high-severity transitive `brace-expansion` ReDoS/DoS advisory (0 vulnerabilities
+  now).
+- **`Caddyfile`: `auto_https disable_redirects`** - Caddy's automatic HTTP-to-HTTPS redirect does
+  not know the non-standard `CADDY_HTTPS_PORT` and produced its own port-less 308 that took
+  precedence over the explicit `:80` block; disabling it lets only the port-aware block apply.
+  (Pre-existing uncommitted change picked up by this commit.)
+- **`CHANGELOG.dev.md` itself repaired**: the English `v2026.9.77` entry was missing entirely (the
+  original replace failed on two matches, only the German one went through), and in the German
+  section `v2026.9.78` sat after `v2026.9.77` instead of before it. The English v77 entry was
+  added back (reconstructed from the German one), and the order is now 79, 78, 77, 76 everywhere.
+
+🔄 Change
+
+- `.gitignore`: added `.env.prod`, `dist/` and `*.docker-image.tar` (pipeline artifacts).
+- `CLAUDE.md`: distribution section rewritten to the real state, and the stale "occupied ports get
+  an automatic fallback" sentence replaced by the fixed-port-registry behavior and the three
+  reachable hostnames.
+
 ## v2026.9.78 - 2026-09-18 22:22
 
 ✨ New
@@ -94,6 +155,39 @@ user's own Pi-hole router (see the "Change" section above for what actually ship
 project-local shared `infra` Docker stack (dnsmasq + a central Caddy) meant to resolve
 `*.sushifluxdevelop` without touching the Pi-hole - abandoned once the Pi-hole itself turned out to
 already support the same wildcard natively.
+
+## v2026.9.77 - 2026-09-18 15:20
+
+🗑️ Removed
+
+- **Per-note visual extras (shape/edge style/arrowheads/width/color, per-connection overrides)
+  removed entirely - notes graph nodes are plain colored circles with a title label again**,
+  completing the previous commit's backend-only removal by bringing the frontend into sync
+  (the two had drifted apart across a session-limit interruption, leaving the frontend calling
+  a contract the backend no longer implemented - `npx tsc -b` caught it with `TS2739` errors on
+  the now-narrower `NoteAppearanceFields`).
+  - **Backend**: `Models/NoteShape.cs`, `NoteEdgeStyle.cs`, `NoteEdgeArrow.cs`,
+    `NoteEdgeOverride.cs` deleted; `Note`/`NoteDto`/`UpdateNoteRequest`/`CreateNoteRequest` keep
+    only `Color`. New EF Core migration `RemoveNoteAppearanceExtras` for both providers
+    (Postgres + SqlServer) drops the `Shape`/`EdgeStyle`/`EdgeArrow`/`EdgeWidth`/`EdgeColor`
+    columns and the `NoteEdgeOverrides` table - applied live and verified via `psql \d "Notes"`.
+  - **Frontend**: `api/notes.ts`'s `NoteAppearanceFields` narrowed to `{ color: string | null }`;
+    `api/types.ts`'s `Note` drops `shape`/`edgeStyle`/`edgeArrow`/`edgeWidth`/`edgeColor` and the
+    now-unused `NoteShape`/`NoteEdgeStyle`/`NoteEdgeArrow`/`NoteEdgeOverride` types.
+    `notesGraph/GraphSidePanel.tsx`, `NoteAppearanceMenu.tsx`, `EdgeOverridePanel.tsx`,
+    `ShapePickerPanel.tsx`, `edgeStyles.tsx`, `shapeOptions.ts`, `shapePreview.tsx` deleted
+    outright. `notesGraph/NoteNodeShape.tsx` rewritten to a fixed-radius circle + title label
+    below it (no shape variants). `NoteGraphView.tsx` rewritten: edges are now plain `<line>`
+    center-to-center (no anchor-box clipping/markers/gradients), clicking a node calls
+    `onSelectNote` directly instead of opening a side panel. `NotesView.tsx`'s Farbschema/Form
+    segmented control is now a single Farbschema button; `appearanceOf()`/`DEFAULT_APPEARANCE`
+    narrowed to just `color`.
+  - Confirmed while doing this: notes were never limited to one graph connection each -
+    `buildEdges()` already iterates every note's full `outgoingLinks` array, so the
+    "neural-network" look with many cross-links stays fully supported.
+  - Verified: typecheck/lint/backend build all clean, migration applied and confirmed via psql,
+    Playwright live run 5/5 PASS (no Form button, Farbschema button + options present, node click
+    switches to list view, no appearance side panel).
 
 ## v2026.9.76 - 2026-09-17 21:18
 
@@ -857,41 +951,72 @@ lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses 
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
 
-## v2026.9.77 - 2026-09-18 15:20
+## v2026.9.79 - 2026-09-30 17:43
 
-🗑️ Entfernt
+✨ Neu
 
-- **Notiz-Erscheinungsbild-Extras (Form/Linienstil/Pfeilspitzen/Linienbreite/-farbe,
-  Pro-Verbindung-Overrides) komplett entfernt - Graph-Knoten sind wieder schlichte farbige Kreise
-  mit Titel-Label darunter.** Vervollständigt den rein backend-seitigen Rückbau des vorherigen
-  Commits um die dazugehörige Frontend-Anpassung (beide waren durch eine Session-Limit-
-  Unterbrechung auseinandergelaufen - das Frontend rief noch einen Vertrag auf, den das Backend
-  nicht mehr implementierte; `npx tsc -b` deckte das mit `TS2739`-Fehlern auf dem verschlankten
-  `NoteAppearanceFields` auf).
-  - **Backend**: `Models/NoteShape.cs`, `NoteEdgeStyle.cs`, `NoteEdgeArrow.cs`,
-    `NoteEdgeOverride.cs` gelöscht; `Note`/`NoteDto`/`UpdateNoteRequest`/`CreateNoteRequest`
-    behalten nur noch `Color`. Neue EF-Core-Migration `RemoveNoteAppearanceExtras` für beide
-    Provider (Postgres + SqlServer) entfernt die Spalten `Shape`/`EdgeStyle`/`EdgeArrow`/
-    `EdgeWidth`/`EdgeColor` sowie die Tabelle `NoteEdgeOverrides` - live angewendet und per
-    `psql \d "Notes"` verifiziert.
-  - **Frontend**: `api/notes.ts`s `NoteAppearanceFields` verschlankt auf
-    `{ color: string | null }`; `api/types.ts`s `Note` verliert `shape`/`edgeStyle`/`edgeArrow`/
-    `edgeWidth`/`edgeColor` sowie die nun ungenutzten Typen `NoteShape`/`NoteEdgeStyle`/
-    `NoteEdgeArrow`/`NoteEdgeOverride`. `notesGraph/GraphSidePanel.tsx`, `NoteAppearanceMenu.tsx`,
-    `EdgeOverridePanel.tsx`, `ShapePickerPanel.tsx`, `edgeStyles.tsx`, `shapeOptions.ts`,
-    `shapePreview.tsx` komplett gelöscht. `notesGraph/NoteNodeShape.tsx` neu geschrieben: fester
-    Kreis-Radius + Titel-Label darunter (keine Form-Varianten mehr). `NoteGraphView.tsx` neu
-    geschrieben: Verbindungslinien jetzt als schlichte `<line>`-Elemente Mittelpunkt-zu-
-    Mittelpunkt (keine Anker-Box-Clipping-Logik/Marker/Gradienten mehr), Klick auf einen Knoten
-    ruft direkt `onSelectNote` auf statt ein Seitenpanel zu öffnen. `NotesView.tsx`s
-    Farbschema/Form-Segmented-Control ist jetzt ein einzelner Farbschema-Button;
-    `appearanceOf()`/`DEFAULT_APPEARANCE` auf nur noch `color` verschlankt.
-  - Dabei bestätigt: Notizen waren nie auf eine einzige Graph-Verbindung limitiert -
-    `buildEdges()` iteriert bereits über das komplette `outgoingLinks`-Array jeder Notiz, der
-    „neuronales Netzwerk"-Look mit beliebig vielen Querverlinkungen bleibt also voll unterstützt.
-  - Verifiziert: Typecheck/Lint/Backend-Build alle sauber, Migration angewendet und per psql
-    bestätigt, Playwright-Live-Lauf 5/5 PASS (kein Form-Button mehr, Farbschema-Button + Optionen
-    vorhanden, Klick auf Notiz wechselt zur Listenansicht, kein Aussehen-Seitenpanel mehr).
+- **Unraid/Docker-Distributionsweg** - erster echter Aufbau des „Customer distribution concept"
+  aus der CLAUDE.md (nur die Unraid/Docker-Seite; der Windows-Installer ist weiterhin ein Plan):
+  - `backend/Dockerfile.prod`: Multi-Stage-Build (Node baut das Frontend, .NET veröffentlicht das
+    Backend, das `dist/` des Frontends landet als `wwwroot` im Runtime-Image). Die Runtime-Stufe
+    installiert `libgssapi-krb5-2` - Npgsql lädt sie beim Verbindungsaufbau selbst bei reiner
+    Passwort-Authentifizierung, und dem schlanken `aspnet:10.0`-Image fehlt sie (zeigte sich als
+    `libgssapi_krb5.so.2: cannot open shared object file` direkt bei der Start-Migration).
+  - `Program.cs`: `UseStaticFiles()` + `MapFallbackToFile("index.html")`, nach allen API-/Hub-/
+    `/healthz`-Routen registriert, damit sie diese nie überdecken; nur aktiv, wenn `wwwroot`
+    existiert, im Dev-Stack (mit separatem Vite-Container) also ein No-Op.
+  - `docker-compose.prod.yml` (generischer Self-Host-Weg mit mitgelieferter Postgres; optionale
+    Profile `whisper` und `caddy`), `Caddyfile.prod` (`tls internal { on_demand }`, ein einziger
+    Upstream), `.env.prod.example` und eine `.dockerignore` im Repo-Root (der Build-Kontext auf
+    Repo-Ebene schickte sonst `frontend/node_modules` an den Daemon und scheiterte mit
+    `invalid file request`).
+  - `unraid/milepoint.xml.template`: Community-Applications-Template als Einzelcontainer nach
+    Fluxos Muster, erwartet externe Postgres und Redis. Die Recherche ergab, dass Unraids
+    Compose-Manager-Plugin kein standardisiertes CA-Manifestformat für Multi-Container-Stacks hat -
+    das ursprünglich geplante „ein Compose-Stack = eine App" ist also kein echter One-Click-Weg.
+    Whisper-/OpenAI-/Google-Einstellungen sind bewusst keine Container-Felder, sondern
+    datenbankgestützte Admin-Einstellungen.
+  - `Program.cs`: fehlt `ConnectionStrings:Postgres`, wird er aus
+    `ConnectionStrings:Postgres_Host/_Port/_Database/_Username/_Password` zusammengesetzt (die
+    einzelnen beschrifteten Felder des Templates). Compose setzt weiterhin den kompletten String
+    direkt und gewinnt, wenn er vorhanden ist.
+  - `.github/workflows/release.yml`: tag-getriggert (`v*`); baut und pusht
+    `ghcr.io/sushiflux-develop/milepoint`, schreibt `version.txt` aus dem Tag, rendert die XML
+    (`__VERSION__`-Platzhalter), hängt sie an das Release; `-rcN`-Tags erzeugen ein Draft-/
+    Prerelease, einfache Tags ein öffentliches Release und verschieben `latest`. Ein angehängtes
+    `-unraid`/`-windows`-Tag-Segment begrenzt den Build auf eine Plattform (die Konvention „RC
+    Unraid / RC Windows / RC = beides" aus der globalen CLAUDE.md). Noch nicht in GitHub Actions
+    gelaufen - nur YAML-validiert und die Einzelteile lokal getestet (Image-Build, XML-Rendering,
+    Start gegen externe Postgres, statische Dateien + SPA-Fallback liefern jeweils 200).
+- **Repository nach `github.com/SushiFlux-Develop/Milepoint` umgezogen** (neues Repo + Push der
+  vollständigen Historie; der alte `SynShiftLabs`-Account war über den `gh`-Login nicht
+  erreichbar, ein GitHub-Transfer war daher nicht möglich). `origin` nutzt jetzt SSH mit einem
+  neuen persönlichen Schlüssel.
+
+🔧 Behoben
+
+- **`frontend/package-lock.json` war nicht mit `package.json` synchron** (`@playwright/test` wurde
+  in `package.json` ergänzt, ohne die Lock-Datei zu aktualisieren), wodurch `npm ci` - das
+  Dockerfile.prod verwendet - mit `Missing: @playwright/test@1.63.0 from lock file` scheiterte.
+  Neu erzeugt, und `npm audit fix` behob einen hochgradigen transitiven
+  `brace-expansion`-ReDoS/DoS-Hinweis (jetzt 0 Schwachstellen).
+- **`Caddyfile`: `auto_https disable_redirects`** - Caddys automatische HTTP-zu-HTTPS-Weiterleitung
+  kennt den nicht standardmäßigen `CADDY_HTTPS_PORT` nicht und erzeugte eine eigene 308-Weiterleitung
+  ohne Port, die Vorrang vor dem expliziten `:80`-Block hatte; mit der Abschaltung greift nur noch
+  der portbewusste Block. (Bereits vorhandene, nicht committete Änderung, die dieser Commit
+  mitnimmt.)
+- **`CHANGELOG.dev.md` selbst repariert**: der englische Eintrag `v2026.9.77` fehlte komplett
+  (die damalige Ersetzung schlug wegen zwei Treffern fehl, nur der deutsche kam durch), und in der
+  deutschen Sektion stand `v2026.9.78` hinter `v2026.9.77` statt davor. Der englische v77-Eintrag
+  wurde nachgetragen (aus dem deutschen rekonstruiert), die Reihenfolge ist jetzt überall 79, 78,
+  77, 76.
+
+🔄 Geändert
+
+- `.gitignore`: `.env.prod`, `dist/` und `*.docker-image.tar` ergänzt (Pipeline-Artefakte).
+- `CLAUDE.md`: Distributions-Abschnitt auf den tatsächlichen Stand gebracht, der veraltete Satz
+  „belegte Ports bekommen einen automatischen Fallback" durch das Verhalten der festen
+  Port-Registry und die drei erreichbaren Hostnamen ersetzt.
 
 ## v2026.9.78 - 2026-09-18 22:22
 
@@ -974,6 +1099,42 @@ herausstellte, dass es mit dem eigenen Pi-hole-Router dieses Nutzers kollidiert 
 projekt-lokaler, geteilter `infra`-Docker-Stack (dnsmasq + ein zentraler Caddy), der
 `*.sushifluxdevelop` auflösen sollte, ohne das Pi-hole anzufassen - verworfen, nachdem sich zeigte,
 dass das Pi-hole dieselbe Wildcard-Funktion bereits selbst nativ unterstützt.
+
+## v2026.9.77 - 2026-09-18 15:20
+
+🗑️ Entfernt
+
+- **Notiz-Erscheinungsbild-Extras (Form/Linienstil/Pfeilspitzen/Linienbreite/-farbe,
+  Pro-Verbindung-Overrides) komplett entfernt - Graph-Knoten sind wieder schlichte farbige Kreise
+  mit Titel-Label darunter.** Vervollständigt den rein backend-seitigen Rückbau des vorherigen
+  Commits um die dazugehörige Frontend-Anpassung (beide waren durch eine Session-Limit-
+  Unterbrechung auseinandergelaufen - das Frontend rief noch einen Vertrag auf, den das Backend
+  nicht mehr implementierte; `npx tsc -b` deckte das mit `TS2739`-Fehlern auf dem verschlankten
+  `NoteAppearanceFields` auf).
+  - **Backend**: `Models/NoteShape.cs`, `NoteEdgeStyle.cs`, `NoteEdgeArrow.cs`,
+    `NoteEdgeOverride.cs` gelöscht; `Note`/`NoteDto`/`UpdateNoteRequest`/`CreateNoteRequest`
+    behalten nur noch `Color`. Neue EF-Core-Migration `RemoveNoteAppearanceExtras` für beide
+    Provider (Postgres + SqlServer) entfernt die Spalten `Shape`/`EdgeStyle`/`EdgeArrow`/
+    `EdgeWidth`/`EdgeColor` sowie die Tabelle `NoteEdgeOverrides` - live angewendet und per
+    `psql \d "Notes"` verifiziert.
+  - **Frontend**: `api/notes.ts`s `NoteAppearanceFields` verschlankt auf
+    `{ color: string | null }`; `api/types.ts`s `Note` verliert `shape`/`edgeStyle`/`edgeArrow`/
+    `edgeWidth`/`edgeColor` sowie die nun ungenutzten Typen `NoteShape`/`NoteEdgeStyle`/
+    `NoteEdgeArrow`/`NoteEdgeOverride`. `notesGraph/GraphSidePanel.tsx`, `NoteAppearanceMenu.tsx`,
+    `EdgeOverridePanel.tsx`, `ShapePickerPanel.tsx`, `edgeStyles.tsx`, `shapeOptions.ts`,
+    `shapePreview.tsx` komplett gelöscht. `notesGraph/NoteNodeShape.tsx` neu geschrieben: fester
+    Kreis-Radius + Titel-Label darunter (keine Form-Varianten mehr). `NoteGraphView.tsx` neu
+    geschrieben: Verbindungslinien jetzt als schlichte `<line>`-Elemente Mittelpunkt-zu-
+    Mittelpunkt (keine Anker-Box-Clipping-Logik/Marker/Gradienten mehr), Klick auf einen Knoten
+    ruft direkt `onSelectNote` auf statt ein Seitenpanel zu öffnen. `NotesView.tsx`s
+    Farbschema/Form-Segmented-Control ist jetzt ein einzelner Farbschema-Button;
+    `appearanceOf()`/`DEFAULT_APPEARANCE` auf nur noch `color` verschlankt.
+  - Dabei bestätigt: Notizen waren nie auf eine einzige Graph-Verbindung limitiert -
+    `buildEdges()` iteriert bereits über das komplette `outgoingLinks`-Array jeder Notiz, der
+    „neuronales Netzwerk"-Look mit beliebig vielen Querverlinkungen bleibt also voll unterstützt.
+  - Verifiziert: Typecheck/Lint/Backend-Build alle sauber, Migration angewendet und per psql
+    bestätigt, Playwright-Live-Lauf 5/5 PASS (kein Form-Button mehr, Farbschema-Button + Optionen
+    vorhanden, Klick auf Notiz wechselt zur Listenansicht, kein Aussehen-Seitenpanel mehr).
 
 ## v2026.9.76 - 2026-09-17 21:18
 

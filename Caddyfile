@@ -1,5 +1,11 @@
 {
 	admin off
+	# Caddys eigener automatischer HTTP->HTTPS-Redirect (Standardverhalten fuer jede Site mit
+	# automatischem HTTPS) kennt den tatsaechlich verwendeten, nicht-standardmaessigen HTTPS-Port
+	# (CADDY_HTTPS_PORT) nicht und erzeugt einen eigenen 308-Redirect OHNE Port, der Vorrang vor
+	# dem eigenen ":80"-Block unten hat - "disable_redirects" schaltet das ab, damit ausschliesslich
+	# der eigene ":80"-Block (der den Port korrekt anhaengt) greift.
+	auto_https disable_redirects
 }
 
 # Plain HTTP just redirects to HTTPS - CADDY_HTTPS_PORT is whatever start.ps1

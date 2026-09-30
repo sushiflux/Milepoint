@@ -28,9 +28,15 @@ not always fully up to date with the current state).
 .\start.ps1 -NoWhisper             # Start WITHOUT the self-hosted Whisper speech-to-text service (runs by default)
 ```
 
-`.env` is auto-generated from `.env.example` on first run (random passwords/JWT secret). Occupied
-ports get an automatic fallback, written back into `.env`; actual ports used are printed at the
-end of the run.
+`.env` is auto-generated from `.env.example` on first run (random passwords/JWT secret). Ports are
+**fixed**, read from the global registry `C:\Users\Flux\.claude\ports.json` (project key
+`milepoint`) and written into `.env` on every start — no more silent fallback to the next free
+port. If a registered port is genuinely occupied by something else, `start.ps1` stops with a
+message naming the conflict instead of moving to another port (bookmarked URLs stay valid).
+Reachable at `https://localhost:<CADDY_HTTPS_PORT>`, `https://milepoint.localhost:<port>`, and
+`https://milepoint.sushifluxdevelop:<port>` (the last needs the Pi-hole wildcard entry described in
+the global CLAUDE.md, and both extra names must stay listed in `Caddyfile` and
+`frontend/vite.config.ts`'s `server.allowedHosts`).
 
 Frontend (run inside the container, which has the actual `node_modules` — see the EF Core gotcha
 below for why running host-side tooling in parallel with the container is risky):
@@ -341,11 +347,25 @@ transcription provider/keys/settings) is a DB-backed singleton row behind an adm
 var — see `TranscriptionSettings` as the reference pattern. Secrets, connection strings, and
 anything needed before the DB connection exists still belong in `.env`/Compose config.
 
-### Customer distribution concept (not yet implemented — reference for future work)
+### Customer distribution concept (Unraid/Docker path implemented, Windows installer still planned)
 
-Milepoint currently only has this one Dev docker-compose.yml; nothing below exists yet
-(`docker-compose.prod.yml`, a WiX installer project, `.github/workflows/`). Captured here so the
-plan survives across sessions once the actual build-out starts:
+**Implemented (Unraid/Docker):** `backend/Dockerfile.prod` (multi-stage: builds the frontend to
+static files and embeds them into the backend image as `wwwroot`, served by `Program.cs`'s
+`UseStaticFiles()`/`MapFallbackToFile("index.html")` — a no-op in dev, where `wwwroot` doesn't
+exist), `docker-compose.prod.yml` (generic self-host path with a bundled Postgres; Caddy as an
+opt-in `caddy` profile, `Caddyfile.prod`), `.env.prod.example`, `unraid/milepoint.xml.template`
+(the actual Unraid Community Applications template — see the Unraid bullet below for why it's a
+single-container XML with an external DB, not a Compose stack) and `.github/workflows/release.yml`
+(tag-triggered: builds/pushes `ghcr.io/sushiflux-develop/milepoint`, renders the XML, publishes a
+draft GitHub Release for `-rcN` tags and a public one for plain tags; a `-unraid`/`-windows`
+suffix on the tag scopes the build to one platform, see the global CLAUDE.md's "Platform-scoped
+RC"). The repo lives at `github.com/SushiFlux-Develop/Milepoint` (moved from the old
+`SynShiftLabs` org). **Not yet exercised live:** the workflow has only been YAML-validated and its
+pieces (image build, XML render, `Program.cs` behaviour against an external Postgres) run locally —
+the first real `-rcN-unraid` tag push is its first actual GitHub Actions run.
+
+**Still only a plan:** the WiX installer project below. Captured here so the plan survives across
+sessions once that build-out starts:
 
 - **MSSQL is no longer part of the everyday dev stack.** It sits behind the `mssql-check` Compose
   profile (`docker compose --profile mssql-check up -d mssql`, or `start.ps1 -MssqlCheck` — same
@@ -379,17 +399,22 @@ plan survives across sessions once the actual build-out starts:
   Docker-Desktop licensing caveat that used to apply to an earlier "bundle Docker Desktop on
   Windows" idea is moot — neither platform touches Docker Desktop (Windows is IIS-native, Unraid
   uses the Docker Engine directly).
-- **Unraid**: stays Docker-based, via the **Docker Compose plugin** (one compose stack shows up as
-  one app in the Unraid UI) rather than several separate Community Applications templates for the
-  individual services — closer to the "just install Milepoint, everything else is automatic" goal
-  than a multi-template spread. TLS default is **no bundled Caddy** — Unraid users commonly
-  already run a shared reverse proxy (SWAG or Nginx Proxy Manager) handling Let's Encrypt
-  centrally for every app; Milepoint should slot into that instead of forcing its own TLS. Caddy
-  stays available as an opt-in Compose profile (toggle in the CA template, default off) for users
-  without an existing reverse proxy who want instant HTTPS. Rough CA template field list: DB
-  provider choice (Postgres/MSSQL) + its credentials, Redis toggle (on by default, needed for
-  SignalR), HTTP port, "enable bundled Caddy/HTTPS" toggle (off by default) + its port when on,
-  Whisper toggle (off by default, with a resource-cost hint), data-directory volume mappings.
+- **Unraid** (implemented — the original plan here was a Docker Compose plugin stack shown as one
+  app, but research found Unraid's Compose Manager plugin has **no standardized Community
+  Applications manifest format for multi-container stacks**, so that isn't a real one-click path).
+  What shipped instead follows Fluxo's proven pattern: **one single-container CA XML**
+  (`unraid/milepoint.xml.template`) for the backend container (which already serves the frontend
+  itself), expecting an **external Postgres** and **external Redis** the user runs separately
+  (e.g. the official CA containers). The Postgres connection is exposed as five separate labeled
+  fields (`ConnectionStrings__Postgres_Host/_Port/_Database/_Username/_Password`) that
+  `Program.cs` assembles into one connection string when `ConnectionStrings__Postgres` itself is
+  absent (Compose keeps setting that directly and wins if present). MSSQL is not offered on
+  Unraid — Postgres only. Whisper/OpenAI/Google transcription is **not** a container setting: the
+  provider and its URL/keys are DB-backed admin settings configured in the running app (see
+  "Voice dictation"), so the template has no field for it. TLS default is **no bundled Caddy** —
+  Unraid users commonly already run a shared reverse proxy (SWAG or Nginx Proxy Manager); the
+  bundled Caddy only exists as the opt-in `caddy` profile in `docker-compose.prod.yml` (the
+  generic bundled-DB self-host path, e.g. via Compose Manager or any other Docker host).
 - **RC-Commit must also produce an Unraid XML template** (explicit user request) — the user copies
   it by hand onto their own Unraid box to test it there before anything goes out to the public
   Community Applications feed. A V-Commit/V-Tag is the point that template actually gets pushed to

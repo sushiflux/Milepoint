@@ -1,0 +1,41 @@
+# Multi-stage production build - builds the frontend to static files and embeds them into the
+# backend image, so the customer-facing distribution needs only this one container (plus
+# Postgres/Redis/optional Whisper) instead of separate frontend/Caddy containers - see
+# "Customer distribution concept" in CLAUDE.md for the rationale.
+
+# --- Stage 1: build the frontend to static files ---
+FROM node:24-alpine AS frontend-build
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
+
+# --- Stage 2: build the backend ---
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS backend-build
+WORKDIR /src
+COPY backend/Milepoint.sln .
+COPY backend/src/Milepoint.Api/Milepoint.Api.csproj src/Milepoint.Api/
+RUN dotnet restore src/Milepoint.Api/Milepoint.Api.csproj
+COPY backend/ .
+WORKDIR /src/src/Milepoint.Api
+RUN dotnet publish -c Release -o /app/publish --no-restore
+
+# --- Stage 3: runtime ---
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+# Npgsql loads libgssapi_krb5 at connection time to probe for Kerberos/GSSAPI auth support, even
+# when the actual connection uses plain password auth - the slim aspnet runtime image doesn't
+# include it by default, which surfaces as "libgssapi_krb5.so.2: cannot open shared object file"
+# right when the startup migration tries to connect, not as a missing-package error at build time.
+RUN apt-get update && apt-get install -y --no-install-recommends libgssapi-krb5-2 \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=backend-build /app/publish .
+# The frontend's built static files (index.html, hashed JS/CSS bundles) land in wwwroot -
+# Program.cs's UseStaticFiles()/MapFallbackToFile("index.html") serve them from there.
+COPY --from=frontend-build /frontend/dist ./wwwroot
+
+ENV ASPNETCORE_URLS=http://+:8080
+EXPOSE 8080
+
+ENTRYPOINT ["dotnet", "Milepoint.Api.dll"]

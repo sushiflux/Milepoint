@@ -1,0 +1,30 @@
+{
+	admin off
+	auto_https disable_redirects
+}
+
+# Plain HTTP redirects to HTTPS - CADDY_HTTPS_PORT is whatever the user's .env maps on the host.
+:80 {
+	redir https://{host}:{$CADDY_HTTPS_PORT}{uri} permanent
+}
+
+# No hostname match here (unlike the dev Caddyfile's "localhost:443") - a production deployment
+# is reached via whatever hostname/IP the user actually configured (their own domain, their
+# Unraid box's LAN IP, etc.), which isn't known in advance. "tls internal { on_demand }" issues a
+# locally-trusted cert for whatever name the request actually arrives on instead of requiring one
+# fixed hostname up front.
+:443 {
+	tls internal {
+		on_demand
+	}
+
+	# Everything (API, SignalR hub, and the static frontend) lives behind this one backend
+	# container now - see Dockerfile.prod/Program.cs's UseStaticFiles()/MapFallbackToFile. No
+	# separate frontend upstream to route to.
+	reverse_proxy backend:8080
+
+	log {
+		output stdout
+		format console
+	}
+}

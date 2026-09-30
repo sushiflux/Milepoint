@@ -1,0 +1,16 @@
+# Used by backend/Dockerfile.prod's repo-root build context (needs both frontend/ and backend/
+# in one context for its multi-stage build) - keeps host-side build artifacts and dev-only state
+# out of what gets sent to the Docker daemon.
+.git/
+**/node_modules/
+**/bin/
+**/obj/
+**/dist/
+**/.vite/
+frontend/e2e/
+.env
+.env.local
+.env.prod
+*.local.json
+.backups/
+docs/
