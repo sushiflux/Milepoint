@@ -18,6 +18,22 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.9.81 - 2026-09-30 20:15
+
+✨ New
+- **Auto-generated JWT signing key** (`Program.cs`): if `JWT_SIGNING_KEY` is empty, a random 48-byte
+  key (base64) is generated once and stored in `${DATA_DIR:-/data}/jwt-signing.key` (mode 600), so
+  every install gets its own key and logins survive restarts. If the data directory is not writable
+  the app still starts with an in-memory key and logs a warning. Verified with the prod image on a
+  fresh DB (file created, identical after restart, admin login returns a token).
+- Unraid template: new required path `/data` (default `/mnt/user/appdata/milepoint`); the JWT key
+  field is now optional/advanced.
+
+🔄 Changed
+- **CORS origins are optional** (Unraid template + `.env.prod.example`): the backend serves the UI
+  itself (same origin), so an empty `CORS_ALLOWED_ORIGINS` is the normal case; the field is now
+  advanced/optional and only needed for additional origins.
+
 ## v2026.9.80 - 2026-09-30 18:45
 
 ✨ New
@@ -983,6 +999,23 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.9.81 - 2026-09-30 20:15
+
+✨ Neu
+- **Automatisch erzeugter JWT-Schlüssel** (`Program.cs`): Ist `JWT_SIGNING_KEY` leer, wird einmalig ein
+  zufälliger 48-Byte-Schlüssel (Base64) erzeugt und in `${DATA_DIR:-/data}/jwt-signing.key` (Modus 600)
+  abgelegt. Jede Installation bekommt so einen eigenen Schlüssel, Logins überleben Neustarts. Ist der
+  Datenordner nicht beschreibbar, startet die App trotzdem mit einem Schlüssel im Speicher und warnt
+  im Log. Mit dem Prod-Image auf frischer DB geprüft (Datei angelegt, nach Neustart identisch,
+  Admin-Login liefert ein Token).
+- Unraid-Vorlage: neuer Pflichtpfad `/data` (Standard `/mnt/user/appdata/milepoint`); das
+  JWT-Key-Feld ist jetzt optional/erweitert.
+
+🔄 Geändert
+- **CORS-Origins sind optional** (Unraid-Vorlage + `.env.prod.example`): Das Backend liefert die
+  Oberfläche selbst aus (gleicher Origin), ein leeres `CORS_ALLOWED_ORIGINS` ist der Normalfall; das
+  Feld ist jetzt erweitert/optional und nur für zusätzliche Origins nötig.
 
 ## v2026.9.80 - 2026-09-30 18:45
 

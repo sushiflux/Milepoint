@@ -34,8 +34,38 @@ if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Postgre
 }
 
 var dbProvider = (builder.Configuration["DB_PROVIDER"] ?? "postgres").ToLowerInvariant();
-var jwtSigningKey = builder.Configuration["JWT_SIGNING_KEY"]
-    ?? throw new InvalidOperationException("JWT_SIGNING_KEY ist nicht gesetzt.");
+var jwtSigningKey = builder.Configuration["JWT_SIGNING_KEY"];
+if (string.IsNullOrWhiteSpace(jwtSigningKey))
+{
+    // No key configured (e.g. a fresh Unraid install): generate a random one once and keep it in
+    // the data directory, so every installation gets its own key and logins survive restarts.
+    var keyFile = Path.Combine(builder.Configuration["DATA_DIR"] ?? "/data", "jwt-signing.key");
+    try
+    {
+        if (File.Exists(keyFile))
+        {
+            jwtSigningKey = File.ReadAllText(keyFile).Trim();
+        }
+        if (string.IsNullOrWhiteSpace(jwtSigningKey) || jwtSigningKey.Length < 32)
+        {
+            jwtSigningKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(48));
+            Directory.CreateDirectory(Path.GetDirectoryName(keyFile)!);
+            File.WriteAllText(keyFile, jwtSigningKey);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+        // Data directory not writable: still start, but the key only lives until the next restart.
+        Console.Error.WriteLine($"WARNUNG: JWT-Schlüssel kann nicht in '{keyFile}' gespeichert werden ({ex.Message}) - " +
+            "er gilt nur bis zum nächsten Neustart, danach müssen sich alle Nutzer neu anmelden. " +
+            "Einen Datenordner nach /data mounten oder JWT_SIGNING_KEY setzen.");
+        jwtSigningKey ??= Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(48));
+    }
+}
 var jwtIssuer = builder.Configuration["JWT_ISSUER"] ?? "milepoint-api";
 var jwtAudience = builder.Configuration["JWT_AUDIENCE"] ?? "milepoint-client";
 

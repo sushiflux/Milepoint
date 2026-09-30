@@ -91,23 +91,33 @@
 
   <!-- JWT / Auth -->
   <Config
-    Name="JWT Signing Key"
+    Name="JWT Signing Key (optional)"
     Target="JWT_SIGNING_KEY"
     Default=""
-    Description="Mindestens 32 zufällige Zeichen zum Signieren der Login-Tokens - z.B. mit 'openssl rand -base64 32' erzeugen. Einmal gesetzt nicht mehr ändern, sonst werden alle bestehenden Logins ungültig."
+    Description="Normalerweise leer lassen: Milepoint erzeugt beim ersten Start automatisch einen eigenen, zufälligen Schlüssel und speichert ihn im Datenordner. Nur setzen, wenn du einen festen Schlüssel vorgeben willst (mindestens 32 Zeichen). Ändert sich der Schlüssel, werden alle bestehenden Logins ungültig."
     Type="Variable"
-    Display="always"
-    Required="true"
+    Display="advanced"
+    Required="false"
     Mask="true"></Config>
 
   <Config
-    Name="CORS Erlaubte Origins"
-    Target="CORS_ALLOWED_ORIGINS"
-    Default=""
-    Description="Die URL, unter der du Milepoint im Browser aufrufst, z.B. https://milepoint.example.com oder http://192.168.178.115:8080 - mehrere Adressen kommagetrennt."
-    Type="Variable"
+    Name="Datenordner"
+    Target="/data"
+    Default="/mnt/user/appdata/milepoint"
+    Description="Hier legt Milepoint den automatisch erzeugten JWT-Schlüssel ab. Muss erhalten bleiben, sonst müssen sich nach einer Neuinstallation alle Nutzer neu anmelden."
+    Type="Path"
     Display="always"
     Required="true"
+    Mode="rw">/mnt/user/appdata/milepoint</Config>
+
+  <Config
+    Name="CORS Zusätzliche Origins (optional)"
+    Target="CORS_ALLOWED_ORIGINS"
+    Default=""
+    Description="Normalerweise leer lassen: Milepoint liefert die Oberfläche selbst aus, der Aufruf über die IP/den Port des Containers (oder deinen Reverse Proxy) funktioniert ohne Eintrag. Nur nötig, wenn ein Browser die API von einer anderen Adresse aus anspricht, z.B. https://milepoint.example.com - mehrere Adressen kommagetrennt."
+    Type="Variable"
+    Display="advanced"
+    Required="false"
     Mask="false"></Config>
 
   <!-- Admin-Konto (nur beim allerersten Start verwendet) -->

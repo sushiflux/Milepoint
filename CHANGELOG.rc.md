@@ -14,7 +14,7 @@ that matters to you as a Milepoint user since the last entry in [CHANGELOG.md](C
 (v2026.8.66). A release candidate is a test build, not a final release: when it is released, this
 summary moves into `CHANGELOG.md` under the release's version number.
 
-## v2026.9.80-rc1 (Unraid)
+## v2026.9.80-rc2 (Unraid)
 
 ✨ New
 
@@ -36,7 +36,7 @@ summary moves into `CHANGELOG.md` under the release's version number.
   default.
 - **Ready-made Unraid installation**: Milepoint now ships as a Docker image with a template for
   Unraid's Community Applications. A single container serves the whole app; you connect it to your
-  own PostgreSQL and Redis and set the first admin login right in the template.
+  own PostgreSQL and Redis and set the first admin login right in the template. The key that signs logins is generated automatically on first start and is different for every installation; you no longer have to enter an extra address for access.
 
 🔄 Change
 
@@ -67,7 +67,7 @@ alles, was für dich als Milepoint-Nutzer seit dem letzten Eintrag in
 kein fertiges Release: Beim Release wandert diese Übersicht unter der Versionsnummer des Releases
 in die `CHANGELOG.md`.
 
-## v2026.9.80-rc1 (Unraid)
+## v2026.9.80-rc2 (Unraid)
 
 ✨ Neu
 
@@ -93,7 +93,7 @@ in die `CHANGELOG.md`.
 - **Fertige Unraid-Installation**: Milepoint gibt es jetzt als Docker-Image mit einer Vorlage für
   die Community Applications von Unraid. Ein einziger Container liefert die ganze App aus; du
   verbindest ihn mit deiner eigenen PostgreSQL und deinem Redis und legst den ersten Admin-Login
-  direkt in der Vorlage fest.
+  direkt in der Vorlage fest. Der Schlüssel zum Signieren der Logins wird beim ersten Start automatisch erzeugt und ist für jede Installation anders; eine zusätzliche Adresse für den Zugriff musst du nicht mehr eintragen.
 
 🔄 Geändert
 
