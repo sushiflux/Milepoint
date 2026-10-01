@@ -1,7 +1,8 @@
 import React, { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import * as signalR from '@microsoft/signalr'
 import { createWorkItem, deleteWorkItem, moveWorkItem, updateWorkItem } from '../api/workItems'
-import type { Board, BoardColumn, BoardColumnType, WorkItem, WorkItemCategory, WorkItemPriority } from '../api/types'
+import type { Board, BoardColumn, BoardColumnType, ProjectCategory, WorkItem, WorkItemCategory, WorkItemPriority } from '../api/types'
+import { categoryBadgeClass } from '../lib/categoryColors'
 import type { UserSummary } from '../api/users'
 import { createKanbanConnection } from '../realtime/signalr'
 import { useAuth } from '../context/AuthContext'
@@ -13,6 +14,8 @@ interface Props {
   board: Board
   items: WorkItem[]
   users: UserSummary[]
+  // The project's categories ("Typ"), hidden ones included - see ProjectCategory.
+  categories: ProjectCategory[]
   onItemsChange: Dispatch<SetStateAction<WorkItem[]>>
 }
 
@@ -42,9 +45,7 @@ const SORT_LABELS: Record<SortKey, string> = {
 }
 
 const PRIORITY_ORDER: Record<WorkItemPriority, number> = { Urgent: 0, High: 1, Medium: 2, Low: 3 }
-const CATEGORY_ORDER: Record<string, number> = { Feature: 0, Bug: 1, Chore: 2 }
 const PRIORITY_OPTIONS: WorkItemPriority[] = ['Urgent', 'High', 'Medium', 'Low']
-const CATEGORY_OPTIONS: WorkItemCategory[] = ['Feature', 'Bug', 'Chore']
 
 function toggleInSet<T>(set: Set<T>, value: T) {
   const next = new Set(set)
@@ -54,14 +55,14 @@ function toggleInSet<T>(set: Set<T>, value: T) {
 }
 
 
-function compareItems(a: WorkItem, b: WorkItem, sortBy: SortKey, users: UserSummary[]): number {
+function compareItems(a: WorkItem, b: WorkItem, sortBy: SortKey, users: UserSummary[], categoryOrder: Record<string, number>): number {
   switch (sortBy) {
     case 'referenceCode':
       return a.referenceCode.localeCompare(b.referenceCode, undefined, { numeric: true })
     case 'priority':
       return PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]
     case 'category':
-      return (CATEGORY_ORDER[a.category ?? ''] ?? 99) - (CATEGORY_ORDER[b.category ?? ''] ?? 99)
+      return (categoryOrder[a.category ?? ''] ?? 99) - (categoryOrder[b.category ?? ''] ?? 99)
     case 'title':
       return a.title.localeCompare(b.title, 'de')
     case 'assignee': {
@@ -74,7 +75,7 @@ function compareItems(a: WorkItem, b: WorkItem, sortBy: SortKey, users: UserSumm
   }
 }
 
-export default function KanbanBoard({ board, items, users, onItemsChange }: Props) {
+export default function KanbanBoard({ board, items, users, categories, onItemsChange }: Props) {
   const { token } = useAuth()
   const { getPreference, setPreference } = usePreferences()
   const [newTitleByColumn, setNewTitleByColumn] = useState<Record<string, string>>({})
@@ -98,6 +99,18 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
   const [columnContextMenu, setColumnContextMenu] = useState<{ x: number; y: number; column: BoardColumn } | null>(null)
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<WorkItem | null>(null)
   const [editTarget, setEditTarget] = useState<WorkItem | null>(null)
+
+  // Per-project configuration: hidden columns are not shown (and hold no cards), hidden categories
+  // can't be newly assigned but still show on cards that already carry them.
+  const visibleColumns = useMemo(() => board.columns.filter((c) => !c.isHidden), [board.columns])
+  const selectableCategories = useMemo(() => categories.filter((c) => !c.isHidden), [categories])
+  const categoryOrder = useMemo(() => Object.fromEntries(categories.map((c, i) => [c.name, i])) as Record<string, number>, [categories])
+  const categoryClass = (name: string) => categoryBadgeClass(categories.find((c) => c.name === name)?.color)
+  // Options for a card's category select: the selectable ones, plus its current (hidden) one.
+  const categoryOptionsFor = (current: string | null) =>
+    current && !selectableCategories.some((c) => c.name === current)
+      ? [...selectableCategories.map((c) => c.name), current]
+      : selectableCategories.map((c) => c.name)
   const [editTitle, setEditTitle] = useState('')
   const [editDescription, setEditDescription] = useState('')
 
@@ -400,10 +413,10 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
       map.set(item.columnId, list)
     }
     for (const list of map.values()) {
-      list.sort((a, b) => compareItems(a, b, sortBy, users))
+      list.sort((a, b) => compareItems(a, b, sortBy, users, categoryOrder))
     }
     return map
-  }, [items, searchQuery, filterPriorities, filterCategories, filterAssignees, sortBy, users])
+  }, [items, searchQuery, filterPriorities, filterCategories, filterAssignees, sortBy, users, categoryOrder])
 
   async function handleCreate(column: BoardColumn) {
     const title = (newTitleByColumn[column.id] ?? '').trim()
@@ -608,18 +621,6 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
     Urgent: 'bg-rose-50 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 font-semibold',
   }
 
-  const CATEGORY_LABELS: Record<WorkItemCategory, string> = {
-    Feature: 'Feature',
-    Bug: 'Bug',
-    Chore: 'Chore',
-  }
-
-  const CATEGORY_COLORS: Record<WorkItemCategory, string> = {
-    Feature: 'bg-violet-50 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300 font-semibold',
-    Bug: 'bg-rose-50 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300 font-semibold',
-    Chore: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 font-semibold',
-  }
-
   const COLUMN_BORDER_COLORS: Record<string, string> = {
     Todo: 'bg-yellow-400 dark:bg-yellow-500',
     InProgress: 'bg-blue-400 dark:bg-blue-500',
@@ -735,7 +736,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
 
               <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-300">Typ</p>
               <div className="mb-4 flex flex-wrap gap-1.5">
-                {CATEGORY_OPTIONS.map((c) => (
+                {selectableCategories.map((cat) => cat.name).map((c) => (
                   <button
                     key={c}
                     type="button"
@@ -746,7 +747,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                         : 'border border-slate-200/80 bg-slate-100/50 text-slate-700 hover:bg-slate-200/60 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-200'
                     }`}
                   >
-                    {CATEGORY_LABELS[c]}
+                    {c}
                   </button>
                 ))}
               </div>
@@ -817,7 +818,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
           ))}
           {[...filterCategories].map((c) => (
             <span key={c} className="inline-flex items-center gap-1 rounded-full bg-slate-200/80 px-2.5 py-0.5 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-              {CATEGORY_LABELS[c]}
+              {c}
               <button type="button" onClick={() => setFilterCategories((prev) => toggleInSet(prev, c))} className="hover:text-red-500">✕</button>
             </span>
           ))}
@@ -838,7 +839,7 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
       </div>
 
     <div className="flex flex-1 min-h-0 gap-5 overflow-x-auto pb-8 pt-2 pl-2">
-      {board.columns.map((column) => (
+      {visibleColumns.map((column) => (
         <section
           key={column.id}
           data-column-id={column.id}
@@ -917,9 +918,9 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                     className="w-full rounded-lg border bg-transparent px-2 py-1.5 text-xs text-slate-700 focus:border-brand-primary focus:outline-none focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-600 dark:text-slate-100"
                   >
                     <option value="" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Kein Typ</option>
-                    <option value="Feature" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Feature</option>
-                    <option value="Bug" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Bug</option>
-                    <option value="Chore" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Chore</option>
+                    {categoryOptionsFor(null).map((name) => (
+                      <option key={name} value={name} className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">{name}</option>
+                    ))}
                   </select>
                 </div>
                 <div className="mt-3 flex items-center justify-end gap-2">
@@ -1019,16 +1020,16 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
                             className="absolute inset-0 z-10 w-full h-full cursor-pointer opacity-0"
                           >
                             <option value="" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Kein Typ</option>
-                            <option value="Feature" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Feature</option>
-                            <option value="Bug" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Bug</option>
-                            <option value="Chore" className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">Chore</option>
+                            {categoryOptionsFor(item.category).map((name) => (
+                              <option key={name} value={name} className="text-slate-900 bg-white dark:text-slate-100 dark:bg-slate-800">{name}</option>
+                            ))}
                           </select>
                           <span
                             className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
-                              item.category ? CATEGORY_COLORS[item.category] : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-300'
+                              item.category ? categoryClass(item.category) : 'bg-slate-50 text-slate-500 dark:bg-slate-800/50 dark:text-slate-300'
                             }`}
                           >
-                            {item.category ? CATEGORY_LABELS[item.category] : '+ Typ'}
+                            {item.category ?? '+ Typ'}
                           </span>
                         </div>
                       </div>
@@ -1108,8 +1109,8 @@ export default function KanbanBoard({ board, items, users, onItemsChange }: Prop
               {activeDrag.item.priority}
             </span>
             {activeDrag.item.category && (
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${CATEGORY_COLORS[activeDrag.item.category]}`}>
-                {CATEGORY_LABELS[activeDrag.item.category]}
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${categoryClass(activeDrag.item.category)}`}>
+                {activeDrag.item.category}
               </span>
             )}
           </div>

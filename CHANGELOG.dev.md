@@ -18,6 +18,51 @@ version is always computable (today's year/month plus the current year's commit 
 before that commit actually exists yet, so it's headed with its real number rather than a
 placeholder.
 
+## v2026.10.83 - 2026-10-01 10:03
+
+✨ New
+- **Per-project Kanban columns and categories** (`BoardColumnsController`, `ProjectCategoriesController`,
+  `ProjectCategoryService`, `ProjectSettingsView` with `ColumnsSettings`/`CategoriesSettings`): the
+  four built-in columns (`BoardColumn.IsDefault`) and Feature/Bug/Chore can only be hidden/shown;
+  custom columns (name + `BoardColumnType`, reorder via `PUT .../columns/order`) and custom
+  categories (name + palette colour token, `lib/categoryColors.ts`) can be added/renamed/deleted.
+  Server rules: only Projektleiter/Admin may change anything (`[Authorize(Roles)]`); hide/delete a
+  column only while empty (409 with count); at least one visible Todo and one Done column remain;
+  hidden columns reject create/move (`WorkItemsController`); a category can't be deleted while cards
+  use it; a rename updates the cards. `KanbanBoard` renders only visible columns and takes its
+  category options/colours from the project; `TimelineView.firstTodoColumn` skips hidden columns.
+- **Migration `ProjectCategoriesAndColumnVisibility`** (both providers, hand-edited): new
+  `ProjectCategories` table, `BoardColumns.IsDefault` (existing rows = true) / `IsHidden`, and
+  `WorkItems.Category` converted from the enum int (0/1/2) to the category name (rename column, add
+  text column, UPDATE ... CASE, drop old). `WorkItemCategory` enum removed. Default categories are
+  created lazily per project. SQL Server variant not yet run against a live SQL Server.
+- **User management** (`AdminUsersController`, `/api/admin/users`, Admin only): create user, set role,
+  reset password, delete; never self or same/higher rank (`FindModifiableAsync`), delete refused with
+  a readable message while the user owns projects. Frontend: `AdminPage` (tabs Benutzer / Rollen /
+  Spracherkennung) with a role matrix (`AdminRolesTab`); shared `TabBar` + `useUrlTab` (tab in
+  `?tab=`); personal `SettingsPage` split into Darstellung / Sicherheit.
+- **Change own password** (`POST /api/auth/change-password`, `ChangePasswordSection`): current password
+  once, new one twice, server re-checks, specific German errors.
+- **Notes autosave** (`NotesView.tsx`): debounced save ~0.9 s after the last edit through one serialized
+  promise chain (`saveQueueRef`), flush on visibilitychange/pagehide/unmount with `keepalive`
+  (`updateNote(..., { keepalive })`) and before a tab is closed; status text replaces the Save button.
+- **Sliding session + no-store**: API responses carry `Cache-Control: no-store`; once less than half of
+  `JWT_EXPIRY_MINUTES` is left a response carries `X-Refreshed-Token` (CORS-exposed) and
+  `api/client.ts` swaps it in. A 401 on a protected endpoint clears the login (`AuthContext`) and
+  `RequireAuth` redirects to the login page with `{ from, expired }`; `LoginPage` shows a hint and
+  returns to `from`. `SessionExpiredModal` removed.
+- **Auto-generated JWT key + roles**: Admin ranks above Projektleiter (`ProjectsController` treats Admin
+  as Projektleiter, seeded admin has only `Admin`); header badge shows the real role.
+- Release workflow: RC images are also pushed as the moving tag `rc` and the RC template points at it
+  (`template_tag`); target ids in the tag message (`platform:` list/`all`), release title with target.
+  Unraid template: JWT key and CORS fields optional, new `/data` path, public icon repo
+  (`Milepoint_Unraid`).
+
+🔧 Fixed
+- `frontend/.dockerignore`: `**/node_modules` (a nested `e2e/node_modules` broke the dev image build).
+- Tests: `frontend/e2e/` grew from 3 to 10 specs (admin users, change password, project settings API +
+  UI, session/cache/autosave).
+
 ## v2026.9.82 - 2026-09-30 20:25
 
 🔧 Fixed
@@ -1008,6 +1053,57 @@ jeweiligen Jahres, startet bei jedem neuen Jahr wieder bei 1) - siehe den Eintra
 lässt sich immer berechnen (aktuelles Jahr/Monat plus die Commit-Anzahl dieses Jahres), auch
 bevor dieser Commit tatsächlich existiert - deshalb steht dort die echte Nummer statt eines
 Platzhalters.
+
+## v2026.10.83 - 2026-10-01 10:03
+
+✨ Neu
+- **Spalten und Kategorien pro Projekt** (`BoardColumnsController`, `ProjectCategoriesController`,
+  `ProjectCategoryService`, `ProjectSettingsView` mit `ColumnsSettings`/`CategoriesSettings`): Die
+  vier Standard-Spalten (`BoardColumn.IsDefault`) und Feature/Bug/Chore lassen sich nur aus- und
+  einblenden; eigene Spalten (Name + `BoardColumnType`, Reihenfolge per `PUT .../columns/order`) und
+  eigene Kategorien (Name + Palettenfarbe, `lib/categoryColors.ts`) können angelegt, umbenannt und
+  gelöscht werden. Serverregeln: Nur Projektleiter/Admin dürfen ändern (`[Authorize(Roles)]`); eine
+  Spalte nur ausblenden/löschen, solange sie leer ist (409 mit Anzahl); mindestens eine sichtbare
+  Todo- und eine Done-Spalte bleiben; ausgeblendete Spalten lehnen Anlegen/Verschieben ab
+  (`WorkItemsController`); eine Kategorie ist nicht löschbar, solange Karten sie nutzen; Umbenennen
+  zieht die Karten mit. `KanbanBoard` zeigt nur sichtbare Spalten und nimmt Kategorie-Optionen und
+  -Farben aus dem Projekt; `TimelineView.firstTodoColumn` überspringt ausgeblendete Spalten.
+- **Migration `ProjectCategoriesAndColumnVisibility`** (beide Provider, von Hand angepasst): neue
+  Tabelle `ProjectCategories`, `BoardColumns.IsDefault` (vorhandene Zeilen = true) / `IsHidden` und
+  `WorkItems.Category` von der Enum-Zahl (0/1/2) auf den Kategorienamen umgestellt (Spalte umbenennen,
+  Textspalte anlegen, UPDATE ... CASE, alte löschen). Enum `WorkItemCategory` entfernt. Standardkategorien
+  entstehen pro Projekt bei Bedarf. Die SQL-Server-Variante ist noch nicht gegen einen echten SQL Server
+  gelaufen.
+- **Benutzerverwaltung** (`AdminUsersController`, `/api/admin/users`, nur Admin): Benutzer anlegen, Rolle
+  setzen, Passwort zurücksetzen, löschen; nie das eigene Konto oder gleiche/höhere Rolle
+  (`FindModifiableAsync`), Löschen wird mit lesbarer Meldung abgelehnt, solange der Benutzer Projekte
+  angelegt hat. Frontend: `AdminPage` (Reiter Benutzer / Rollen / Spracherkennung) mit Rollen-Matrix
+  (`AdminRolesTab`); gemeinsame `TabBar` + `useUrlTab` (Reiter in `?tab=`); persönliche `SettingsPage` in
+  Darstellung / Sicherheit geteilt.
+- **Eigenes Passwort ändern** (`POST /api/auth/change-password`, `ChangePasswordSection`): aktuelles
+  Passwort einmal, neues zweimal, Server prüft erneut, konkrete deutsche Fehlermeldungen.
+- **Autosave für Notizen** (`NotesView.tsx`): entprellt ~0,9 s nach der letzten Änderung über eine
+  serialisierte Promise-Kette (`saveQueueRef`), sofortiges Speichern bei visibilitychange/pagehide/Unmount
+  mit `keepalive` (`updateNote(..., { keepalive })`) und vor dem Schließen eines Tabs; Statustext ersetzt
+  den Speichern-Knopf.
+- **Gleitende Sitzung + no-store**: API-Antworten tragen `Cache-Control: no-store`; bleibt weniger als die
+  Hälfte von `JWT_EXPIRY_MINUTES`, liefert eine Antwort `X-Refreshed-Token` (CORS-freigegeben), `api/client.ts`
+  tauscht es aus. Ein 401 auf einem geschützten Endpunkt löscht den Login (`AuthContext`), `RequireAuth`
+  leitet mit `{ from, expired }` auf die Anmeldeseite, `LoginPage` zeigt einen Hinweis und kehrt zu `from`
+  zurück. `SessionExpiredModal` entfernt.
+- **Automatischer JWT-Schlüssel + Rollen**: Admin steht über Projektleiter (`ProjectsController` behandelt
+  Admin wie Projektleiter, der geseedete Admin hat nur `Admin`); das Badge in der Kopfzeile zeigt die echte
+  Rolle.
+- Release-Workflow: RC-Images werden zusätzlich als beweglicher Tag `rc` gepusht, die RC-Vorlage zeigt
+  darauf (`template_tag`); Ziel-IDs in der Tag-Nachricht (`platform:` Liste/`all`), Release-Titel mit
+  Ziel. Unraid-Vorlage: JWT-Schlüssel- und CORS-Feld optional, neuer `/data`-Pfad, öffentliches Icon-Repo
+  (`Milepoint_Unraid`).
+
+🔧 Behoben
+- `frontend/.dockerignore`: `**/node_modules` (ein verschachteltes `e2e/node_modules` ließ den Dev-Image-Build
+  scheitern).
+- Tests: `frontend/e2e/` wuchs von 3 auf 10 Specs (Benutzerverwaltung, Passwort ändern,
+  Projekt-Einstellungen API + UI, Sitzung/Cache/Autosave).
 
 ## v2026.9.82 - 2026-09-30 20:25
 

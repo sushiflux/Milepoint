@@ -2,17 +2,20 @@ import { type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { usePreferences } from '../context/PreferencesContext'
 
-type ProjectTab = 'timeline' | 'kanban' | 'notes'
+type ProjectTab = 'timeline' | 'kanban' | 'notes' | 'settings'
 
 interface Props {
   project?: { id: string; name: string } | null
   activeTab?: ProjectTab | null
+  // Projektleiter/Admin only: the project's own settings (columns, categories).
+  canManage?: boolean
 }
 
 const TAB_LABELS: Record<ProjectTab, string> = {
   timeline: 'Timeline',
   kanban: 'Kanban',
   notes: 'Notizen',
+  settings: 'Einstellungen',
 }
 
 const TAB_ICONS: Record<ProjectTab, ReactNode> = {
@@ -34,6 +37,12 @@ const TAB_ICONS: Record<ProjectTab, ReactNode> = {
       <path d="M6.75 9h6M6.75 12.25h6M6.75 15h3.5" />
     </svg>
   ),
+  settings: (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
+      <path d="M8.3 2.5h3.4l.5 2.2a5.9 5.9 0 011.6.93l2.2-.7 1.7 2.94-1.75 1.5a5.9 5.9 0 010 1.86l1.75 1.5-1.7 2.94-2.2-.7a5.9 5.9 0 01-1.6.93l-.5 2.2H8.3l-.5-2.2a5.9 5.9 0 01-1.6-.93l-2.2.7-1.7-2.94 1.75-1.5a5.9 5.9 0 010-1.86L2.3 8.87 4 5.93l2.2.7a5.9 5.9 0 011.6-.93l.5-2.2z" />
+      <circle cx="10" cy="10" r="2.5" />
+    </svg>
+  ),
 }
 
 const PREFERENCE_KEY = 'sidebarCollapsed'
@@ -46,7 +55,7 @@ function navLinkClass(active: boolean, collapsed: boolean) {
   }`
 }
 
-export default function Sidebar({ project, activeTab }: Props) {
+export default function Sidebar({ project, activeTab, canManage = false }: Props) {
   const { getPreference, setPreference } = usePreferences()
   const collapsed = getPreference(PREFERENCE_KEY, '0') === '1'
 
@@ -80,7 +89,7 @@ export default function Sidebar({ project, activeTab }: Props) {
         <div>
           {!collapsed && <p className="mb-3 truncate px-3 text-[11px] font-bold uppercase tracking-wider text-brand-accent">{project.name}</p>}
           <nav className="space-y-1">
-            {(Object.keys(TAB_LABELS) as ProjectTab[]).map((tab) => (
+            {(Object.keys(TAB_LABELS) as ProjectTab[]).filter((tab) => tab !== 'settings' || canManage).map((tab) => (
               <Link
                 key={tab}
                 to={`/projects/${project.id}/${tab}`}

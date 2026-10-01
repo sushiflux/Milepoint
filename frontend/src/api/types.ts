@@ -58,6 +58,19 @@ export interface BoardColumn {
   order: number
   wipLimit: number | null
   type: BoardColumnType
+  // The four built-in columns can only be hidden/shown; hidden columns are not shown on the board.
+  isDefault: boolean
+  isHidden: boolean
+}
+
+// A work-item category ("Typ") of one project. WorkItem.category holds the NAME of one of these.
+export interface ProjectCategory {
+  id: string
+  name: string
+  color: string
+  isDefault: boolean
+  isHidden: boolean
+  order: number
 }
 
 export interface Board {
@@ -69,7 +82,8 @@ export interface Board {
 
 export type WorkItemType = 'Task' | 'Phase'
 export type WorkItemPriority = 'Low' | 'Medium' | 'High' | 'Urgent'
-export type WorkItemCategory = 'Feature' | 'Bug' | 'Chore'
+// Name of a ProjectCategory ("Feature", "Bug", "Chore" or a custom one) - per project, no fixed list.
+export type WorkItemCategory = string
 
 export interface WorkItem {
   id: string

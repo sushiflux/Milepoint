@@ -215,6 +215,7 @@ builder.Services.AddCors(options =>
         policy.WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
+            .WithExposedHeaders("X-Refreshed-Token")
             .AllowCredentials();
     });
 });
@@ -275,14 +276,11 @@ using (var scope = app.Services.CreateScope())
 
         if (admin is not null)
         {
-            // Seeded dev account gets both roles - full system config access and full project
-            // visibility - since there's no SystemAdmin tier above it anymore.
-            foreach (var role in new[] { "Admin", "Projektleiter" })
+            // Admin ranks above Projektleiter: it alone carries full system access and - by rank,
+            // see ProjectsController - full project visibility, so no second role is needed.
+            if (!await userManager.IsInRoleAsync(admin, "Admin"))
             {
-                if (!await userManager.IsInRoleAsync(admin, role))
-                {
-                    await userManager.AddToRoleAsync(admin, role);
-                }
+                await userManager.AddToRoleAsync(admin, "Admin");
             }
         }
     }
@@ -294,8 +292,54 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+// API responses are never cacheable. Without this a browser may answer a GET from its cache
+// (notably when restoring tabs after a browser restart) and show a stale state without ever asking
+// the server - so no 401 either, and the user looks at old data until a manual reload.
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        context.Response.OnStarting(() =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Task.CompletedTask;
+        });
+    }
+    await next();
+});
+
 app.UseCors("PmClient");
 app.UseAuthentication();
+
+// Sliding session: while someone is working, the login never runs out. Once less than half of the
+// token's lifetime is left, the response carries a fresh token in X-Refreshed-Token and the client
+// swaps it in (api/client.ts). Only an idle session (no request for the full JWT_EXPIRY_MINUTES,
+// e.g. overnight) expires - and then the user lands on the normal login page.
+app.Use(async (context, next) =>
+{
+    if (context.User.Identity?.IsAuthenticated == true && context.Request.Path.StartsWithSegments("/api"))
+    {
+        var jwtOptions = context.RequestServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<JwtOptions>>().Value;
+        if (long.TryParse(context.User.FindFirst("exp")?.Value, out var exp) &&
+            DateTimeOffset.FromUnixTimeSeconds(exp) - DateTimeOffset.UtcNow < TimeSpan.FromMinutes(jwtOptions.ExpiryMinutes) / 2)
+        {
+            var userManager = context.RequestServices.GetRequiredService<UserManager<ApplicationUser>>();
+            var user = await userManager.GetUserAsync(context.User);
+            if (user is not null)
+            {
+                var roles = await userManager.GetRolesAsync(user);
+                var (token, _) = context.RequestServices.GetRequiredService<TokenService>().CreateToken(user, roles);
+                context.Response.OnStarting(() =>
+                {
+                    context.Response.Headers["X-Refreshed-Token"] = token;
+                    return Task.CompletedTask;
+                });
+            }
+        }
+    }
+    await next();
+});
+
 app.UseAuthorization();
 
 app.MapControllers();

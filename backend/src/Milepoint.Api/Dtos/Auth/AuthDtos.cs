@@ -4,6 +4,8 @@ public record RegisterRequest(string Username, string Email, string Password, st
 
 public record LoginRequest(string Username, string Password);
 
+public record ChangePasswordRequest(string CurrentPassword, string NewPassword);
+
 public record AuthResponse(
     string Token,
     DateTimeOffset ExpiresAt,

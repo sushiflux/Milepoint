@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { checkUsernameAvailable, login, register } from '../api/auth'
 import { useAuth } from '../context/AuthContext'
 import { ApiError } from '../api/client'
@@ -31,6 +31,10 @@ export default function LoginPage() {
 
   const { signIn } = useAuth()
   const navigate = useNavigate()
+  // Set by RequireAuth when the user was sent here: the page to return to and whether the cause was
+  // an expired session (captured once - signIn clears the flag in the context).
+  const location = useLocation()
+  const [redirect] = useState(() => (location.state ?? {}) as { from?: string; expired?: boolean })
   const { theme } = useTheme()
 
   const usernameFormatError = validateRequired(username, 'Benutzername') ?? validateMinLength(username, 3, 'Benutzername')
@@ -104,7 +108,7 @@ export default function LoginPage() {
       const response =
         mode === 'login' ? await login(username, password) : await register(username, email, password, displayName)
       signIn(response.token, response.username, response.displayName, response.roles)
-      navigate('/')
+      navigate(redirect.from && redirect.from !== '/login' ? redirect.from : '/', { replace: true })
     } catch (err) {
       setSubmitError(err instanceof ApiError ? err.message || 'Anmeldung fehlgeschlagen.' : 'Unbekannter Fehler.')
     } finally {
@@ -204,6 +208,11 @@ export default function LoginPage() {
           {passwordMsg && <p className="mt-1 text-xs text-red-400">{passwordMsg}</p>}
         </div>
 
+        {redirect.expired && !submitError && (
+          <p role="status" className="rounded-lg border border-amber-300/60 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+            Deine Sitzung ist abgelaufen. Bitte melde dich erneut an - du kommst danach direkt zurück auf deine Seite. Was du gemacht hast, ist gespeichert.
+          </p>
+        )}
         {submitError && <p className="text-sm text-red-400">{submitError}</p>}
 
         <button

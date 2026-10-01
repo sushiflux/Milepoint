@@ -21,7 +21,9 @@ public class WorkItem
     public string? Description { get; set; }
     public WorkItemType Type { get; set; } = WorkItemType.Task;
     public WorkItemPriority Priority { get; set; } = WorkItemPriority.Medium;
-    public WorkItemCategory? Category { get; set; }
+    // Name of a ProjectCategory of this project (null = none). A name, not an id, so the JSON shape
+    // stays the plain string it always was ("Feature", "Bug", "Chore", or a custom name).
+    public string? Category { get; set; }
     public int Position { get; set; }
 
     // Assigned once at creation (see WorkItemReferenceCode) and never recomputed, so a ticket's

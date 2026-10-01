@@ -2,8 +2,8 @@ name: Release
 
 # Three-tier push model (see the global CLAUDE.md's "Three-tier push model" / "Platform-scoped RC"):
 #   v2026.9.80            -> plain tag, never pushed by this workflow's trigger shape (a real
-#                            release tag always carries "-rcN" or nothing extra - see below)
-#   v2026.9.80-rc1         -> RC push: builds the image, publishes a DRAFT GitHub Release
+#                            release tag always carries "-rc" or nothing extra - see below)
+#   v2026.9.83-rc          -> RC push: builds the image, publishes a DRAFT GitHub Release
 #   platform scope         -> NOT part of the tag name; an annotated tag message line
 #                            "platform: unraid" (or "windows") scopes the build to one platform
 #   v2026.9.80             -> Release push (no "-rc" suffix at all): same build, published as a
@@ -29,33 +29,64 @@ jobs:
       - name: Versionsschema aus Tag ableiten
         id: version
         run: |
-          # The tag is only ever the plain version (v2026.9.80-rc1 / v2026.9.80). The build scope
-          # ("RC Unraid" / "RC Windows") lives in the annotated tag's message as a line
-          # "platform: unraid" or "platform: windows"; no such line means "build every platform",
-          # which for Milepoint today just means the Unraid/Docker artifact.
+          # The tag is only ever the plain version (v2026.9.83-rc / v2026.9.83). The build target
+          # ("RC Unraid", "RC Windows Server", "RC All", ...) lives in the annotated tag's message
+          # as a line "platform: <list>" with the ids unraid, windows-server, windows-desktop
+          # (comma-separated) or all; no such line means "build every target". Milepoint ships only
+          # the Unraid/Docker artifact so far, so only unraid/all/empty trigger a build.
           tag="${GITHUB_REF_NAME}"
           is_rc=false
           if [[ "$tag" == *-rc* ]]; then is_rc=true; fi
 
           # actions/checkout may have flattened the annotated tag - re-fetch the real tag object.
           git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" || true
-          platform="$(git tag -l --format='%(contents)' "$tag" | sed -n 's/^platform:[[:space:]]*//p' | head -n1 | tr 'A-Z' 'a-z' | tr -d '[:space:]')"
-          builds_unraid=true
-          if [[ -n "$platform" && "$platform" != "unraid" ]]; then builds_unraid=false; fi
+          platform="$(git tag -l --format='%(contents)' "$tag" | sed -n 's/^platform:[[:space:]]*//p' | head -n1 | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+          builds_unraid=false
+          case ",${platform}," in
+            ",,"|*,unraid,*|*,all,*) builds_unraid=true ;;
+          esac
           echo "Build-Scope: platform='${platform:-alle}' builds_unraid=$builds_unraid"
+
+          # Readable target name(s) for the release title, e.g. "v2026.9.83-rc (Unraid)".
+          target_label=""
+          if [[ -z "$platform" || ",${platform}," == *,all,* ]]; then
+            target_label="All"
+          else
+            IFS=',' read -ra ids <<< "$platform"
+            for id in "${ids[@]}"; do
+              case "$id" in
+                unraid) name="Unraid" ;;
+                windows-server) name="Windows Server" ;;
+                windows-desktop) name="Windows Desktop" ;;
+                *) name="$id" ;;
+              esac
+              target_label="${target_label:+$target_label, }$name"
+            done
+          fi
 
           docker_tag="${tag#v}"
 
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "is_rc=$is_rc" >> "$GITHUB_OUTPUT"
-          echo "builds_unraid=$builds_unraid" >> "$GITHUB_OUTPUT"
-          echo "docker_tag=$docker_tag" >> "$GITHUB_OUTPUT"
+          # RC builds are also pushed under the moving tag "rc", and the RC Unraid template points
+          # at it: the test container is then updated in place (Unraid's own update, all saved
+          # settings stay) instead of re-creating the template for every RC. Real releases use the
+          # fixed version. An RC never moves "latest".
+          template_tag="$docker_tag"
+          if [[ "$is_rc" == "true" ]]; then template_tag="rc"; fi
+
+          {
+            echo "tag=$tag"
+            echo "is_rc=$is_rc"
+            echo "builds_unraid=$builds_unraid"
+            echo "docker_tag=$docker_tag"
+            echo "template_tag=$template_tag"
+            echo "release_name=$tag ($target_label)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: version.txt schreiben
         # Dieselbe Datei, die scripts/git-hooks/post-commit lokal pflegt - beim CI-Build wird sie
         # stattdessen direkt aus dem Tag-Namen gesetzt (kein .git-Verlaufszugriff auf den
         # Jahres-Commit-Zähler nötig, der Tag selbst trägt schon die endgültige Versionsnummer).
-        # Der Tag ist immer die reine Version (z.B. v2026.9.80-rc1), die App zeigt genau das an.
+        # Der Tag ist immer die reine Version (z.B. v2026.9.83-rc), die App zeigt genau das an.
         run: echo "v${{ steps.version.outputs.docker_tag }}" > backend/src/Milepoint.Api/version.txt
 
       - name: Docker Buildx einrichten
@@ -79,12 +110,13 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.docker_tag }}
+            ${{ steps.version.outputs.is_rc == 'true' && format('{0}:rc', env.IMAGE_NAME) || '' }}
             ${{ steps.version.outputs.is_rc == 'false' && format('{0}:latest', env.IMAGE_NAME) || '' }}
 
       - name: Unraid Community-Applications-Template rendern
         if: steps.version.outputs.builds_unraid == 'true'
         run: |
-          sed "s/__VERSION__/${{ steps.version.outputs.docker_tag }}/g" \
+          sed "s/__VERSION__/${{ steps.version.outputs.template_tag }}/g" \
             unraid/milepoint.xml.template > unraid/milepoint.xml
 
       - name: Unraid-Template als Artefakt anhängen (nur zum Selbst-Herunterladen, kein Feed-Push)
@@ -98,6 +130,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.release_name }}
           draft: ${{ steps.version.outputs.is_rc }}
           prerelease: ${{ steps.version.outputs.is_rc }}
           # Nur anhängen, wenn der Unraid-Build oben tatsächlich lief - sonst existiert die Datei

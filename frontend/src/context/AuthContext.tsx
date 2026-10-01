@@ -11,16 +11,11 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   isAdmin: boolean
   isProjectLeader: boolean
-  // True once any request has come back 401 - the app keeps rendering exactly what it was
-  // showing (nothing unmounts), and a modal on top prompts to log back in without losing
-  // whatever the user was in the middle of typing.
+  // True when the login was cleared because the session expired (as opposed to an explicit logout):
+  // RequireAuth passes it to the login page, which then explains why the user is back there.
   sessionExpired: boolean
-  // Increments on every successful signIn (including re-login via SessionExpiredModal). Pages
-  // that load their own data in a useEffect keyed off e.g. projectId need this in their
-  // dependency array too - otherwise a request that failed with 401 while the session was
-  // expired never gets retried after the user logs back in, since projectId itself didn't
-  // change and the effect has no other reason to re-run (the concrete symptom this fixes:
-  // ProjectPage getting stuck on "Projekt wird geladen…" forever after a re-login).
+  // Increments on every successful signIn. Pages that load their own data in a useEffect keyed off
+  // e.g. projectId can list it as a dependency to reload after a (re-)login.
   authVersion: number
   signIn: (token: string, username: string, displayName: string, roles: string[]) => void
   signOut: () => void
@@ -53,7 +48,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authVersion, setAuthVersion] = useState(0)
 
   useEffect(() => {
-    const handleExpired = () => setSessionExpired(true)
+    // The session ran out: drop the stored login and mark it as "expired" - RequireAuth then
+    // redirects to the normal login page (returning to the current page afterwards).
+    const handleExpired = () => {
+      localStorage.removeItem(STORAGE_TOKEN)
+      localStorage.removeItem(STORAGE_USERNAME)
+      localStorage.removeItem(STORAGE_NAME)
+      localStorage.removeItem(STORAGE_ROLES)
+      setState({ token: null, username: null, displayName: null, roles: [] })
+      setSessionExpired(true)
+    }
     window.addEventListener(SESSION_EXPIRED_EVENT, handleExpired)
     return () => window.removeEventListener(SESSION_EXPIRED_EVENT, handleExpired)
   }, [])
@@ -78,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const isAdmin = state.roles.includes('Admin')
-  const isProjectLeader = state.roles.includes('Projektleiter')
+  const isProjectLeader = state.roles.includes('Projektleiter') || isAdmin // Admin ranks above Projektleiter
 
   return (
     <AuthContext.Provider value={{ ...state, isAdmin, isProjectLeader, sessionExpired, authVersion, signIn, signOut }}>

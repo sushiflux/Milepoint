@@ -29,10 +29,13 @@ export const updateNote = (
   title: string,
   content: string,
   appearance: NoteAppearanceFields,
+  options: { keepalive?: boolean } = {},
 ) =>
   apiFetch<Note>(`/projects/${projectId}/notes/${noteId}`, {
     method: 'PUT',
     body: JSON.stringify({ title, content, ...appearance }),
+    // keepalive lets the request survive the page being closed/hidden (autosave flush on pagehide).
+    keepalive: options.keepalive,
   })
 
 export const deleteNote = (projectId: string, noteId: string) =>

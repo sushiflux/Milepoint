@@ -1,12 +1,21 @@
 import Header from '../components/Header'
+import ChangePasswordSection from '../components/ChangePasswordSection'
+import TabBar from '../components/TabBar'
+import { useUrlTab, type TabDef } from '../hooks/useUrlTab'
 import { usePreferences } from '../context/PreferencesContext'
-import { useAuth } from '../context/AuthContext'
 import { BAR_COLOR_MODE_OPTIONS, BAR_COLOR_MODE_PREFERENCE_KEY, resolveBarColorMode } from '../lib/timelinePreferences'
-import TranscriptionSettingsSection from '../components/TranscriptionSettingsSection'
+
+// Personal settings, grouped by topic: Darstellung (how things look) and Sicherheit (password, and
+// later two-factor/passkeys). Instance-wide settings live in the separate app administration.
+type Tab = 'appearance' | 'security'
+const TABS: TabDef<Tab>[] = [
+  { value: 'appearance', label: 'Darstellung' },
+  { value: 'security', label: 'Sicherheit' },
+]
 
 export default function SettingsPage() {
   const { getPreference, setPreference } = usePreferences()
-  const { isAdmin } = useAuth()
+  const [tab, setTab] = useUrlTab(TABS)
   const barColorMode = resolveBarColorMode(getPreference(BAR_COLOR_MODE_PREFERENCE_KEY, ''))
 
   return (
@@ -16,9 +25,12 @@ export default function SettingsPage() {
       <main className="mx-auto w-full max-w-2xl flex-1 space-y-6 p-6">
         <div>
           <h1 className="text-xl font-bold text-slate-900 dark:text-slate-100">Einstellungen</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Persönliche Anzeigeoptionen - werden für dein Konto gespeichert.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Persönliche Optionen - werden für dein Konto gespeichert.</p>
         </div>
 
+        <TabBar tabs={TABS} active={tab} onChange={setTab} />
+
+        {tab === 'appearance' && (
         <section className="glass-panel rounded-xl border border-slate-200/80 p-5 dark:border-slate-800">
           <h2 className="text-sm font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">Timeline</h2>
 
@@ -52,16 +64,9 @@ export default function SettingsPage() {
             </div>
           </div>
         </section>
-
-        {isAdmin && (
-          <div>
-            <div className="mb-2">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Administration</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">Instanzweite Einstellungen - nur für Administratoren sichtbar.</p>
-            </div>
-            <TranscriptionSettingsSection />
-          </div>
         )}
+
+        {tab === 'security' && <ChangePasswordSection />}
       </main>
     </div>
   )

@@ -39,8 +39,15 @@ const SETTINGS_ICON = (
   </svg>
 )
 
+const ADMIN_ICON = (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0">
+    <path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3" />
+  </svg>
+)
+
 export default function Header() {
-  const { displayName, signOut } = useAuth()
+  const { displayName, signOut, isAdmin, isProjectLeader } = useAuth()
+  const roleLabel = isAdmin ? 'Admin' : isProjectLeader ? 'Projektleiter' : 'Benutzer'
   const { theme } = useTheme()
   const [userMenuOpen, setUserMenuOpen] = useState(false)
   const [appVersion, setAppVersion] = useState<string | null>(null)
@@ -135,7 +142,7 @@ export default function Header() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs font-bold text-slate-800 dark:text-slate-100">{displayName}</p>
                     <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-200">
-                      Benutzer
+                      {roleLabel}
                     </span>
                   </div>
                 </div>
@@ -160,6 +167,17 @@ export default function Header() {
                     {SETTINGS_ICON}
                     Einstellungen
                   </Link>
+
+                  {isAdmin && (
+                    <Link
+                      to="/admin"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800/70"
+                    >
+                      {ADMIN_ICON}
+                      App-Administration
+                    </Link>
+                  )}
 
                   <button
                     onClick={() => {

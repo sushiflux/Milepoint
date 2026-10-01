@@ -141,11 +141,43 @@ at creation (`TCK#00001` for Bug/Epic, `TSK#00001` for Task/Feature) from a sing
 
 ### Roles and project visibility
 
-Three roles: `Admin` (system settings only, no automatic project access), `Projektleiter` (sees
-every project system-wide regardless of ownership), `User` (default — creating a project makes you
-its owner). The seeded dev account gets both `Admin` and `Projektleiter`. `GET /api/projects`
-visibility: `Projektleiter` sees everything; everyone else sees a project only if they created it,
-are an explicit `ProjectMember`, or are assigned at least one work item in it.
+Three roles with a rank: `Admin` > `Projektleiter` > `User`. An account holds exactly one of them (the
+seeded admin only `Admin`); a higher rank inherits the lower ones' rights - `ProjectsController`
+treats `Admin` like `Projektleiter`, the frontend's `isProjectLeader` includes admins. `User` is the
+default (creating a project makes you its owner). `GET /api/projects` visibility: `Projektleiter` and
+`Admin` see everything; everyone else sees a project only if they created it, are an explicit
+`ProjectMember`, or are assigned at least one work item in it.
+
+User management lives on the admin-only **App-Administration** page (`/admin`, tabs Benutzer / Rollen /
+Spracherkennung; `AdminUsersController`, `/api/admin/users`): create users, set the role (a role
+matrix), set a password, delete. An admin can never change/delete their own account or another
+admin - same or higher rank is locked, enforced server-side. The personal **Einstellungen** page
+(tabs Darstellung / Sicherheit) holds only the user's own options incl. changing their own password
+(`POST /api/auth/change-password`, current password once, new one twice).
+
+### Per-project Kanban columns and work-item categories
+
+Both are configurable per project in the project's own **Einstellungen** tab (`ProjectSettingsView`,
+sub-tabs Spalten / Kategorien; sidebar entry only for Projektleiter/Admin). **Only Projektleiter and
+Admin may add, rename, hide, show or delete** (explicit user rule, not the plain project owner),
+enforced server-side with `[Authorize(Roles = "Projektleiter,Admin")]`; everyone in the project can read.
+
+- **Columns** (`BoardColumnsController`, `/api/projects/{p}/boards/{b}/columns`): the four built-in
+  ones (`Neu`, `In Arbeit`, `Fertig`, `Pausiert`, `BoardColumn.IsDefault`) can only be hidden/shown
+  (`IsHidden`); custom ones can be added (name + `BoardColumnType`), renamed, retyped, reordered
+  (`PUT .../order`) and deleted. Rules: hide/delete only when the column is empty (409 with the card
+  count), and at least one visible `Todo` and one visible `Done` column must remain. Hidden columns are
+  not rendered on the board, no card can be created in or moved into them, the Timeline's "new item"
+  goes to the first visible Todo column. A custom column keeps the status colour of its type.
+- **Categories ("Typ")** (`ProjectCategoriesController`, `ProjectCategory` table, per project):
+  `Feature`, `Bug`, `Chore` (= routine/maintenance work without a new feature or bug fix) exist per
+  project as `IsDefault` rows and can only be hidden/shown; custom ones (name + a palette colour token,
+  see `lib/categoryColors.ts`) can be added, renamed (cards follow), recoloured and deleted (409 while a
+  card uses them). Defaults are created lazily (`ProjectCategoryService.EnsureDefaultsAsync`), so old
+  projects need no data migration. `WorkItem.Category` is now the category's **name** (a string, was the
+  `WorkItemCategory` enum); the migration `ProjectCategoriesAndColumnVisibility` (both providers)
+  converts the old int values (0/1/2 = Feature/Bug/Chore) in place. A hidden category can't be newly
+  assigned but stays on cards that already carry it.
 
 ### Timeline / Kanban / Notes are three views over the same project data
 
@@ -310,6 +342,21 @@ the same `preferredDeviceId` device choice as the recording stream. `AudioContex
 the animation loop are torn down in the effect's cleanup whenever the stream changes or recording
 stops, avoiding a hung/leaked audio context.
 
+### Autosave and sessions
+
+Nothing waits for a Save button. Kanban and Timeline persist every action on its own (create, move,
+edit, drag); the **Notes editor autosaves** (debounced ~0.9 s after the last keystroke, serialized
+through one promise chain, flushed immediately on tab hide / pagehide / unmount with `keepalive`, and
+before a tab is closed) and shows "Speichert… / Gespeichert / Nicht gespeichert" instead of a button.
+
+API responses carry `Cache-Control: no-store` (`Program.cs`) - otherwise a restored browser tab could
+show a stale state without asking the server. The session is **sliding**: once less than half of
+`JWT_EXPIRY_MINUTES` is left, a response carries a fresh token in `X-Refreshed-Token` and
+`api/client.ts` swaps it in, so only an idle session expires. When a protected request still comes back
+401, `AuthContext` clears the login and `RequireAuth` redirects to the normal **login page** with a
+hint and returns to the same page after logging in (the former overlay modal is gone - with autosave
+there is nothing unsaved to protect).
+
 ### Realtime
 
 Kanban board state syncs live across open tabs/users via SignalR (`Hubs/`), not polling.
@@ -369,12 +416,12 @@ opt-in `caddy` profile, `Caddyfile.prod`), `.env.prod.example`, `unraid/milepoin
 (the actual Unraid Community Applications template — see the Unraid bullet below for why it's a
 single-container XML with an external DB, not a Compose stack) and `.github/workflows/release.yml`
 (tag-triggered: builds/pushes `ghcr.io/sushiflux-develop/milepoint`, renders the XML, publishes a
-draft GitHub Release for `-rcN` tags and a public one for plain tags; tag names are always the
+draft GitHub Release for `-rc` tags and a public one for plain tags; tag names are always the
 plain version, the platform scope ("RC Unraid"/"RC Windows") is a `platform: unraid` line in the
 annotated tag's message, see the global CLAUDE.md's "Platform-scoped RC"). The repo lives at `github.com/SushiFlux-Develop/Milepoint` (moved from the old
 `SynShiftLabs` org). **Not yet exercised live:** the workflow has only been YAML-validated and its
 pieces (image build, XML render, `Program.cs` behaviour against an external Postgres) run locally —
-the first real `-rcN` tag push is its first actual GitHub Actions run.
+the first real `-rc` tag push is its first actual GitHub Actions run.
 
 **Still only a plan:** the WiX installer project below. Captured here so the plan survives across
 sessions once that build-out starts:
@@ -427,6 +474,19 @@ sessions once that build-out starts:
   Unraid users commonly already run a shared reverse proxy (SWAG or Nginx Proxy Manager); the
   bundled Caddy only exists as the opt-in `caddy` profile in `docker-compose.prod.yml` (the
   generic bundled-DB self-host path, e.g. via Compose Manager or any other Docker host).
+- **RC Unraid = update in place.** `release.yml` pushes every RC image as `<version>-rc` AND the
+  moving tag `rc`, and renders the RC template with `<Repository>...milepoint:rc`. After the first
+  install (template filled in once), every later `RC Unraid` just runs Unraid's `update_container
+  Milepoint` over SSH - all saved settings stay. The container saved from `rc1`/`rc2` still points
+  at a fixed tag, so it needs one manual Edit to `:rc`.
+- **Milepoint's own Unraid names** (what the global "Release Unraid" cleanup and the "RC Unraid"
+  template copy act on, and nothing else): container `Milepoint`, template file
+  `my-Milepoint.xml` (plus the hand-copied `manual-templates/Milepoint-rc2.xml`-style copies and
+  `templates-user/Milepoint.xml` if present), image `ghcr.io/sushiflux-develop/milepoint`, appdata
+  `/mnt/cache/appdata/milepoint` (holds only the generated `jwt-signing.key`), cached icon
+  `Milepoint-icon.png`. The database `milepoint_db` on the user's Postgres is never touched. A
+  Release does not copy anything to the user's Unraid - the template goes to the public
+  `SushiFlux-Develop/Milepoint_Unraid` repo (Community Applications route, like Fluxo).
 - **RC-Commit must also produce an Unraid XML template** (explicit user request) — the user copies
   it by hand onto their own Unraid box to test it there before anything goes out to the public
   Community Applications feed. A V-Commit/V-Tag is the point that template actually gets pushed to

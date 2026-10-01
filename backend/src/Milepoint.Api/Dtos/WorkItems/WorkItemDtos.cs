@@ -11,7 +11,7 @@ public record CreateWorkItemRequest(
     string? ParentWorkItemId,
     DateTimeOffset? StartDate,
     DateTimeOffset? DueDate,
-    WorkItemCategory? Category = null);
+    string? Category = null);
 
 public record UpdateWorkItemRequest(
     string Title,
@@ -22,7 +22,7 @@ public record UpdateWorkItemRequest(
     string? ParentWorkItemId,
     DateTimeOffset? StartDate,
     DateTimeOffset? DueDate,
-    WorkItemCategory? Category = null);
+    string? Category = null);
 
 public record MoveWorkItemRequest(Guid TargetColumnId, int Position);
 
@@ -40,7 +40,7 @@ public record WorkItemDto(
     string? Description,
     WorkItemType Type,
     WorkItemPriority Priority,
-    WorkItemCategory? Category,
+    string? Category,
     int Position,
     string? AssigneeId,
     string? AssigneeDisplayName,

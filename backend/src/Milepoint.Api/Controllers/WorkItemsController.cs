@@ -58,10 +58,21 @@ public class WorkItemsController : ControllerBase
             return BadRequest("Spalte gehört nicht zu diesem Board.");
         }
 
+        if (column.IsHidden)
+        {
+            return BadRequest($"Die Spalte '{column.Name}' ist ausgeblendet - hier lassen sich keine Karten anlegen.");
+        }
+
         if (request.ParentWorkItemId is not null &&
             !await _db.WorkItems.AnyAsync(w => w.Id == request.ParentWorkItemId && w.ProjectId == board.ProjectId))
         {
             return BadRequest("Übergeordnete Aufgabe gehört nicht zu diesem Projekt.");
+        }
+
+        var (category, categoryError) = await ProjectCategoryService.ResolveAsync(_db, board.ProjectId, request.Category, null);
+        if (categoryError is not null)
+        {
+            return BadRequest(categoryError);
         }
 
         var position = await _db.WorkItems.Where(w => w.ColumnId == column.Id).CountAsync();
@@ -78,7 +89,7 @@ public class WorkItemsController : ControllerBase
             Description = request.Description,
             Type = request.Type,
             Priority = request.Priority,
-            Category = request.Category,
+            Category = category,
             Position = position,
             ReferencePrefix = prefix,
             ReferenceNumber = number,
@@ -116,11 +127,17 @@ public class WorkItemsController : ControllerBase
             return BadRequest("Eine Aufgabe kann nicht ihre eigene übergeordnete Aufgabe sein.");
         }
 
+        var (category, categoryError) = await ProjectCategoryService.ResolveAsync(_db, item.ProjectId, request.Category, item.Category);
+        if (categoryError is not null)
+        {
+            return BadRequest(categoryError);
+        }
+
         item.Title = request.Title;
         item.Description = request.Description;
         item.Type = request.Type;
         item.Priority = request.Priority;
-        item.Category = request.Category;
+        item.Category = category;
         item.AssigneeId = request.AssigneeId;
         item.ParentWorkItemId = request.ParentWorkItemId;
         item.StartDate = request.StartDate;
@@ -149,6 +166,11 @@ public class WorkItemsController : ControllerBase
         if (targetColumn is null)
         {
             return BadRequest("Zielspalte existiert nicht.");
+        }
+
+        if (targetColumn.IsHidden)
+        {
+            return BadRequest($"Die Spalte '{targetColumn.Name}' ist ausgeblendet - Karten lassen sich dorthin nicht verschieben.");
         }
 
         if (targetColumn.Type != BoardColumnType.Todo)

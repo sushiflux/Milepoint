@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { createNote, deleteNote, updateNote, type NoteAppearanceFields } from '../api/notes'
 import { ApiError } from '../api/client'
 import type { Note } from '../api/types'
@@ -103,6 +103,16 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   const activeTab = tabs.find((t) => t.noteId === activeTabId) ?? null
   const activeNote = notes.find((n) => n.id === activeTabId) ?? null
   const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const tabsRef = useRef(tabs)
+  const notesRef = useRef(notes)
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  useEffect(() => {
+    tabsRef.current = tabs
+  }, [tabs])
+  useEffect(() => {
+    notesRef.current = notes
+  }, [notes])
 
   // Keep non-dirty open tabs in sync if their note changes via another path (e.g. a graph
   // "Notizen verbinden" edit while the target note is already open here) - tabs with
@@ -130,7 +140,13 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     setError(null)
   }
 
-  function closeTab(id: string) {
+  // Closing a tab with pending edits saves them first - nothing typed is ever dropped.
+  async function closeTab(id: string) {
+    if (tabs.find((t) => t.noteId === id)?.dirty) await saveDirtyTabs()
+    removeTab(id)
+  }
+
+  function removeTab(id: string) {
     const idx = tabs.findIndex((t) => t.noteId === id)
     if (idx === -1) return
     const next = [...tabs.slice(0, idx), ...tabs.slice(idx + 1)]
@@ -191,32 +207,79 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
     }
   }
 
-  async function handleSave() {
-    if (!activeTab || !activeNote) return
-    setError(null)
-    try {
-      const updated = await updateNote(
-        projectId,
-        activeTab.noteId,
-        activeTab.draftTitle.trim(),
-        activeTab.draftContent,
-        appearanceOf(activeNote),
-      )
-      onNotesChange(notes.map((n) => (n.id === updated.id ? updated : n)))
-      setTabs((prev) =>
-        prev.map((t) => (t.noteId === updated.id ? { ...t, draftTitle: updated.title, draftContent: updated.content, dirty: false } : t)),
-      )
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Notiz konnte nicht gespeichert werden.')
+  // Autosave (like Word): every edit is saved on its own shortly after the user stops typing, there
+  // is no Save button. Saves are serialized through one promise chain so two never overlap, and the
+  // newest draft is always read at run time (tabsRef/notesRef), never from a stale closure.
+  const doSave = useCallback(
+    async (keepalive: boolean) => {
+      try {
+        for (const tab of tabsRef.current.filter((t) => t.dirty)) {
+          const note = notesRef.current.find((n) => n.id === tab.noteId)
+          const title = tab.draftTitle.trim()
+          // An empty title can't be saved - wait until the user has typed one.
+          if (!note || !title) continue
+          setSaveState('saving')
+          const updated = await updateNote(projectId, tab.noteId, title, tab.draftContent, appearanceOf(note), { keepalive })
+          onNotesChange(notesRef.current.map((n) => (n.id === updated.id ? updated : n)))
+          // Only mark the tab clean if the user hasn't typed further while this request was running.
+          setTabs((prev) =>
+            prev.map((t) =>
+              t.noteId === updated.id && t.draftTitle === tab.draftTitle && t.draftContent === tab.draftContent
+                ? { ...t, draftTitle: updated.title, draftContent: updated.content, dirty: false }
+                : t,
+            ),
+          )
+        }
+        setSaveState('saved')
+        setError(null)
+      } catch (err) {
+        setSaveState('error')
+        setError(err instanceof ApiError ? `Automatisches Speichern fehlgeschlagen: ${err.message || 'unbekannter Fehler'}` : 'Automatisches Speichern fehlgeschlagen.')
+      }
+    },
+    [projectId, onNotesChange],
+  )
+
+  const saveDirtyTabs = useCallback(
+    (keepalive = false) => {
+      saveQueueRef.current = saveQueueRef.current.then(() => doSave(keepalive))
+      return saveQueueRef.current
+    },
+    [doSave],
+  )
+
+  // Debounce: save once the user paused typing. A failed save isn't retried in a loop - the next
+  // edit (or closing the tab / leaving the page) triggers the next attempt.
+  useEffect(() => {
+    if (!tabs.some((t) => t.dirty)) return
+    const timer = window.setTimeout(() => void saveDirtyTabs(), 900)
+    return () => window.clearTimeout(timer)
+  }, [tabs, saveDirtyTabs])
+
+  // Flush immediately when the tab is hidden, the page is closed, or this view unmounts (navigating
+  // to another project/page) - this is what makes "close the browser right after typing" safe.
+  useEffect(() => {
+    const flush = () => {
+      if (tabsRef.current.some((t) => t.dirty)) void saveDirtyTabs(true)
     }
-  }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flush)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flush)
+      flush()
+    }
+  }, [saveDirtyTabs])
 
   async function handleDelete() {
     if (!activeTabId) return
     const id = activeTabId
     await deleteNote(projectId, id)
     onNotesChange(notes.filter((n) => n.id !== id))
-    closeTab(id)
+    removeTab(id)
   }
 
   // Ein Klick auf eine Notiz im Graph öffnet sie direkt im Listen-Editor - genau wie ein Klick in
@@ -428,13 +491,19 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
                     onChange={(e) => updateActiveDraft({ draftTitle: e.target.value })}
                     className="flex-1 rounded-lg border border-slate-300 bg-transparent px-4 py-2.5 text-base font-semibold outline-none transition-all focus:ring-2 focus:ring-brand-primary/50 dark:border-slate-700 dark:text-slate-100"
                   />
-                  <button
-                    onClick={handleSave}
-                    disabled={!activeTab.dirty}
-                    className="rounded-lg bg-brand-accent px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:bg-brand-accent-light disabled:opacity-40 disabled:shadow-none"
+                  <span
+                    role="status"
+                    aria-live="polite"
+                    className={`w-28 shrink-0 text-xs font-medium ${
+                      saveState === 'error' && activeTab.dirty
+                        ? 'text-red-600 dark:text-red-400'
+                        : activeTab.dirty
+                          ? 'text-slate-500 dark:text-slate-400'
+                          : 'text-emerald-700 dark:text-emerald-400'
+                    }`}
                   >
-                    Speichern
-                  </button>
+                    {saveState === 'error' && activeTab.dirty ? 'Nicht gespeichert' : activeTab.dirty ? 'Speichert…' : 'Gespeichert'}
+                  </span>
                   <button
                     onClick={handleDelete}
                     className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-red-500 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:text-red-400 dark:hover:bg-slate-800"

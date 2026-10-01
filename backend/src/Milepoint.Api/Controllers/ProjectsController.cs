@@ -26,7 +26,7 @@ public class ProjectsController : ControllerBase
     public async Task<ActionResult<List<ProjectDto>>> GetAll()
     {
         var currentUserId = _userManager.GetUserId(User);
-        var seesAllProjects = User.IsInRole("Projektleiter");
+        var seesAllProjects = User.IsInRole("Projektleiter") || User.IsInRole("Admin");
 
         var projectsQuery = _db.Projects.AsQueryable();
         if (!seesAllProjects)
@@ -117,7 +117,7 @@ public class ProjectsController : ControllerBase
             ProjectId = project.Id,
             Name = "Board",
             Columns = BoardsController.DefaultColumns
-                .Select((c, index) => new BoardColumn { Name = c.Name, Order = index, Type = c.Type })
+                .Select((c, index) => new BoardColumn { Name = c.Name, Order = index, Type = c.Type, IsDefault = true })
                 .ToList()
         };
         _db.Boards.Add(board);
@@ -323,7 +323,7 @@ public class ProjectsController : ControllerBase
 
     private async Task<bool> CanManageProjectAsync(Project project)
     {
-        if (User.IsInRole("Projektleiter"))
+        if (User.IsInRole("Projektleiter") || User.IsInRole("Admin"))
         {
             return true;
         }
@@ -336,7 +336,7 @@ public class ProjectsController : ControllerBase
     // to probe/associate yourself with a project you otherwise have no relation to.
     private async Task<bool> CanSeeProjectAsync(Project project, string? currentUserId)
     {
-        if (User.IsInRole("Projektleiter"))
+        if (User.IsInRole("Projektleiter") || User.IsInRole("Admin"))
         {
             return true;
         }

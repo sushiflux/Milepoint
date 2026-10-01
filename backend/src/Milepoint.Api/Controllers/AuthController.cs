@@ -80,6 +80,42 @@ public class AuthController : ControllerBase
         return Ok(new { available = existing is null });
     }
 
+    // The signed-in user changes their OWN password: the current one has to be typed again, so a
+    // stolen/left-open session alone can't take over the account. Messages are specific because the
+    // settings form shows them as-is.
+    [HttpPost("change-password")]
+    [Authorize]
+    public async Task<IActionResult> ChangePassword(ChangePasswordRequest request)
+    {
+        var user = await _userManager.GetUserAsync(User);
+        if (user is null)
+        {
+            return Unauthorized();
+        }
+
+        if (string.IsNullOrEmpty(request.NewPassword))
+        {
+            return BadRequest("Bitte ein neues Passwort eingeben.");
+        }
+        if (request.NewPassword == request.CurrentPassword)
+        {
+            return BadRequest("Das neue Passwort muss sich vom aktuellen unterscheiden.");
+        }
+
+        var result = await _userManager.ChangePasswordAsync(user, request.CurrentPassword ?? string.Empty, request.NewPassword);
+        if (result.Succeeded)
+        {
+            return NoContent();
+        }
+
+        if (result.Errors.Any(e => e.Code == "PasswordMismatch"))
+        {
+            return BadRequest("Das aktuelle Passwort ist falsch.");
+        }
+
+        return BadRequest("Passwort konnte nicht geändert werden: " + string.Join(" ", result.Errors.Select(e => e.Description)));
+    }
+
     [HttpGet("me")]
     [Authorize]
     public async Task<IActionResult> Me()

@@ -10,5 +10,12 @@ public class BoardColumn
     public int? WipLimit { get; set; }
     public BoardColumnType Type { get; set; } = BoardColumnType.Todo;
 
+    // The four built-in columns (Neu, In Arbeit, Fertig, Pausiert) can only be hidden/shown, never
+    // renamed, retyped or deleted; custom columns (IsDefault = false) can be all of that. A hidden
+    // column is simply not shown on the board and not offered as a target - it must be empty when
+    // it gets hidden (see BoardColumnsController).
+    public bool IsDefault { get; set; }
+    public bool IsHidden { get; set; }
+
     public ICollection<WorkItem> WorkItems { get; set; } = new List<WorkItem>();
 }

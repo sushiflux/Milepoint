@@ -1,10 +1,8 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '/api'
 const TOKEN_STORAGE_KEY = 'pm.token'
 
-// AuthContext listens for this to show a non-destructive "please log back in" prompt on top of
-// whatever page is open, instead of this module hard-navigating to /login itself (which used to
-// instantly unmount the whole app - losing any in-progress unsaved work, like a half-typed
-// Kanban card, the moment a background request happened to 401).
+// AuthContext listens for this (a protected request came back 401 = the session expired), clears the
+// login and lets RequireAuth send the user to the login page with a return path.
 export const SESSION_EXPIRED_EVENT = 'milepoint:session-expired'
 
 export class ApiError extends Error {
@@ -28,12 +26,19 @@ async function performFetch(path: string, options: RequestInit, headers: Headers
 
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
 
-  if (response.status === 401) {
-    // Abgelaufenes/ungültiges Token (z.B. nach Ablauf von JWT_EXPIRY_MINUTES). The token/roles
-    // are deliberately left in storage here - AuthContext's modal overwrites them with a fresh
-    // token on successful re-login, or clears them on explicit logout. Removing them here (and
-    // hard-navigating) previously wiped the whole page's in-memory state, including anything the
-    // user hadn't saved yet.
+  // Sliding session: while the user is working the server hands out a fresh token before the old
+  // one runs out (X-Refreshed-Token, see Program.cs) - swap it in, so only an idle session expires.
+  const refreshedToken = response.headers.get('X-Refreshed-Token')
+  if (refreshedToken) {
+    localStorage.setItem(TOKEN_STORAGE_KEY, refreshedToken)
+  }
+
+  // A 401 on a protected endpoint means the session ran out (JWT_EXPIRY_MINUTES of inactivity). A
+  // wrong password at login / register is a 401 too, but that is just a failed login, not an
+  // expired session. AuthContext reacts by clearing the login and sending the user to the normal
+  // login page (and back to this page after logging in). Everything the user did is already saved
+  // - every action is persisted on its own (Notes autosave), nothing waits for a Save button.
+  if (response.status === 401 && !path.startsWith('/auth/login') && !path.startsWith('/auth/register')) {
     window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
   }
 

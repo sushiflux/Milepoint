@@ -179,7 +179,8 @@ function groupConsecutiveDays(days: Date[], keyOf: (d: Date) => string, labelOf:
 function firstTodoColumn(boards: Board[]) {
   const board = boards[0]
   if (!board) return null
-  return { board, column: board.columns.find((c) => c.type === 'Todo') ?? board.columns[0] ?? null }
+  const visible = board.columns.filter((c) => !c.isHidden)
+  return { board, column: visible.find((c) => c.type === 'Todo') ?? visible[0] ?? null }
 }
 
 function formatDate(iso: string | null) {

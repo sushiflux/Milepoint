@@ -24,6 +24,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
     public DbSet<Board> Boards => Set<Board>();
     public DbSet<BoardColumn> BoardColumns => Set<BoardColumn>();
     public DbSet<WorkItem> WorkItems => Set<WorkItem>();
+    public DbSet<ProjectCategory> ProjectCategories => Set<ProjectCategory>();
     public DbSet<Label> Labels => Set<Label>();
     public DbSet<SequenceCounter> SequenceCounters => Set<SequenceCounter>();
     public DbSet<ProjectMember> ProjectMembers => Set<ProjectMember>();
@@ -138,8 +139,21 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        builder.Entity<ProjectCategory>(entity =>
+        {
+            entity.Property(c => c.ProjectId).HasMaxLength(40).IsRequired();
+            entity.Property(c => c.Name).HasMaxLength(60).IsRequired();
+            entity.Property(c => c.Color).HasMaxLength(20).IsRequired();
+            entity.HasIndex(c => new { c.ProjectId, c.Name }).IsUnique();
+            entity.HasOne<Project>()
+                .WithMany()
+                .HasForeignKey(c => c.ProjectId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         builder.Entity<WorkItem>(entity =>
         {
+            entity.Property(w => w.Category).HasMaxLength(60);
             entity.Property(w => w.Id).HasMaxLength(40);
             entity.Property(w => w.ProjectId).HasMaxLength(40);
             entity.Property(w => w.BoardId).HasMaxLength(40);

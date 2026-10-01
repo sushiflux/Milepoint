@@ -13,5 +13,11 @@ export const register = (username: string, email: string, password: string, disp
     body: JSON.stringify({ username, email, password, displayName }),
   })
 
+export const changePassword = (currentPassword: string, newPassword: string) =>
+  apiFetch<void>('/auth/change-password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword }),
+  })
+
 export const checkUsernameAvailable = (username: string) =>
   apiFetch<{ available: boolean }>(`/auth/username-available?username=${encodeURIComponent(username)}`)

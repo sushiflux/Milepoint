@@ -58,7 +58,7 @@ public class BoardsController : ControllerBase
         else
         {
             columns = DefaultColumns
-                .Select((c, index) => new BoardColumn { Name = c.Name, Order = index, Type = c.Type })
+                .Select((c, index) => new BoardColumn { Name = c.Name, Order = index, Type = c.Type, IsDefault = true })
                 .ToList();
         }
 
@@ -100,6 +100,6 @@ public class BoardsController : ControllerBase
         board.CreatedAt,
         board.Columns
             .OrderBy(c => c.Order)
-            .Select(c => new BoardColumnDto(c.Id, c.Name, c.Order, c.WipLimit, c.Type))
+            .Select(c => new BoardColumnDto(c.Id, c.Name, c.Order, c.WipLimit, c.Type, c.IsDefault, c.IsHidden))
             .ToList());
 }

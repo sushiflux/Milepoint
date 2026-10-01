@@ -11,7 +11,7 @@
   <Category>Productivity: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/SushiFlux-Develop/Milepoint/main/unraid/milepoint.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/SushiFlux-Develop/Milepoint/main/branding/logo/logo_light_mode.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/SushiFlux-Develop/Milepoint_Unraid/main/icon.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <DateInstalled></DateInstalled>
 
