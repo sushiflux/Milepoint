@@ -146,8 +146,8 @@
 <!--
   Sprachdiktat (Whisper/OpenAI/Google): keine Container-Einstellung. Der Transkriptionsanbieter
   und alle zugehörigen Zugangsdaten (Whisper-Endpoint-URL, OpenAI-/Google-API-Key) werden nach der
-  Installation im Admin-Bereich der laufenden App selbst konfiguriert - datenbankgestützt (siehe
-  TranscriptionSettings in Milepoints CLAUDE.md), nicht per Umgebungsvariable. Ein separat
+  Installation im Admin-Bereich der laufenden App selbst konfiguriert - datenbankgestützt
+  (TranscriptionSettings), nicht per Umgebungsvariable. Ein separat
   laufender onerahmet/openai-whisper-asr-webservice-Container (z.B. ebenfalls über Community
   Applications) wird dort per URL eingetragen, falls gewünscht.
 -->

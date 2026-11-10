@@ -147,7 +147,7 @@ export interface Note {
   // the view's default neutral color. Palette/"scheme" selection is a frontend-only concept (see
   // notesGraph/colorSchemes.ts) - the backend only ever stores/returns the resolved color. The
   // only per-note visual left - per-note shape/edge style/edge overrides were removed entirely
-  // per explicit user request ("Formen wieder nur als Punkt machen"), see CLAUDE.md "Notes".
+  // per explicit user request ("Formen wieder nur als Punkt machen").
   color: string | null
   // Last manually-saved position in the free (physics-simulated) graph view (NoteGraphView), or
   // null if the note has never been dragged there yet - see the backend's dedicated

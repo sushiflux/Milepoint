@@ -16,3 +16,19 @@ root_dir="$(git rev-parse --show-toplevel)"
 year="$(date +%Y)"
 count="$(git -C "$root_dir" rev-list --count HEAD --since="${year}-01-01T00:00:00")"
 printf 'v%s.%s.%s' "$year" "$(date +%-m)" "$count" > "$root_dir/backend/src/Milepoint.Api/version.txt"
+
+# The git-ignored intern/ folder (private notes, never part of this repository) is backed up by the command named in the local git
+# config key intern.sync, if one is set, with this commit's version as the message. It runs in the background and may never fail
+# or block the commit that ran the hook.
+sync=$(git config --get intern.sync 2>/dev/null)
+if [ -n "$sync" ] && [ -d "$root_dir/intern" ]; then
+    message=$(sed -n '1p' "$root_dir/backend/src/Milepoint.Api/version.txt" 2>/dev/null | tr -d '\r')
+    [ -n "$message" ] || message="update"
+    (
+        # The hook runs with GIT_DIR/GIT_INDEX_FILE of this repository - the backup command must not inherit them
+        unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+        sh -c "$sync save \"\$1\" --message \"\$2\"" intern-sync "$root_dir" "$message" >/dev/null 2>&1 &
+    ) || true
+fi
+
+exit 0

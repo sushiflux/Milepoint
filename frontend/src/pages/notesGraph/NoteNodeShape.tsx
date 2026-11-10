@@ -4,7 +4,7 @@
 // text as a box) plus a full per-note appearance side panel - both removed entirely per explicit
 // user request ("Formen wieder nur als Punkt machen"). Color remains the only per-note visual
 // (via the project-wide Farbschema buttons, see colorSchemes.ts/assignSchemeColors) - the
-// backend's Note.Shape column and every NoteShape-typed field are gone (see CLAUDE.md "Notes").
+// backend's Note.Shape column and every NoteShape-typed field are gone.
 
 const NODE_RADIUS = 9
 const FONT_SIZE = 11

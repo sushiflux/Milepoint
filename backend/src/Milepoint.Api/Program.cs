@@ -360,9 +360,9 @@ app.MapGet("/api/version", () =>
 });
 
 // Serves the built frontend (frontend/dist, copied to wwwroot by Dockerfile.prod's multi-stage
-// build) directly from this same Kestrel process - the customer-facing distribution shape from
-// CLAUDE.md's "Customer distribution concept" (no separate frontend/Caddy container needed just
-// to serve static files). Dev keeps using the separate Vite dev-server container instead (see
+// build) directly from this same Kestrel process - the customer-facing distribution shape
+// (no separate frontend/Caddy container needed just to serve static files). Dev keeps using the
+// separate Vite dev-server container instead (see
 // docker-compose.yml) - wwwroot simply doesn't exist there, so this block is a no-op in dev.
 // Placed after every API/hub/healthcheck route above: MapFallbackToFile only ever runs for a
 // request that didn't match any of those, so it can never shadow /api/*, /hubs/*, or /healthz.

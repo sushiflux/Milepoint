@@ -48,7 +48,7 @@ services:
   # MSSQL is NOT part of the everyday dev stack anymore - it only starts via the "mssql-check"
   # profile (docker compose --profile mssql-check up -d mssql, or start.ps1 -MssqlCheck), spun up
   # deliberately before an RC-Commit/V-Commit to verify the SqlServerPmDbContext provider still
-  # works (see the dual-EF-Core-provider architecture in CLAUDE.md), rather than staying resident
+  # works (see the dual-EF-Core provider setup), rather than staying resident
   # for the rest of a session the way it used to. Keeping two full DB servers running all the time
   # for a provider only occasionally exercised was wasted resources for no daily benefit - Postgres
   # alone is the dev default now (DB_PROVIDER=postgres).
@@ -164,7 +164,7 @@ services:
     # actively maintained - github.com/ahmetoner/whisper-asr-webservice). Pinned to an exact tag
     # for reproducibility (image is multi-GB and bundles specific model-engine versions), not
     # `:latest`. Bump the tag deliberately when a newer release is verified, same as any other
-    # image in this file - check VERSIONS.md.
+    # image in this file.
     image: onerahmet/openai-whisper-asr-webservice:v1.10.0
     profiles: ["whisper"]
     environment:

@@ -1,4 +1,4 @@
-# Customer-facing distribution stack - see "Customer distribution concept" in CLAUDE.md. This is
+# Customer-facing distribution stack. This is
 # the generic "self-host with Docker Compose on any Linux host" path, WITH a bundled Postgres -
 # not what the Unraid Community Applications template uses (unraid/milepoint.xml.template ships a
 # single container and expects an EXTERNAL Postgres instead, since Unraid's Compose Manager plugin
@@ -107,7 +107,7 @@ services:
 
   # Optional: bundled reverse proxy with automatic local-CA HTTPS - off by default, since most
   # Unraid users already run their own shared reverse proxy (SWAG/Nginx Proxy Manager) handling
-  # TLS centrally for every app on their server, see "Unraid" in CLAUDE.md's distribution concept.
+  # TLS centrally for every app on their server.
   # Enable only for users without an existing reverse proxy who want instant HTTPS:
   #   docker compose -f docker-compose.prod.yml --profile caddy up -d
   caddy:

@@ -1,0 +1,14 @@
+#!/bin/sh
+# After a pull the git-ignored intern/ folder (private notes, never part of this repository) is brought up to date from its backup
+# by the command named in the local git config key intern.sync, if one is set. Newer local changes are kept. Never fails the pull.
+
+sync=$(git config --get intern.sync 2>/dev/null)
+[ -n "$sync" ] || exit 0
+repo_root=$(git rev-parse --show-toplevel) || exit 0
+
+(
+    unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX GIT_OBJECT_DIRECTORY GIT_COMMON_DIR
+    sh -c "$sync restore \"\$1\"" intern-sync "$repo_root"
+) || true
+
+exit 0

@@ -241,7 +241,7 @@ function tick(
 /**
  * Freie, physik-simulierte Graph-Ansicht der Notizen - zeigt nur die [[Titel]]-Querlinks, kein
  * Seitenpanel mehr für Aussehen-Anpassung (Form/Linienstil/Pfeilspitzen/Liniendicke/Linienfarbe/
- * Pro-Verbindung-Overrides wurden komplett entfernt, siehe CLAUDE.md "Notes"). Ein Klick auf eine
+ * Pro-Verbindung-Overrides wurden komplett entfernt). Ein Klick auf eine
  * Notiz öffnet direkt den Listen-Editor (onSelectNote), genau wie ein Klick in der Liste selbst -
  * kein Zwischenschritt über ein Panel mehr. Farbe bleibt als einzige visuelle Stellschraube
  * (project-weite Farbschema-Buttons in NotesView.tsx, siehe assignSchemeColors).

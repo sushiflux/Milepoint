@@ -283,7 +283,7 @@ export default function NotesView({ projectId, notes, onNotesChange }: Props) {
   }
 
   // Ein Klick auf eine Notiz im Graph öffnet sie direkt im Listen-Editor - genau wie ein Klick in
-  // der Liste selbst, kein Seitenpanel/Zwischenschritt mehr (siehe CLAUDE.md "Notes").
+  // der Liste selbst, kein Seitenpanel/Zwischenschritt mehr.
   function handleGraphSelect(note: Note) {
     openNote(note)
     setViewMode('list')

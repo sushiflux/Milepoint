@@ -14,3 +14,6 @@ frontend/e2e/
 *.local.json
 .backups/
 docs/
+# The private intern/ folder and the local-only CLAUDE.md stub are never part of an image.
+/intern/
+/CLAUDE.md

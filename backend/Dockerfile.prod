@@ -1,7 +1,6 @@
 # Multi-stage production build - builds the frontend to static files and embeds them into the
 # backend image, so the customer-facing distribution needs only this one container (plus
-# Postgres/Redis/optional Whisper) instead of separate frontend/Caddy containers - see
-# "Customer distribution concept" in CLAUDE.md for the rationale.
+# Postgres/Redis/optional Whisper) instead of separate frontend/Caddy containers.
 
 # --- Stage 1: build the frontend to static files ---
 FROM node:24-alpine AS frontend-build

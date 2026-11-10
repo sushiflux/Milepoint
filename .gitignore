@@ -48,3 +48,6 @@ npm-debug.log*
 # docker-compose.prod.yml and .github/workflows/) - never hand-authored, never committed ---
 dist/
 *.docker-image.tar
+
+# Private development documents: intern/ is its own private repository.
+/intern/
