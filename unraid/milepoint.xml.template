@@ -1,17 +1,17 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Milepoint</Name>
-  <Repository>ghcr.io/sushiflux-develop/milepoint:__VERSION__</Repository>
-  <Registry>https://github.com/SushiFlux-Develop/Milepoint/pkgs/container/milepoint</Registry>
+  <Repository>ghcr.io/sushiflux-development/milepoint:__VERSION__</Repository>
+  <Registry>https://github.com/SushiFlux-Development/Milepoint/pkgs/container/milepoint</Registry>
   <Network>bridge</Network>
   <Privileged>false</Privileged>
-  <Support>https://github.com/SushiFlux-Develop/Milepoint</Support>
-  <Project>https://github.com/SushiFlux-Develop/Milepoint</Project>
+  <Support>https://github.com/SushiFlux-Development/Milepoint</Support>
+  <Project>https://github.com/SushiFlux-Development/Milepoint</Project>
   <Overview>Milepoint – Selbst gehostetes Projekt-Management-Tool (Issue-Tracking, Kanban, Gantt-Timeline, Notizen). ASP.NET Core Backend mit integriertem React-Frontend. Benötigt eine externe PostgreSQL-Datenbank; Redis und der optionale Whisper-Spracherkennungs-Dienst können ebenfalls extern betrieben werden.</Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/SushiFlux-Develop/Milepoint/main/unraid/milepoint.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/SushiFlux-Develop/Milepoint_Unraid/main/icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/SushiFlux-Development/Milepoint/main/unraid/milepoint.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/SushiFlux-Development/Milepoint_Unraid/main/icon.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <DateInstalled></DateInstalled>
 
@@ -32,7 +32,7 @@
     Name="Datenbank Host"
     Target="ConnectionStrings__Postgres_Host"
     Default=""
-    Description="IP-Adresse oder Hostname des PostgreSQL-Containers, z.B. 192.168.178.115"
+    Description="IP-Adresse oder Hostname des PostgreSQL-Containers, z.B. 192.168.1.20"
     Type="Variable"
     Display="always"
     Required="true"
@@ -83,7 +83,7 @@
     Name="Redis Host:Port"
     Target="ConnectionStrings__Redis"
     Default=""
-    Description="Adresse des Redis-Containers, z.B. 192.168.178.115:6379 - wird für SignalR (Live-Sync des Kanban-Boards) benötigt."
+    Description="Adresse des Redis-Containers, z.B. 192.168.1.20:6379 - wird für SignalR (Live-Sync des Kanban-Boards) benötigt."
     Type="Variable"
     Display="always"
     Required="true"

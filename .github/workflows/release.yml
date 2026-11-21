@@ -1,20 +1,18 @@
 name: Release
 
-# Three-tier push model (see the global CLAUDE.md's "Three-tier push model" / "Platform-scoped RC"):
-#   v2026.9.80            -> plain tag, never pushed by this workflow's trigger shape (a real
-#                            release tag always carries "-rc" or nothing extra - see below)
-#   v2026.9.83-rc          -> RC push: builds the image, publishes a DRAFT GitHub Release
-#   platform scope         -> NOT part of the tag name; an annotated tag message line
-#                            "platform: unraid" (or "windows") scopes the build to one platform
-#   v2026.9.80             -> Release push (no "-rc" suffix at all): same build, published as a
-#                            normal PUBLIC GitHub Release
+# Four-channel model (Dev stays local):
+#   vYear.Month.Commit.Prompts.Lines-nightly -> Nightly (α), public pre-release, Docker: <id>-nightly + :nightly
+#   vYear.Month.Commit.Prompts.Lines-beta    -> Beta (β), public pre-release, Docker: <id>-beta + :beta (also supports legacy -rc)
+#   vYear.Month.Commit                       -> Release, public release, Docker: <id> + :latest + :beta + :nightly
+#
+# Target scope lives in the annotated tag message as "platform: <list>" (e.g. "platform: unraid" or "all").
 on:
   push:
     tags:
       - "v*"
 
 env:
-  IMAGE_NAME: ghcr.io/sushiflux-develop/milepoint
+  IMAGE_NAME: ghcr.io/sushiflux-development/milepoint
 
 jobs:
   build:
@@ -26,28 +24,51 @@ jobs:
       - name: Repo auschecken
         uses: actions/checkout@v5
 
-      - name: Versionsschema aus Tag ableiten
+      - name: Kanal und Zielplattform aus Tag ableiten
         id: version
         run: |
-          # The tag is only ever the plain version (v2026.9.83-rc / v2026.9.83). The build target
-          # ("RC Unraid", "RC Windows Server", "RC All", ...) lives in the annotated tag's message
-          # as a line "platform: <list>" with the ids unraid, windows-server, windows-desktop
-          # (comma-separated) or all; no such line means "build every target". Milepoint ships only
-          # the Unraid/Docker artifact so far, so only unraid/all/empty trigger a build.
           tag="${GITHUB_REF_NAME}"
-          is_rc=false
-          if [[ "$tag" == *-rc* ]]; then is_rc=true; fi
 
-          # actions/checkout may have flattened the annotated tag - re-fetch the real tag object.
+          # Determine channel from tag suffix.
+          if [[ "$tag" == *-nightly* ]]; then
+            channel="Nightly"
+            is_prerelease=true
+            template_tag="nightly"
+            five_seg="${tag%-nightly*}"
+          elif [[ "$tag" == *-beta* ]]; then
+            channel="Beta"
+            is_prerelease=true
+            template_tag="beta"
+            five_seg="${tag%-beta*}"
+          elif [[ "$tag" == *-rc* ]]; then
+            channel="Beta"
+            is_prerelease=true
+            template_tag="beta"
+            five_seg="${tag%-rc*}"
+          else
+            channel="Release"
+            is_prerelease=false
+            template_tag="latest"
+            five_seg="$tag"
+          fi
+
+          # Derive 3-segment base version (vYear.Month.Commit) from five_seg or existing version.txt.
+          base_version="$(echo "$five_seg" | awk -F. '{ if (NF >= 3) print $1 "." $2 "." $3; else print $0 }')"
+          if [[ -f backend/src/Milepoint.Api/version.txt ]]; then
+            committed_five_seg="$(sed -n '2p' backend/src/Milepoint.Api/version.txt | tr -d '\r')"
+            if [[ -n "$committed_five_seg" && "$channel" == "Release" ]]; then
+              five_seg="$committed_five_seg"
+            fi
+          fi
+
+          # Re-fetch annotated tag to read "platform: ..." from its message.
           git fetch --force origin "refs/tags/${tag}:refs/tags/${tag}" || true
           platform="$(git tag -l --format='%(contents)' "$tag" | sed -n 's/^platform:[[:space:]]*//p' | head -n1 | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
           builds_unraid=false
           case ",${platform}," in
-            ",,"|*,unraid,*|*,all,*) builds_unraid=true ;;
+            ",,"|*,unraid,*|*,docker,*|*,all,*) builds_unraid=true ;;
           esac
-          echo "Build-Scope: platform='${platform:-alle}' builds_unraid=$builds_unraid"
 
-          # Readable target name(s) for the release title, e.g. "v2026.9.83-rc (Unraid)".
           target_label=""
           if [[ -z "$platform" || ",${platform}," == *,all,* ]]; then
             target_label="All"
@@ -56,8 +77,7 @@ jobs:
             for id in "${ids[@]}"; do
               case "$id" in
                 unraid) name="Unraid" ;;
-                windows-server) name="Windows Server" ;;
-                windows-desktop) name="Windows Desktop" ;;
+                docker) name="Docker" ;;
                 *) name="$id" ;;
               esac
               target_label="${target_label:+$target_label, }$name"
@@ -65,29 +85,38 @@ jobs:
           fi
 
           docker_tag="${tag#v}"
-
-          # RC builds are also pushed under the moving tag "rc", and the RC Unraid template points
-          # at it: the test container is then updated in place (Unraid's own update, all saved
-          # settings stay) instead of re-creating the template for every RC. Real releases use the
-          # fixed version. An RC never moves "latest".
-          template_tag="$docker_tag"
-          if [[ "$is_rc" == "true" ]]; then template_tag="rc"; fi
+          case "$channel" in
+            Nightly)
+              display_title="${five_seg} (α) (${target_label})"
+              docker_tags="${IMAGE_NAME}:${docker_tag}"$'\n'"${IMAGE_NAME}:nightly"
+              ;;
+            Beta)
+              display_title="${five_seg} (β) (${target_label})"
+              docker_tags="${IMAGE_NAME}:${docker_tag}"$'\n'"${IMAGE_NAME}:beta"
+              ;;
+            Release)
+              display_title="${five_seg} (${target_label})"
+              docker_tags="${IMAGE_NAME}:${docker_tag}"$'\n'"${IMAGE_NAME}:latest"$'\n'"${IMAGE_NAME}:beta"$'\n'"${IMAGE_NAME}:nightly"
+              ;;
+          esac
 
           {
             echo "tag=$tag"
-            echo "is_rc=$is_rc"
+            echo "channel=$channel"
+            echo "is_prerelease=$is_prerelease"
             echo "builds_unraid=$builds_unraid"
             echo "docker_tag=$docker_tag"
             echo "template_tag=$template_tag"
-            echo "release_name=$tag ($target_label)"
+            echo "base_version=$base_version"
+            echo "five_seg=$five_seg"
+            echo "release_name=$display_title"
+            echo "docker_tags<<EOF"
+            echo "$docker_tags"
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: version.txt schreiben
-        # Dieselbe Datei, die scripts/git-hooks/post-commit lokal pflegt - beim CI-Build wird sie
-        # stattdessen direkt aus dem Tag-Namen gesetzt (kein .git-Verlaufszugriff auf den
-        # Jahres-Commit-Zähler nötig, der Tag selbst trägt schon die endgültige Versionsnummer).
-        # Der Tag ist immer die reine Version (z.B. v2026.9.83-rc), die App zeigt genau das an.
-        run: echo "v${{ steps.version.outputs.docker_tag }}" > backend/src/Milepoint.Api/version.txt
+        run: printf '%s\n%s\n' "${{ steps.version.outputs.base_version }}" "${{ steps.version.outputs.five_seg }}" > backend/src/Milepoint.Api/version.txt
 
       - name: Docker Buildx einrichten
         if: steps.version.outputs.builds_unraid == 'true'
@@ -108,10 +137,11 @@ jobs:
           context: .
           file: backend/Dockerfile.prod
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.docker_tag }}
-            ${{ steps.version.outputs.is_rc == 'true' && format('{0}:rc', env.IMAGE_NAME) || '' }}
-            ${{ steps.version.outputs.is_rc == 'false' && format('{0}:latest', env.IMAGE_NAME) || '' }}
+          build-args: |
+            MILEPOINT_CHANNEL=${{ steps.version.outputs.channel }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.tag }}
+          tags: ${{ steps.version.outputs.docker_tags }}
 
       - name: Unraid Community-Applications-Template rendern
         if: steps.version.outputs.builds_unraid == 'true'
@@ -119,7 +149,7 @@ jobs:
           sed "s/__VERSION__/${{ steps.version.outputs.template_tag }}/g" \
             unraid/milepoint.xml.template > unraid/milepoint.xml
 
-      - name: Unraid-Template als Artefakt anhängen (nur zum Selbst-Herunterladen, kein Feed-Push)
+      - name: Unraid-Template als Artefakt anhängen
         if: steps.version.outputs.builds_unraid == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -131,9 +161,7 @@ jobs:
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: ${{ steps.version.outputs.release_name }}
-          draft: ${{ steps.version.outputs.is_rc }}
-          prerelease: ${{ steps.version.outputs.is_rc }}
-          # Nur anhängen, wenn der Unraid-Build oben tatsächlich lief - sonst existiert die Datei
-          # nicht (z.B. bei einem künftigen rein-Windows-scoped Tag).
+          draft: false
+          prerelease: ${{ steps.version.outputs.is_prerelease }}
           files: ${{ steps.version.outputs.builds_unraid == 'true' && 'unraid/milepoint.xml' || '' }}
           generate_release_notes: true

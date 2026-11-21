@@ -1,28 +1,16 @@
 #!/bin/sh
-# Keeps backend/src/Milepoint.Api/version.txt (read live by GET /api/version) in sync with
-# the actual commit count immediately after every commit - not just whenever start.ps1
-# happens to be re-run. Wired up automatically by start.ps1 via `git config core.hooksPath`.
-#
-# Scheme: Year.Month.CommitOfTheYear, no zero-padding (e.g. v2026.8.64). No day segment and no
-# daily reset - commits are usually made in small end-of-session batches, not evenly through the
-# day, so a per-day counter mostly just reads ".1" or ".2" and adds little information. Counting
-# per year instead gives an at-a-glance sense of overall commit volume for that year. The last
-# segment resets to 1 on the first commit of each new calendar year (git rev-list --count
-# --since, anchored at Jan 1 of the current year), not the repo's total commit count - otherwise
-# it grows unbounded over the project's lifetime instead of staying a meaningful "how many
-# commits this year" figure.
+# Resets the prompt counter after a commit and backs up intern/ via intern.sync if configured.
 
 root_dir="$(git rev-parse --show-toplevel)"
-year="$(date +%Y)"
-count="$(git -C "$root_dir" rev-list --count HEAD --since="${year}-01-01T00:00:00")"
-printf 'v%s.%s.%s' "$year" "$(date +%-m)" "$count" > "$root_dir/backend/src/Milepoint.Api/version.txt"
+printf '0\n' > "$root_dir/.version-prompts"
 
 # The git-ignored intern/ folder (private notes, never part of this repository) is backed up by the command named in the local git
 # config key intern.sync, if one is set, with this commit's version as the message. It runs in the background and may never fail
 # or block the commit that ran the hook.
 sync=$(git config --get intern.sync 2>/dev/null)
 if [ -n "$sync" ] && [ -d "$root_dir/intern" ]; then
-    message=$(sed -n '1p' "$root_dir/backend/src/Milepoint.Api/version.txt" 2>/dev/null | tr -d '\r')
+    message=$(sed -n '2p' "$root_dir/backend/src/Milepoint.Api/version.txt" 2>/dev/null | tr -d '\r')
+    [ -n "$message" ] || message=$(sed -n '1p' "$root_dir/backend/src/Milepoint.Api/version.txt" 2>/dev/null | tr -d '\r')
     [ -n "$message" ] || message="update"
     (
         # The hook runs with GIT_DIR/GIT_INDEX_FILE of this repository - the backup command must not inherit them

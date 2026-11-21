@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { checkUsernameAvailable, login, register } from '../api/auth'
+import { getVersion } from '../api/version'
 import { useAuth } from '../context/AuthContext'
 import { ApiError } from '../api/client'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
@@ -21,6 +22,13 @@ export default function LoginPage() {
   const [touched, setTouched] = useState<Record<string, boolean>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [appVersion, setAppVersion] = useState<string | null>(null)
+
+  useEffect(() => {
+    getVersion()
+      .then((res) => setAppVersion(res.version))
+      .catch(() => setAppVersion(null))
+  }, [])
 
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null)
   // Which debounced username value usernameAvailable's current result actually belongs to - lets
@@ -235,6 +243,11 @@ export default function LoginPage() {
           {mode === 'login' ? 'Noch kein Konto? Registrieren' : 'Schon ein Konto? Anmelden'}
         </button>
         </form>
+        {appVersion && (
+          <p className="absolute bottom-4 left-0 right-0 text-center font-mono text-[11px] text-slate-400 dark:text-slate-500">
+            {appVersion}
+          </p>
+        )}
       </div>
     </div>
   )

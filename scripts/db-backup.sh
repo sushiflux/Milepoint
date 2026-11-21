@@ -3,8 +3,7 @@
 # (docker-compose.yml). The stack is started at random times, so this is deliberately NOT a
 # cron-style schedule: it dumps once right after the database becomes reachable (i.e. on every
 # stack start) and then every BACKUP_INTERVAL_HOURS while the stack keeps running. start.ps1 also
-# triggers `db-backup.sh once` right before stopping the stack. See the global CLAUDE.md,
-# "Database backups for local Docker Compose stacks".
+# triggers `db-backup.sh once` right before stopping the stack.
 #
 #   db-backup.sh          -> loop mode (default: sidecar entrypoint)
 #   db-backup.sh once     -> one dump, then exit

@@ -36,6 +36,7 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
     public DbSet<Note> Notes => Set<Note>();
     public DbSet<NoteLink> NoteLinks => Set<NoteLink>();
     public DbSet<TranscriptionSettings> TranscriptionSettings => Set<TranscriptionSettings>();
+    public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
 
     // IDataProtectionKeyContext requires a settable DbSet property (not just Set<T>()) named
     // exactly DataProtectionKeys - see class-level comment above for why keys live here.
@@ -315,6 +316,20 @@ public abstract class PmDbContextBase : IdentityDbContext<ApplicationUser>, IDat
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_TranscriptionSettings_SingletonId",
                 $"\"Id\" = {Models.TranscriptionSettings.SingletonId}"));
+        });
+
+        builder.Entity<ApiToken>(entity =>
+        {
+            entity.Property(t => t.Name).HasMaxLength(100).IsRequired();
+            entity.Property(t => t.TokenPrefix).HasMaxLength(20).IsRequired();
+            entity.Property(t => t.TokenHash).HasMaxLength(64).IsRequired();
+            entity.HasIndex(t => t.TokenHash).IsUnique();
+            entity.HasIndex(t => t.UserId);
+
+            entity.HasOne(t => t.User)
+                .WithMany()
+                .HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

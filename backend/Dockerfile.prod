@@ -34,6 +34,8 @@ COPY --from=backend-build /app/publish .
 # Program.cs's UseStaticFiles()/MapFallbackToFile("index.html") serve them from there.
 COPY --from=frontend-build /frontend/dist ./wwwroot
 
+ARG MILEPOINT_CHANNEL=Release
+ENV MILEPOINT_CHANNEL=${MILEPOINT_CHANNEL}
 ENV ASPNETCORE_URLS=http://+:8080
 EXPOSE 8080
 

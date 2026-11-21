@@ -1,0 +1,53 @@
+#!/bin/sh
+# Writes the two-line version.txt (3-segment base version + 5-segment full id) into the commit
+# itself and stamps any open "## Unreleased" headings in the changelog files.
+#
+# Five-segment scheme: vYear.Month.CommitOfYear.Prompts.ChangedLines (no zero-padding).
+
+root_dir="$(git rev-parse --show-toplevel)"
+year="$(date +%Y)"
+month="$(date +%-m)"
+
+# Next commit count in the current calendar year (HEAD commits this year + 1 for this commit).
+existing_count="$(git -C "$root_dir" rev-list --count HEAD --since="${year}-01-01T00:00:00" 2>/dev/null || echo 0)"
+commit_num=$((existing_count + 1))
+
+# Prompt counter since the previous commit (stored in git-ignored .version-prompts).
+prompts=1
+if [ -f "$root_dir/.version-prompts" ]; then
+    raw_prompts="$(tr -dc '0-9' < "$root_dir/.version-prompts")"
+    if [ -n "$raw_prompts" ] && [ "$raw_prompts" -gt 0 ] 2>/dev/null; then
+        prompts="$raw_prompts"
+    fi
+fi
+
+# Changed lines in the staged diff (insertions + deletions), excluding binaries and version.txt.
+changed_lines="$(git -C "$root_dir" diff --cached --numstat -- . ':!backend/src/Milepoint.Api/version.txt' | awk '
+    $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { sum += $1 + $2 }
+    END { print sum + 0 }
+')"
+
+base_version="v${year}.${month}.${commit_num}"
+five_segment="${base_version}.${prompts}.${changed_lines}"
+
+version_file="$root_dir/backend/src/Milepoint.Api/version.txt"
+printf '%s\n%s\n' "$base_version" "$five_segment" > "$version_file"
+git -C "$root_dir" add "backend/src/Milepoint.Api/version.txt"
+
+# Stamp "## Unreleased" (dev) or "## vNEXT..." (customer channels) headings if present.
+stamp_time="$(date '+%Y-%m-%d %H:%M')"
+for cl in "$root_dir/CHANGELOG.md" "$root_dir/CHANGELOG.nightly.md" "$root_dir/CHANGELOG.beta.md" "$root_dir/intern/CHANGELOG.dev.md"; do
+    if [ -f "$cl" ]; then
+        if grep -q '^## Unreleased' "$cl"; then
+            sed -i "s/^## Unreleased.*/## ${five_segment} - ${stamp_time}/" "$cl"
+        fi
+        if grep -q '^## vNEXT' "$cl"; then
+            sed -i "s/^## vNEXT/## ${five_segment}/" "$cl"
+        fi
+        if [ "$cl" != "$root_dir/intern/CHANGELOG.dev.md" ]; then
+            git -C "$root_dir" add "$cl"
+        fi
+    fi
+done
+
+exit 0

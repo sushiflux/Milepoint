@@ -166,12 +166,28 @@ builder.Services
     .AddSignInManager()
     .AddDefaultTokenProviders();
 
+const string AuthPolicyScheme = "BearerOrApiToken";
+
 builder.Services
     .AddAuthentication(options =>
     {
-        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultAuthenticateScheme = AuthPolicyScheme;
+        options.DefaultChallengeScheme = AuthPolicyScheme;
     })
+    .AddPolicyScheme(AuthPolicyScheme, "JWT or API Token", options =>
+    {
+        options.ForwardDefaultSelector = context =>
+        {
+            var authHeader = context.Request.Headers.Authorization.ToString();
+            if (authHeader.StartsWith($"Bearer {ApiTokenService.TokenPrefix}", StringComparison.OrdinalIgnoreCase))
+            {
+                return ApiTokenAuthenticationHandler.SchemeName;
+            }
+            return JwtBearerDefaults.AuthenticationScheme;
+        };
+    })
+    .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, ApiTokenAuthenticationHandler>(
+        ApiTokenAuthenticationHandler.SchemeName, _ => { })
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
@@ -346,17 +362,37 @@ app.MapControllers();
 app.MapHub<KanbanHub>("/hubs/kanban");
 app.MapHealthChecks("/healthz");
 // Read fresh on every request (not baked into IConfiguration at startup) so the version
-// updates immediately when scripts/git-hooks/post-commit rewrites this file after a commit,
-// without requiring a container restart.
-// Dev and prod use the exact same vYear.Month.CommitOfTheYear scheme (e.g. v2026.8.64), no
-// separate "-dev" marker - the fallback below only matters before the first
-// start.ps1/post-commit run has ever written the file, and still follows the same format
-// rather than a literal "dev" string.
+// updates immediately when git hooks rewrite this file after a commit, without requiring a
+// container restart. Line 1 holds the 3-segment base version (vYear.Month.Commit), line 2 holds
+// the 5-segment id (vYear.Month.Commit.Prompts.Lines). The channel symbol is derived at runtime.
 var versionFilePath = Path.Combine(builder.Environment.ContentRootPath, "version.txt");
-app.MapGet("/api/version", () =>
+app.MapGet("/api/version", (IHostEnvironment env, IConfiguration config) =>
 {
-    var version = File.Exists(versionFilePath) ? File.ReadAllText(versionFilePath).Trim() : "v0.0.0";
-    return Results.Ok(new { version });
+    var lines = File.Exists(versionFilePath)
+        ? File.ReadAllLines(versionFilePath).Select(l => l.Trim()).Where(l => l.Length > 0).ToArray()
+        : [];
+    var baseVersion = lines.Length >= 1 ? lines[0] : "v0.0.0";
+    var fiveSegment = lines.Length >= 2 ? lines[1] : baseVersion;
+
+    var channel = env.IsDevelopment()
+        ? "Dev"
+        : (config["MILEPOINT_CHANNEL"]?.Trim() switch
+        {
+            "Nightly" => "Nightly",
+            "Beta" => "Beta",
+            _ => "Release"
+        });
+
+    var symbol = channel switch
+    {
+        "Dev" => " (</>) ",
+        "Nightly" => " (\u03B1)",
+        "Beta" => " (\u03B2)",
+        _ => string.Empty
+    };
+
+    var displayVersion = $"{fiveSegment}{symbol}".TrimEnd();
+    return Results.Ok(new { version = displayVersion, baseVersion, fiveSegment, channel });
 });
 
 // Serves the built frontend (frontend/dist, copied to wwwroot by Dockerfile.prod's multi-stage

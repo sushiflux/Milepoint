@@ -106,7 +106,7 @@
   Zeitpunkt der Prüfung nicht registriert (`milepoint.com` gehört einer thematisch unabhängigen
   Vielflieger-Advice-Seite, kein Software-Konkurrent). Eindeutige Aussprache war das ausschlaggebende
   Kriterium gegenüber der lateinischen Alternative "Facienda".
-- **Copyright: © 2026 SushiFlux Develop** (vormals SynShift Labs, umfirmiert; GitHub-Identität für Commits, siehe Git-Konfiguration dieses Repos).
+- **Copyright: © 2026 SushiFlux Development** (vormals SynShift Labs, umfirmiert; GitHub-Identität für Commits, siehe Git-Konfiguration dieses Repos).
 - **Hinweis:** Diese Recherche ist keine rechtsverbindliche Markenprüfung. Vor einer öffentlichen Nutzung des
   Namens sollte eine echte Markenrecherche (DPMA/EUIPO TMview) sowie eine Registrar-Prüfung der Domain erfolgen.
 - **Umbenennung von "PM" auf "Milepoint" durchgeführt** (2026-08-12): Ordnername, Docker-Compose-Projektname

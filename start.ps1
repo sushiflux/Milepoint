@@ -2,7 +2,7 @@
   Milepoint Dev-Stack - Start/Stopp/Status in einer Datei.
 
   .\start.ps1                  Startet den Stack (erstellt .env falls nötig, liest feste Ports aus
-                                der globalen Registry ~/.claude/ports.json, wartet auf Healthchecks)
+                                einer lokalen ports.json, wartet auf Healthchecks)
   .\start.ps1 -Action stop     Stoppt den Stack (Docker-Volumes/Daten bleiben erhalten)
   .\start.ps1 -Action restart  Stoppt und startet neu
   .\start.ps1 -Action status   Zeigt den Container-Status
@@ -36,12 +36,11 @@ param(
     # zusätzliche Container vermieden werden soll.
     [switch]$NoWhisper,
 
-    # MSSQL läuft NICHT mehr standardmäßig mit (siehe docker-compose.yml, Service "mssql" hinter
-    # dem "mssql-check"-Profil) - der tägliche Dev-Stack braucht nur Postgres. -MssqlCheck startet
-    # den mssql-Dienst gezielt mit, für den Fall, dass die SqlServerPmDbContext-Seite der dualen
-    # EF-Core-Provider-Architektur geprüft werden muss (Standardfall: vor einem RC-Commit/V-Commit,
-    # siehe "Test depth by commit word" in der globalen CLAUDE.md). Ohne dieses Flag bleibt mssql
-    # unberührt (weder gestartet noch gestoppt), analog zum -NoWhisper/whisper-Muster oben.
+    # MSSQL no longer runs by default (see docker-compose.yml, service "mssql" behind the
+    # "mssql-check" profile) - the everyday dev stack only needs Postgres. -MssqlCheck starts the
+    # mssql service on purpose, for when the SqlServerPmDbContext side of the dual EF Core provider
+    # setup has to be checked (typically before an RC commit / V commit). Without this flag mssql is
+    # left untouched (neither started nor stopped), like the -NoWhisper/whisper pattern above.
     [switch]$MssqlCheck
 )
 $WithWhisper = -not $NoWhisper
@@ -69,7 +68,7 @@ function New-StrongPassword {
 }
 
 function Get-AppVersion {
-    # Year.Month.CommitOfTheYear, no zero-padding (e.g. v2026.8.64) - mirrors Fluxo's versioning.
+    # Year.Month.CommitOfTheYear, no zero-padding (e.g. v2026.8.64) (year, month, commit count of the year).
     # No manually-maintained base file anymore (see scripts/git-hooks/post-commit, which keeps
     # this current after every commit) - just the current year/month plus the count of commits
     # since Jan 1 of the current year (not the repo's total commit count, so this resets to 1 on
@@ -179,12 +178,28 @@ function Test-TcpPortFree([int]$Port) {
     return -not (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
 }
 
-# Feste Ports aus der globalen Registry (~/.claude/ports.json, projektübergreifend) statt
-# stillem Auto-Fallback auf den nächsten freien Port - siehe "Port registry" in der globalen
-# CLAUDE.md. Ports ändern sich dadurch nie von selbst zwischen Läufen, damit vom Nutzer
-# gespeicherte Links (https://localhost:8445 etc.) stabil bleiben. Ein belegter Port ist ein
-# echter Konflikt und wird laut abgebrochen statt stillschweigend verschoben.
-$PortRegistryFile = 'C:\Users\Flux\.claude\ports.json'
+# Fixed ports from a local port file (ports.json) instead of a silent fallback to the next free
+# port, so ports never change by themselves between runs and links saved by the user
+# (https://localhost:8445 etc.) stay stable. A busy port is a real conflict and aborts loudly
+# instead of being moved silently.
+# Lookup order: environment variable MILEPOINT_PORTS_FILE (explicit path), otherwise a
+# "ports.json" in a dot folder directly under the user profile that has a "milepoint" entry.
+function Find-PortRegistryFile {
+    if ($env:MILEPOINT_PORTS_FILE -and (Test-Path -LiteralPath $env:MILEPOINT_PORTS_FILE)) { return $env:MILEPOINT_PORTS_FILE }
+    if (-not $env:USERPROFILE) { return $null }
+    foreach ($dir in @(Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Force -Filter '.*' -ErrorAction SilentlyContinue)) {
+        $candidate = Join-Path $dir.FullName 'ports.json'
+        if (-not (Test-Path -LiteralPath $candidate)) { continue }
+        try {
+            $json = Get-Content -LiteralPath $candidate -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($json.PSObject.Properties['milepoint']) { return $candidate }
+        }
+        catch { }
+    }
+    return $null
+}
+
+$PortRegistryFile = Find-PortRegistryFile
 
 function Resolve-Ports {
     $portMap = @{
@@ -201,8 +216,8 @@ function Resolve-Ports {
         'WHISPER_PORT'       = 'whisper'
     }
 
-    if (-not (Test-Path $PortRegistryFile)) {
-        throw "Port-Registry nicht gefunden: $PortRegistryFile - siehe 'Port registry' in der globalen CLAUDE.md."
+    if (-not $PortRegistryFile) {
+        throw "Keine Port-Datei mit einem 'milepoint'-Eintrag gefunden. Bitte eine ports.json mit den festen Ports anlegen und ihren Pfad in der Umgebungsvariable MILEPOINT_PORTS_FILE setzen."
     }
     $registry = Get-Content $PortRegistryFile -Raw | ConvertFrom-Json
     if (-not $registry.milepoint) {

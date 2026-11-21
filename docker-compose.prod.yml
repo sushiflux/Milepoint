@@ -16,7 +16,7 @@
 #        (add --profile caddy to also start the bundled Caddy for users without their own proxy)
 # Must differ from the dev stack's "milepoint": Compose derives volume/network names from this, so
 # sharing it made a `down -v` on a prod test wipe the DEV database volume (milepoint_postgres_data)
-# - see the global CLAUDE.md's "distinct Compose project name per environment" rule.
+# - so every environment needs its own Compose project name.
 name: milepoint-prod
 
 services:
@@ -52,7 +52,7 @@ services:
   # Dockerfile.prod, see Program.cs's UseStaticFiles()/MapFallbackToFile) - no separate
   # frontend/Caddy hop needed just to reach the web UI, unlike the dev stack.
   backend:
-    image: ${MILEPOINT_IMAGE:-ghcr.io/sushiflux-develop/milepoint}:${MILEPOINT_TAG:-latest}
+    image: ${MILEPOINT_IMAGE:-ghcr.io/sushiflux-development/milepoint}:${MILEPOINT_TAG:-latest}
     build:
       context: .
       dockerfile: backend/Dockerfile.prod

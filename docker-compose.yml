@@ -25,8 +25,7 @@ services:
   # start), then every BACKUP_INTERVAL_HOURS while up; start.ps1 also triggers one before stopping.
   # Backups go to ./.backups/auto on the HOST (a bind mount, git-ignored via .backups/), never into
   # a Docker volume - a deleted volume (docker compose down -v) must not take its backups with it.
-  # Restore with scripts/restore-db.ps1. See the global CLAUDE.md, "Database backups for local
-  # Docker Compose stacks". The entrypoint strips CRs first so a CRLF checkout can't break the script.
+  # Restore with scripts/restore-db.ps1. The entrypoint strips CRs first so a CRLF checkout can't break the script.
   db-backup:
     image: postgres:18.6-alpine
     entrypoint: ["sh", "-c", "tr -d '\\r' < /scripts/db-backup.sh > /tmp/db-backup.sh && exec sh /tmp/db-backup.sh"]

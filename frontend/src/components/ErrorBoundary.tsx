@@ -39,21 +39,18 @@ interface State {
 const TABS: Tab[] = ['stack', 'context', 'request', 'app']
 
 /**
- * Entwickler-Absturzkonsole für uncaught React-Render-Fehler, im Stil von Laravel Ignition -
- * 1:1 aus PrimeSource (frontend/src/components/ErrorBoundary.tsx) übernommen, siehe globale
- * CLAUDE.md "Developer error boundary" für die projektübergreifende Konvention.
+ * Developer crash console for uncaught React render errors, in the style of Laravel Ignition.
  *
- * BEWUSST fest dunkel, nicht theme-abhängig (Ausnahme vom globalen Light/Dark-Grundsatz): eine
- * Absturzkonsole ist ein eigenständiges Diagnose-Werkzeug mit eigener Identität (wie Browser-
- * DevTools oder eben Ignition selbst), kein Teil der eigentlichen App-Oberfläche — sie soll auch
- * dann lesbar/erkennbar bleiben, wenn das eigentliche Rendering (inkl. ThemeContext) bereits
- * kaputt ist. Milepoint schaltet Dark Mode über eine `dark`-Klasse auf <html> (siehe
- * ThemeContext.tsx), nicht über ein data-theme-Attribut wie PrimeSource - hier irrelevant, da
- * jede Farbe unten ohnehin als fester dunkler Wert geschrieben ist, nie über eine `dark:`-Variante.
+ * Deliberately always dark, not theme-dependent (an exception to the app-wide light/dark rule): a
+ * crash console is a standalone diagnostic tool with its own identity (like browser DevTools or
+ * Ignition itself), not part of the regular app UI - it must stay readable and recognisable even
+ * when the regular rendering (including ThemeContext) is already broken. Milepoint toggles dark
+ * mode via a `dark` class on <html> (see ThemeContext.tsx); that is irrelevant here, since every
+ * colour below is written as a fixed dark value, never through a `dark:` variant.
  *
- * Fängt nur echte React-Render-/Lifecycle-Fehler (siehe React-Doku zu Error Boundaries) — Fehler
- * in Event-Handlern oder async Code (z. B. fehlgeschlagene fetch-Aufrufe) laufen NICHT hier durch,
- * die werden an ihrer jeweiligen Aufrufstelle behandelt (siehe api/client.ts/ApiError).
+ * Only catches genuine React render/lifecycle errors (see the React docs on error boundaries) -
+ * errors in event handlers or async code (e.g. failed fetch calls) do NOT pass through here;
+ * they are handled where they occur (see api/client.ts/ApiError).
  */
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {

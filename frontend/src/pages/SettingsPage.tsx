@@ -1,16 +1,19 @@
 import Header from '../components/Header'
 import ChangePasswordSection from '../components/ChangePasswordSection'
+import ApiTokensSection from '../components/ApiTokensSection'
 import TabBar from '../components/TabBar'
 import { useUrlTab, type TabDef } from '../hooks/useUrlTab'
 import { usePreferences } from '../context/PreferencesContext'
 import { BAR_COLOR_MODE_OPTIONS, BAR_COLOR_MODE_PREFERENCE_KEY, resolveBarColorMode } from '../lib/timelinePreferences'
 
-// Personal settings, grouped by topic: Darstellung (how things look) and Sicherheit (password, and
-// later two-factor/passkeys). Instance-wide settings live in the separate app administration.
-type Tab = 'appearance' | 'security'
+// Personal settings, grouped by topic: Darstellung (how things look), Sicherheit (password, and
+// later two-factor/passkeys), and API-Tokens (for MCP / external integrations). Instance-wide
+// settings live in the separate app administration.
+type Tab = 'appearance' | 'security' | 'api-tokens'
 const TABS: TabDef<Tab>[] = [
   { value: 'appearance', label: 'Darstellung' },
   { value: 'security', label: 'Sicherheit' },
+  { value: 'api-tokens', label: 'API-Tokens' },
 ]
 
 export default function SettingsPage() {
@@ -67,6 +70,7 @@ export default function SettingsPage() {
         )}
 
         {tab === 'security' && <ChangePasswordSection />}
+        {tab === 'api-tokens' && <ApiTokensSection />}
       </main>
     </div>
   )
