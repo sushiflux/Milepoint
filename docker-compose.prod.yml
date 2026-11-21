@@ -52,7 +52,7 @@ services:
   # Dockerfile.prod, see Program.cs's UseStaticFiles()/MapFallbackToFile) - no separate
   # frontend/Caddy hop needed just to reach the web UI, unlike the dev stack.
   backend:
-    image: ${MILEPOINT_IMAGE:-ghcr.io/sushiflux-development/milepoint}:${MILEPOINT_TAG:-latest}
+    image: ${MILEPOINT_IMAGE:-ghcr.io/sushiflux/milepoint}:${MILEPOINT_TAG:-latest}
     build:
       context: .
       dockerfile: backend/Dockerfile.prod

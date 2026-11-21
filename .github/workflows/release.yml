@@ -12,7 +12,7 @@ on:
       - "v*"
 
 env:
-  IMAGE_NAME: ghcr.io/sushiflux-development/milepoint
+  IMAGE_NAME: ghcr.io/sushiflux/milepoint
 
 jobs:
   build:

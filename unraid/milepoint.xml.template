@@ -1,17 +1,17 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Milepoint</Name>
-  <Repository>ghcr.io/sushiflux-development/milepoint:__VERSION__</Repository>
-  <Registry>https://github.com/SushiFlux-Development/Milepoint/pkgs/container/milepoint</Registry>
+  <Repository>ghcr.io/sushiflux/milepoint:__VERSION__</Repository>
+  <Registry>https://github.com/sushiflux/Milepoint/pkgs/container/milepoint</Registry>
   <Network>bridge</Network>
   <Privileged>false</Privileged>
-  <Support>https://github.com/SushiFlux-Development/Milepoint</Support>
-  <Project>https://github.com/SushiFlux-Development/Milepoint</Project>
+  <Support>https://github.com/sushiflux/Milepoint</Support>
+  <Project>https://github.com/sushiflux/Milepoint</Project>
   <Overview>Milepoint – Selbst gehostetes Projekt-Management-Tool (Issue-Tracking, Kanban, Gantt-Timeline, Notizen). ASP.NET Core Backend mit integriertem React-Frontend. Benötigt eine externe PostgreSQL-Datenbank; Redis und der optionale Whisper-Spracherkennungs-Dienst können ebenfalls extern betrieben werden.</Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/SushiFlux-Development/Milepoint/main/unraid/milepoint.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/SushiFlux-Development/Milepoint_Unraid/main/icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/sushiflux/Milepoint/master/unraid/milepoint.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/sushiflux/Milepoint/master/branding/logo/logo_dark_mode.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <DateInstalled></DateInstalled>
 
