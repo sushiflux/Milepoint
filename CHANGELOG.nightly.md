@@ -9,6 +9,10 @@
 
 _The German version follows below — [jump to it](#deutsch)._
 
+## v2026.11.87.2.8 (α) · All
+
+- No user-visible changes.
+
 ## v2026.11.85.5.5444 (α) · Unraid
 
 ✨ New
@@ -20,6 +24,10 @@ _The German version follows below — [jump to it](#deutsch)._
 
 <a id="deutsch"></a>
 ## Deutsch
+
+## v2026.11.87.2.8 (α) · All
+
+- Keine sichtbaren Änderungen.
 
 ## v2026.11.85.5.5444 (α) · Unraid
 
